@@ -1,0 +1,14 @@
+{
+  "bundle": {
+    "targets": ["app"],
+    "fileAssociations": [
+      {
+        "ext": ["*"],
+        "name": "Files",
+        "contentTypes": ["public.data"],
+        "role": "Editor",
+        "rank": "None"
+      }
+    ]
+  }
+}

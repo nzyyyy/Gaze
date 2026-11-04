@@ -1,0 +1,583 @@
+import { memo, useEffect, useMemo, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { CircleCheck, Cloud, GitBranch } from "lucide-react";
+import {
+  api,
+  type BranchInfo,
+  type RemoteInfo,
+  type RepositorySummary,
+  type SubmoduleInfo,
+  type TagInfo,
+} from "../api";
+import { useI18n } from "../i18n";
+import { rankBranches } from "../lib/search";
+import { errorMessage, shortOid, type DialogSpec, type RunOperation } from "../types";
+import { RailMark, RowMenu } from "./RepositoryPane";
+
+export function BranchCanvas({ repository }: { repository?: RepositorySummary }) {
+  const { t } = useI18n();
+  return (
+    <div className="canvas-empty">
+      <div className="branch-hero">
+        <RailMark />
+        <code>{repository?.branch ?? t("detachedHead")}</code>
+      </div>
+      <h2>{t("refsIntegration")}</h2>
+      <p>{t("branchHint")}</p>
+    </div>
+  );
+}
+
+export function BranchesPane({
+  repositoryId,
+  onRun,
+  onDialog,
+  onDiff,
+  onError,
+  onInteractiveRebase,
+}: {
+  repositoryId: number;
+  onRun: RunOperation;
+  onDialog: (spec: DialogSpec) => void;
+  onDiff: (diff: string) => void;
+  onError: (message: string) => void;
+  onInteractiveRebase: (onto: string) => void;
+}) {
+  const { language, t } = useI18n();
+  const dateFormatter = useMemo(
+    () => new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" }),
+    [],
+  );
+  const timeFormatter = useMemo(
+    () => new Intl.DateTimeFormat(language, { dateStyle: "full", timeStyle: "long" }),
+    [language],
+  );
+  const [section, setSection] = useState<"branches" | "tags" | "remotes" | "submodules">(
+    "branches",
+  );
+  const [branchFilter, setBranchFilter] = useState("");
+  const [branches, setBranches] = useState<BranchInfo[]>();
+  const [tags, setTags] = useState<TagInfo[]>();
+  const [remotes, setRemotes] = useState<RemoteInfo[]>();
+  const [submodules, setSubmodules] = useState<SubmoduleInfo[]>();
+  useEffect(() => {
+    let cancelled = false;
+    let generation = 0;
+    setBranches(undefined);
+    setTags(undefined);
+    setRemotes(undefined);
+    setSubmodules(undefined);
+    const load = () => {
+      const current = ++generation;
+      Promise.all([
+        api.getBranches(repositoryId),
+        api.getTags(repositoryId),
+        api.getRemotes(repositoryId),
+        api.getSubmodules(repositoryId),
+      ])
+        .then(([nextBranches, nextTags, nextRemotes, nextSubmodules]) => {
+          if (cancelled || current !== generation) return;
+          setBranches(nextBranches);
+          setTags(nextTags);
+          setRemotes(nextRemotes);
+          setSubmodules(nextSubmodules);
+        })
+        .catch((error) => {
+          if (!cancelled && current === generation) {
+            setBranches([]);
+            setTags([]);
+            setRemotes([]);
+            setSubmodules([]);
+            onError(errorMessage(error));
+          }
+        });
+    };
+    load();
+    const unlisten = listen<{ repositoryId: number }>("repository-changed", ({ payload }) => {
+      if (payload.repositoryId === repositoryId) load();
+    });
+    return () => {
+      cancelled = true;
+      void unlisten.then((stop) => stop());
+    };
+  }, [repositoryId, onError]);
+  const currentBranch = (branches ?? []).find((branch) => branch.current)?.name;
+  const compareWith = (name: string) => {
+    if (currentBranch)
+      api
+        .compareBranches(repositoryId, currentBranch, name)
+        .then(onDiff)
+        .catch((error) => onError(errorMessage(error)));
+  };
+  const switchRemoteBranch = (name: string) => {
+    const localName = name.split("/").slice(1).join("/");
+    onRun(
+      (branches ?? []).some((branch) => !branch.remote && branch.name === localName)
+        ? { type: "switchBranch", name: localName }
+        : { type: "createBranch", name: localName, startPoint: name, checkout: true },
+    );
+  };
+  const newBranchFrom = (from: string) =>
+    onDialog({
+      title: t("newBranch"),
+      submitLabel: t("create"),
+      fields: [
+        { name: "name", label: t("newBranchName"), required: true },
+        { name: "from", label: t("baseBranch"), value: from, required: true },
+        { name: "checkout", label: t("checkoutBranch"), value: true, type: "checkbox" },
+      ],
+      onSubmit: ({ name, from: start, checkout }) =>
+        onRun({
+          type: "createBranch",
+          name: String(name).trim(),
+          startPoint: String(start).trim() || null,
+          checkout: Boolean(checkout),
+        }),
+    });
+  const renameBranch = (oldName: string) =>
+    onDialog({
+      title: t("rename"),
+      fields: [{ name: "name", label: t("newBranchName"), value: oldName, required: true }],
+      onSubmit: ({ name }) =>
+        onRun({ type: "renameBranch", oldName, newName: String(name).trim() }),
+    });
+  const createTag = () =>
+    onDialog({
+      title: t("create"),
+      fields: [
+        { name: "name", label: t("tagName"), required: true },
+        { name: "message", label: t("annotation") },
+      ],
+      onSubmit: ({ name, message }) =>
+        onRun({
+          type: "createTag",
+          name: String(name).trim(),
+          target: null,
+          message: String(message).trim() || null,
+        }),
+    });
+  const pushTag = (name: string) =>
+    onDialog({
+      title: t("pushTag"),
+      fields: [{ name: "remote", label: t("remote"), value: "origin", required: true }],
+      onSubmit: ({ remote }) => onRun({ type: "pushTag", remote: String(remote).trim(), name }),
+    });
+  const addRemote = () =>
+    onDialog({
+      title: t("add"),
+      fields: [
+        { name: "name", label: t("remoteName"), required: true },
+        { name: "url", label: t("remoteUrl"), type: "url", required: true },
+      ],
+      onSubmit: ({ name, url }) =>
+        onRun({ type: "addRemote", name: String(name).trim(), url: String(url).trim() }),
+    });
+  const editRemote = (name: string, value: string) =>
+    onDialog({
+      title: t("editUrl"),
+      fields: [{ name: "url", label: t("newRemoteUrl"), type: "url", value, required: true }],
+      onSubmit: ({ url }) => onRun({ type: "setRemoteUrl", name, url: String(url).trim() }),
+    });
+  const updateSubmodules = () =>
+    onDialog({
+      title: t("update"),
+      fields: [{ name: "recursive", label: t("updateNested"), value: false, type: "checkbox" }],
+      onSubmit: ({ recursive }) =>
+        onRun({ type: "submoduleUpdate", paths: [], recursive: Boolean(recursive) }),
+    });
+  const branchQuery = branchFilter.trim().toLowerCase();
+  const visibleBranches = (branches ?? []).filter((branch) =>
+    branch.name.toLowerCase().includes(branchQuery),
+  );
+  const branchGroups: Array<{ label: string | null; entries: BranchInfo[] }> = branchQuery
+    ? [{ label: null, entries: rankBranches(visibleBranches, branchFilter) }]
+    : [
+        {
+          label: t("localBranches"),
+          entries: visibleBranches
+            .filter((branch) => !branch.remote)
+            .sort((left, right) => Number(right.current) - Number(left.current)),
+        },
+        { label: t("remoteBranches"), entries: visibleBranches.filter((branch) => branch.remote) },
+      ];
+  const remoteUrls = (remote: RemoteInfo) => {
+    const fetch = new Set(remote.fetchUrls);
+    const push = new Set(remote.pushUrls);
+    const icon = (url: string) =>
+      fetch.has(url) && push.has(url) ? "⇅" : fetch.has(url) ? "↓" : "↑";
+    return [...new Set([...remote.fetchUrls, ...remote.pushUrls])].map((url) => ({
+      icon: icon(url),
+      url,
+    }));
+  };
+  const loading = branches === undefined;
+  const skeleton = (
+    <div className="skeleton-list" role="status" aria-label={t("loading")}>
+      {[0, 1, 2, 3, 4].map((index) => (
+        <div className="skeleton-row object" key={index} />
+      ))}
+    </div>
+  );
+  return (
+    <div>
+      <div className="segmented">
+        {(["branches", "tags", "remotes", "submodules"] as const).map((item) => (
+          <button
+            aria-pressed={section === item}
+            className={section === item ? "active" : ""}
+            key={item}
+            onClick={() => setSection(item)}
+          >
+            {t(item)}
+          </button>
+        ))}
+      </div>
+      {section === "branches" && (
+        <>
+          <div className="pane-title">
+            <span>{t("branches")}</span>
+          </div>
+          <div className="branch-search">
+            <label className="search">
+              <span aria-hidden="true">⌕</span>
+              <input
+                name="branchSearch"
+                autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                aria-label={t("searchBranches")}
+                placeholder={t("findBranch")}
+                value={branchFilter}
+                onChange={(event) => setBranchFilter(event.target.value)}
+              />
+            </label>
+          </div>
+          <div className="object-list">
+            {loading ? (
+              skeleton
+            ) : !(branches ?? []).length ? (
+              <p className="pane-empty">{t("noBranches")}</p>
+            ) : branchGroups.every(({ entries }) => !entries.length) ? (
+              <p className="pane-empty">{t("noMatchingBranches")}</p>
+            ) : (
+              branchGroups.map(
+                ({ label, entries }) =>
+                  entries.length > 0 && (
+                    <section className="branch-group" key={label ?? "matches"}>
+                      {label && (
+                        <header>
+                          <span>{label}</span>
+                          <code>{entries.length}</code>
+                        </header>
+                      )}
+                      {entries.map((branch) => {
+                        const BranchIcon = branch.remote
+                          ? Cloud
+                          : branch.current
+                            ? CircleCheck
+                            : GitBranch;
+                        const date = branch.committedAt ? new Date(branch.committedAt) : null;
+                        const validDate = date && Number.isFinite(date.getTime()) ? date : null;
+                        return (
+                          <div
+                            className="object-action-row"
+                            tabIndex={0}
+                            key={`${branch.remote}-${branch.name}`}
+                          >
+                            <div
+                              className={`object-copy ${branch.remote ? "remote-branch" : "local-branch"} ${branch.current ? "current" : ""}`}
+                            >
+                              <BranchIcon className="branch-icon" strokeWidth={1.75} aria-hidden />
+                              <strong
+                                aria-label={
+                                  branch.current
+                                    ? `${branch.name} (${t("checkedOutBranch")})`
+                                    : undefined
+                                }
+                              >
+                                {branch.remote && branch.name.includes("/") ? (
+                                  <>
+                                    <span className="remote-prefix">
+                                      {branch.name.slice(0, branch.name.indexOf("/") + 1)}
+                                    </span>
+                                    {branch.name.slice(branch.name.indexOf("/") + 1)}
+                                  </>
+                                ) : (
+                                  branch.name
+                                )}
+                              </strong>
+                              <span className="branch-meta">
+                                <span className="branch-sha">{shortOid(branch.oid)}</span>
+                                <span aria-hidden="true">·</span>
+                                {validDate ? (
+                                  <time
+                                    dateTime={branch.committedAt!}
+                                    data-tooltip={timeFormatter.format(validDate)}
+                                  >
+                                    {dateFormatter.format(validDate)}
+                                  </time>
+                                ) : (
+                                  <span className="branch-date-missing">—</span>
+                                )}
+                                {branch.upstream && (
+                                  <span className="branch-upstream" data-tooltip={branch.upstream}>
+                                    · {branch.upstream}
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                            <RowMenu context label={t("moreActions")} glyph="•••">
+                              {branch.remote ? (
+                                <>
+                                  {currentBranch && !branch.current && (
+                                    <button onClick={() => compareWith(branch.name)}>
+                                      {t("compare")}
+                                    </button>
+                                  )}
+                                  {currentBranch && !branch.current && (
+                                    <button onClick={() => onInteractiveRebase(branch.name)}>
+                                      {t("interactiveRebase")}
+                                    </button>
+                                  )}
+                                  <button onClick={() => newBranchFrom(branch.name)}>
+                                    {t("newBranch")}
+                                  </button>
+                                  {!branch.name.endsWith("/HEAD") && (
+                                    <button onClick={() => switchRemoteBranch(branch.name)}>
+                                      {t("switch")}
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => {
+                                      const [remote = "", ...parts] = branch.name.split("/");
+                                      onRun({
+                                        type: "deleteRemoteBranch",
+                                        remote,
+                                        branch: parts.join("/"),
+                                      });
+                                    }}
+                                  >
+                                    {t("deleteRemoteBranch")}
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  {currentBranch && !branch.current && (
+                                    <button onClick={() => compareWith(branch.name)}>
+                                      {t("compare")}
+                                    </button>
+                                  )}
+                                  {currentBranch && !branch.current && (
+                                    <button onClick={() => onInteractiveRebase(branch.name)}>
+                                      {t("interactiveRebase")}
+                                    </button>
+                                  )}
+                                  <button onClick={() => newBranchFrom(branch.name)}>
+                                    {t("newBranch")}
+                                  </button>
+                                  {!branch.current && (
+                                    <button
+                                      onClick={() =>
+                                        onRun({ type: "switchBranch", name: branch.name })
+                                      }
+                                    >
+                                      {t("switch")}
+                                    </button>
+                                  )}
+                                  {!branch.current && (
+                                    <button
+                                      onClick={() =>
+                                        onRun({
+                                          type: "merge",
+                                          reference: branch.name,
+                                          mode: "normal",
+                                        })
+                                      }
+                                    >
+                                      {t("merge")}
+                                    </button>
+                                  )}
+                                  {!branch.current && (
+                                    <button
+                                      onClick={() =>
+                                        onRun({
+                                          type: "merge",
+                                          reference: branch.name,
+                                          mode: "fastForward",
+                                        })
+                                      }
+                                    >
+                                      {t("fastForward")}
+                                    </button>
+                                  )}
+                                  {!branch.current && (
+                                    <button
+                                      onClick={() =>
+                                        onRun({
+                                          type: "merge",
+                                          reference: branch.name,
+                                          mode: "squash",
+                                        })
+                                      }
+                                    >
+                                      {t("squashMerge")}
+                                    </button>
+                                  )}
+                                  {!branch.current && (
+                                    <button
+                                      onClick={() => onRun({ type: "rebase", onto: branch.name })}
+                                    >
+                                      {t("rebaseOnto")}
+                                    </button>
+                                  )}
+                                  <button onClick={() => renameBranch(branch.name)}>
+                                    {t("rename")}
+                                  </button>
+                                  {!branch.current && (
+                                    <button
+                                      onClick={() =>
+                                        onRun({
+                                          type: "deleteBranch",
+                                          name: branch.name,
+                                          force: false,
+                                        })
+                                      }
+                                    >
+                                      {t("delete")}
+                                    </button>
+                                  )}
+                                  {!branch.current && (
+                                    <button
+                                      onClick={() =>
+                                        onRun({
+                                          type: "deleteBranch",
+                                          name: branch.name,
+                                          force: true,
+                                        })
+                                      }
+                                    >
+                                      {t("forceDelete")}
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                            </RowMenu>
+                          </div>
+                        );
+                      })}
+                    </section>
+                  ),
+              )
+            )}
+          </div>
+        </>
+      )}
+      {section === "tags" && (
+        <>
+          <div className="pane-title">
+            <span>{t("tags")}</span>
+            <button aria-label={`${t("create")} ${t("tags")}`} onClick={createTag}>
+              ＋
+            </button>
+          </div>
+          <div className="object-list">
+            {loading ? (
+              skeleton
+            ) : (tags ?? []).length === 0 ? (
+              <p className="pane-empty">{t("noTags")}</p>
+            ) : (
+              (tags ?? []).map((tag) => (
+                <div className="object-action-row" tabIndex={0} key={tag.name}>
+                  <div className="object-copy">
+                    <strong>{tag.name}</strong>
+                    <span>{tag.subject || shortOid(tag.oid)}</span>
+                  </div>
+                  <RowMenu context label={t("moreActions")} glyph="•••">
+                    <button onClick={() => pushTag(tag.name)}>{t("pushTag")}</button>
+                    <button onClick={() => onRun({ type: "deleteLocalTag", name: tag.name })}>
+                      {t("deleteLocalTag")}
+                    </button>
+                  </RowMenu>
+                </div>
+              ))
+            )}
+          </div>
+        </>
+      )}
+      {section === "remotes" && (
+        <>
+          <div className="pane-title">
+            <span>{t("remotes")}</span>
+            <button aria-label={`${t("add")} ${t("remotes")}`} onClick={addRemote}>
+              ＋
+            </button>
+          </div>
+          <div className="object-list">
+            {loading ? (
+              skeleton
+            ) : (remotes ?? []).length === 0 ? (
+              <p className="pane-empty">{t("noRemotes")}</p>
+            ) : (
+              (remotes ?? []).map((remote) => (
+                <div className="object-action-row" tabIndex={0} key={remote.name}>
+                  <div className="object-copy">
+                    <strong>{remote.name}</strong>
+                    {remoteUrls(remote).map(({ icon, url }, index) => (
+                      <span className="remote-url" key={index}>
+                        <i aria-hidden="true">{icon}</i>
+                        <span>{url}</span>
+                      </span>
+                    ))}
+                  </div>
+                  <RowMenu context label={t("moreActions")} glyph="•••">
+                    <button onClick={() => editRemote(remote.name, remote.fetchUrls[0] ?? "")}>
+                      {t("editUrl")}
+                    </button>
+                    <button onClick={() => onRun({ type: "removeRemote", name: remote.name })}>
+                      {t("removeRemote")}
+                    </button>
+                  </RowMenu>
+                </div>
+              ))
+            )}
+          </div>
+        </>
+      )}
+      {section === "submodules" && (
+        <>
+          <div className="pane-title">
+            <span>{t("submodules")}</span>
+            <span>
+              <button onClick={() => onRun({ type: "submoduleInit", paths: [], recursive: false })}>
+                {t("init")}
+              </button>
+              <button onClick={() => onRun({ type: "submoduleSync", paths: [], recursive: false })}>
+                {t("sync")}
+              </button>
+              <button onClick={updateSubmodules}>{t("update")}</button>
+            </span>
+          </div>
+          <div className="object-list">
+            {loading ? (
+              skeleton
+            ) : (submodules ?? []).length === 0 ? (
+              <p className="pane-empty">{t("noSubmodules")}</p>
+            ) : (
+              (submodules ?? []).map((module) => (
+                <div className="object-copy" key={module.path}>
+                  <strong>{module.path}</strong>
+                  <span>
+                    {module.state} · {shortOid(module.oid)}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+export const MemoBranchesPane = memo(BranchesPane);

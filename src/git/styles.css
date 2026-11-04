@@ -1,0 +1,2399 @@
+/* GitDock component styles scoped to Gaze; see THIRD_PARTY_NOTICES.md. */
+.gaze-git-workspace {
+  --canvas: var(--editor-bg);
+  --panel: var(--toolbar-bg);
+  --raised: var(--surface-raised);
+  --line: var(--separator);
+  --line-strong: var(--border-strong);
+  --muted: var(--text-muted);
+  --focus: var(--accent);
+  --green: var(--icon-code);
+  --red: var(--danger);
+  --yellow: var(--icon-config);
+  --shadow: color-mix(in srgb, var(--text) 15%, transparent);
+  --backdrop: var(--overlay-backdrop);
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--text);
+  background: var(--editor-bg);
+  font-family: var(--font-ui);
+}
+.gaze-git-workspace[hidden] {
+  display: none;
+}
+.gaze-git-workspace * {
+  box-sizing: border-box;
+}
+.gaze-git-workspace .file-row,
+.gaze-git-workspace .object-action-row {
+  user-select: none;
+}
+.gaze-git-workspace button,
+.gaze-git-workspace input,
+.gaze-git-workspace textarea {
+  font: inherit;
+}
+.gaze-git-workspace button {
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  min-height: 27px;
+  padding: 4px 9px;
+  cursor: default;
+  transform-origin: center;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.gaze-git-workspace button:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--line-strong);
+}
+.gaze-git-workspace button:active:not(:disabled) {
+  opacity: 0.78;
+  transform: scale(0.98);
+}
+.gaze-git-workspace button:focus-visible,
+.gaze-git-workspace input:focus-visible,
+.gaze-git-workspace textarea:focus-visible,
+.gaze-git-workspace .object-action-row:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.gaze-git-workspace button:disabled {
+  opacity: 0.45;
+}
+.gaze-git-workspace button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text);
+  font-weight: 700;
+}
+.gaze-git-workspace button.danger {
+  background: var(--red);
+  border-color: var(--red);
+  font-weight: 700;
+}
+.gaze-git-workspace code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.gaze-git-workspace .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 28px 10px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.gaze-git-workspace .brand div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.gaze-git-workspace .brand strong {
+  letter-spacing: 0.03em;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gaze-git-workspace .brand span {
+  color: var(--muted);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gaze-git-workspace .rail-mark {
+  width: 26px;
+  height: 26px;
+  fill: var(--canvas);
+  stroke: var(--accent);
+  stroke-width: 2;
+  overflow: visible;
+}
+.gaze-git-workspace .search {
+  flex: 1;
+  min-width: 0;
+  min-height: 27px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid var(--line);
+  background: var(--canvas);
+  border-radius: var(--radius-control);
+  padding: 0 7px;
+  color: var(--muted);
+}
+.gaze-git-workspace .search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+.gaze-git-workspace .search:focus-within {
+  border-color: var(--line-strong);
+}
+.gaze-git-workspace .workspace {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: 48px 1fr auto;
+}
+.gaze-git-workspace .branch-dot {
+  width: 7px;
+  height: 7px;
+  background: var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.gaze-git-workspace .file-main:active:not(:disabled),
+.gaze-git-workspace .graph-row:active:not(:disabled),
+.gaze-git-workspace .object-action-row > button:active:not(:disabled),
+.gaze-git-workspace .object-list > button:active:not(:disabled) {
+  transform: none;
+}
+.gaze-git-workspace .row-menu-trigger {
+  display: grid;
+  place-items: center;
+  min-height: 27px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 10px;
+  cursor: default;
+}
+.gaze-git-workspace .row-menu-popover {
+  position: fixed;
+  z-index: 8;
+  inset: auto;
+  display: none;
+  width: max-content;
+  min-width: 190px;
+  max-width: calc(100vw - 8px);
+  height: max-content;
+  max-height: calc(100vh - 8px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0;
+  padding: 5px;
+  color: var(--text);
+  background: var(--popover-material);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
+  backdrop-filter: blur(24px) saturate(1.2);
+}
+.gaze-git-workspace .row-menu-popover:popover-open {
+  display: grid;
+}
+.gaze-git-workspace .row-menu-popover:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.gaze-git-workspace .row-menu-popover button {
+  border: 0;
+  border-radius: calc(var(--radius-panel) - 6px);
+  background: transparent;
+  text-align: left;
+  white-space: nowrap;
+  min-height: 24px;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+.gaze-git-workspace .row-menu-popover button:hover:not(:disabled),
+.gaze-git-workspace .row-menu-popover button:focus-visible {
+  background: var(--hover);
+}
+.gaze-git-workspace .row-menu-popover button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.gaze-git-workspace .row-menu-popover .menu-danger {
+  color: var(--red);
+}
+.gaze-git-workspace .work-area {
+  display: grid;
+  grid-template-columns: minmax(480px, 1fr) 360px;
+  min-height: 0;
+}
+.gaze-git-workspace .canvas {
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+  overflow: hidden;
+  background: var(--canvas);
+}
+.gaze-git-workspace .tool-pane {
+  position: relative;
+  min-width: 300px;
+  min-height: 0;
+  overflow: auto;
+  background: var(--panel);
+}
+.gaze-git-workspace .canvas-empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: var(--muted);
+  text-align: center;
+}
+.gaze-git-workspace .canvas-empty h2 {
+  color: var(--text);
+  font-size: 17px;
+  margin: 15px 0 4px;
+  text-wrap: balance;
+}
+.gaze-git-workspace .canvas-empty p {
+  font-size: 12px;
+  max-width: 360px;
+  line-height: 1.6;
+}
+.gaze-git-workspace .large-check {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border: 1px solid color-mix(in srgb, var(--green) 12%, var(--canvas));
+  color: var(--green);
+  border-radius: 50%;
+  font-size: 25px;
+}
+.gaze-git-workspace .change-tally {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+}
+.gaze-git-workspace .change-tally strong {
+  color: var(--accent);
+  font-size: 42px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.gaze-git-workspace .change-tally span {
+  letter-spacing: 0.04em;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.gaze-git-workspace .branch-hero {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  color: var(--text);
+}
+.gaze-git-workspace .branch-hero .rail-mark {
+  width: 42px;
+  height: 42px;
+}
+.gaze-git-workspace .branch-hero code {
+  font-size: 14px;
+}
+.gaze-git-workspace .pane-title {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 37px;
+  padding: 0 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 12px;
+  font-weight: 600;
+}
+.gaze-git-workspace .pane-title code {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.gaze-git-workspace .pane-title button {
+  min-height: 23px;
+  padding: 1px 7px;
+}
+.gaze-git-workspace .changes-pane {
+  display: grid;
+  grid-template-rows: 37px 1fr auto;
+  height: 100%;
+}
+.gaze-git-workspace .change-groups {
+  overflow: auto;
+}
+.gaze-git-workspace .change-group header {
+  height: 27px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 600;
+}
+.gaze-git-workspace .change-group header > button {
+  flex: 1;
+  min-width: 0;
+  height: 27px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.gaze-git-workspace .change-group header > button:hover:not(:disabled) {
+  border: 0;
+  background: transparent;
+}
+.gaze-git-workspace .change-group header > span,
+.gaze-git-workspace .batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gaze-git-workspace .batch-actions {
+  gap: 2px;
+}
+.gaze-git-workspace .change-group header code {
+  font-variant-numeric: tabular-nums;
+}
+.gaze-git-workspace .file-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 20px auto;
+  gap: 4px;
+  align-items: center;
+  min-height: 34px;
+  padding: 4px 6px 4px 10px;
+  border-bottom: 1px solid var(--line);
+  transition: background-color 120ms ease;
+}
+.gaze-git-workspace .file-row:hover {
+  background: var(--raised);
+}
+.gaze-git-workspace .file-main {
+  border: 0;
+  background: transparent;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  text-align: left;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+}
+.gaze-git-workspace .file-main:hover:not(:disabled) {
+  border: 0;
+  background: transparent;
+}
+.gaze-git-workspace .file-main b,
+.gaze-git-workspace .file-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gaze-git-workspace .file-main b {
+  flex: 0 1 auto;
+  font-size: 12px;
+  font-weight: 560;
+}
+.gaze-git-workspace .file-main small {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--muted);
+  font: 10px var(--font-mono);
+}
+.gaze-git-workspace .file-row > button:not(.file-main),
+.gaze-git-workspace .file-row-ops button {
+  font-size: 10px;
+  min-height: 22px;
+  padding: 1px 6px;
+}
+.gaze-git-workspace .stage-icon,
+.gaze-git-workspace .file-row-ops > .danger-icon {
+  width: 22px;
+  padding: 1px 0;
+  text-align: center;
+}
+.gaze-git-workspace .stage-icon {
+  color: var(--green);
+}
+.gaze-git-workspace .file-kind {
+  display: inline-block;
+  min-width: 8px;
+  font: 10px var(--font-mono);
+  color: var(--yellow);
+}
+.gaze-git-workspace .kind-modified {
+  color: var(--icon-image);
+}
+.gaze-git-workspace .kind-added {
+  color: var(--green);
+}
+.gaze-git-workspace .kind-deleted,
+.gaze-git-workspace .danger-icon {
+  color: var(--red);
+}
+.gaze-git-workspace .kind-renamed,
+.gaze-git-workspace .kind-copied {
+  color: var(--icon-image);
+}
+.gaze-git-workspace .kind-untracked {
+  color: var(--muted);
+}
+.gaze-git-workspace .kind-ignored {
+  color: var(--muted);
+}
+.gaze-git-workspace .kind-conflicted {
+  color: var(--yellow);
+}
+.gaze-git-workspace .kind-typechanged {
+  color: var(--icon-data);
+}
+.gaze-git-workspace .kind-unknown {
+  color: var(--muted);
+}
+.gaze-git-workspace .file-row.selectable {
+  grid-template-columns: 18px minmax(0, 1fr) 20px auto;
+}
+.gaze-git-workspace .file-row.conflict-row {
+  grid-template-columns: minmax(0, 1fr) 20px auto;
+}
+.gaze-git-workspace .file-row-actions {
+  position: relative;
+  display: grid;
+  justify-items: end;
+  align-items: center;
+  min-width: 52px;
+  min-height: 22px;
+}
+.gaze-git-workspace .file-row-stats {
+  display: flex;
+  gap: 4px;
+  font: 10px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.gaze-git-workspace .file-row-stats .commit-stat-add {
+  color: var(--green);
+}
+.gaze-git-workspace .file-row-stats .commit-stat-del {
+  color: var(--red);
+}
+.gaze-git-workspace .file-row-ops {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: end;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+}
+.gaze-git-workspace .file-row-actions:hover .file-row-ops,
+.gaze-git-workspace .file-row-actions:focus-within .file-row-ops {
+  opacity: 1;
+  pointer-events: auto;
+}
+.gaze-git-workspace .file-row-actions:hover .file-row-stats,
+.gaze-git-workspace .file-row-actions:focus-within .file-row-stats {
+  opacity: 0;
+}
+.gaze-git-workspace .file-row-actions.always-ops .file-row-ops {
+  position: static;
+  opacity: 1;
+  pointer-events: auto;
+}
+.gaze-git-workspace .file-row .row-menu-trigger {
+  min-height: 22px;
+  padding: 1px 6px;
+}
+.gaze-git-workspace .ongoing {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--accent-soft);
+  background: var(--accent-soft);
+}
+.gaze-git-workspace .ongoing strong {
+  margin-right: auto;
+  color: var(--yellow);
+  font-size: 11px;
+  font-weight: 600;
+}
+.gaze-git-workspace .ongoing button {
+  min-height: 22px;
+  font-size: 10px;
+}
+.gaze-git-workspace .commit-box {
+  padding: 10px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+.gaze-git-workspace .commit-box > label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.gaze-git-workspace .commit-box textarea {
+  resize: vertical;
+  min-height: 64px;
+  max-height: 160px;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  padding: 8px;
+  font-size: 12px;
+}
+.gaze-git-workspace .commit-options {
+  display: flex;
+  gap: 14px;
+  padding: 7px 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.gaze-git-workspace .commit-options label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.gaze-git-workspace .commit-box > button {
+  width: 100%;
+}
+.gaze-git-workspace .canvas-header {
+  height: 38px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 9px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.gaze-git-workspace .canvas-header strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+.gaze-git-workspace .canvas-header span {
+  flex-shrink: 0;
+  white-space: nowrap;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.gaze-git-workspace .canvas-header button {
+  flex-shrink: 0;
+  white-space: nowrap;
+  min-height: 24px;
+  font-size: 10px;
+}
+.gaze-git-workspace .diff-whitespace-toggle[aria-pressed="true"] {
+  background: var(--sidebar-active);
+  border-color: var(--accent);
+  color: var(--text);
+}
+.gaze-git-workspace .diff-view,
+.gaze-git-workspace .history-canvas,
+.gaze-git-workspace .commit-detail {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 38px minmax(0, 1fr);
+}
+.gaze-git-workspace .commit-detail {
+  grid-template-rows: 38px auto minmax(0, 1fr);
+}
+.gaze-git-workspace .commit-detail-info {
+  border-bottom: 1px solid var(--line);
+}
+.gaze-git-workspace .commit-detail-meta {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 14px 12px;
+}
+.gaze-git-workspace .commit-detail-meta > div {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+.gaze-git-workspace .commit-detail-meta dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding-top: 2px;
+}
+.gaze-git-workspace .commit-detail-meta dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--text);
+  font-size: 12px;
+}
+.gaze-git-workspace .commit-detail-meta code {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.gaze-git-workspace .commit-detail-meta pre {
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.gaze-git-workspace .commit-detail-files {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 37px minmax(0, 1fr);
+}
+.gaze-git-workspace .commit-file-list {
+  min-height: 0;
+  overflow: auto;
+}
+.gaze-git-workspace .file-row.commit-file-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.gaze-git-workspace .commit-file-stats {
+  display: flex;
+  gap: 6px;
+  font: 10px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.gaze-git-workspace .commit-file-row .commit-stat-add {
+  color: var(--green);
+}
+.gaze-git-workspace .commit-file-row .commit-stat-del {
+  color: var(--red);
+}
+.gaze-git-workspace .commit-file-binary {
+  color: var(--muted);
+  font-size: 10px;
+}
+.gaze-git-workspace .diff-lines,
+.gaze-git-workspace .graph-list {
+  min-height: 0;
+  overflow: auto;
+}
+.gaze-git-workspace .diff-lines {
+  font: 11px/1.55 var(--font-mono);
+}
+.gaze-git-workspace .diff-lines > div,
+.gaze-git-workspace .raw-diff > div {
+  display: grid;
+  grid-template-columns: 48px minmax(max-content, 1fr) auto;
+  min-height: 18px;
+  white-space: pre;
+}
+.gaze-git-workspace .diff-lines > div > span,
+.gaze-git-workspace .raw-diff > div > span {
+  color: var(--muted);
+  text-align: right;
+  padding-right: 10px;
+  user-select: none;
+  border-right: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+.gaze-git-workspace .diff-lines code {
+  padding: 0 10px;
+  font-size: inherit;
+}
+.gaze-git-workspace .diff-lines .add {
+  background: color-mix(in srgb, var(--green) 12%, var(--canvas));
+  color: var(--green);
+}
+.gaze-git-workspace .diff-lines .delete {
+  background: var(--danger-soft);
+  color: var(--red);
+}
+.gaze-git-workspace .diff-lines .hunk {
+  background: color-mix(in srgb, var(--icon-image) 10%, var(--canvas));
+  color: var(--icon-image);
+}
+.gaze-git-workspace .diff-lines .file-header {
+  color: var(--accent);
+  background: var(--panel);
+}
+.gaze-git-workspace .diff-lines button {
+  min-height: 18px;
+  border-radius: 0;
+  border-width: 0 0 0 1px;
+  font-size: 10px;
+}
+.gaze-git-workspace .conflict-editor {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 38px minmax(0, 1fr);
+}
+.gaze-git-workspace .conflict-editor .canvas-header > span {
+  margin-left: auto;
+}
+.gaze-git-workspace .conflict-scroll {
+  min-height: 0;
+  overflow: auto;
+  font: 11px/1.55 var(--font-mono);
+}
+.gaze-git-workspace .conflict-scroll > * {
+  min-width: 720px;
+}
+.gaze-git-workspace .conflict-column-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  margin-left: 5px;
+  color: var(--muted);
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 600;
+}
+.gaze-git-workspace .conflict-column-head span {
+  padding: 7px 10px;
+  border-right: 1px solid var(--line);
+}
+.gaze-git-workspace .conflict-column-head span:last-child {
+  border-right: 0;
+}
+.gaze-git-workspace .conflict-context {
+  margin: 0 0 0 5px;
+  padding: 6px 10px;
+  overflow: visible;
+  color: var(--muted);
+  background: var(--canvas);
+  border-bottom: 1px solid var(--line);
+  white-space: pre;
+}
+.gaze-git-workspace .conflict-block {
+  position: relative;
+  display: grid;
+  grid-template-columns: 5px repeat(3, minmax(220px, 1fr));
+  grid-template-rows: minmax(72px, auto) 32px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.gaze-git-workspace .conflict-track {
+  grid-row: 1 / 3;
+  background: var(--red);
+  box-shadow: 2px 0 12px var(--danger-soft);
+}
+.gaze-git-workspace .conflict-pane {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: minmax(48px, 1fr) auto;
+  border-right: 1px solid var(--line);
+}
+.gaze-git-workspace .conflict-pane pre {
+  margin: 0;
+  min-width: max-content;
+  padding: 8px 10px;
+  color: var(--text);
+  white-space: pre;
+}
+.gaze-git-workspace .conflict-pane.base pre {
+  color: var(--muted);
+  background: var(--canvas);
+}
+.gaze-git-workspace .conflict-pane.current pre {
+  background: color-mix(in srgb, var(--green) 12%, var(--canvas));
+}
+.gaze-git-workspace .conflict-pane.incoming pre {
+  background: color-mix(in srgb, var(--icon-image) 10%, var(--canvas));
+}
+.gaze-git-workspace .conflict-pane button {
+  margin: 0 8px 7px;
+  min-height: 23px;
+  justify-self: start;
+  font-size: 10px;
+}
+.gaze-git-workspace .conflict-pane button.active,
+.gaze-git-workspace .conflict-block footer button.active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--green) 12%, var(--canvas));
+  border-color: var(--green);
+}
+.gaze-git-workspace .conflict-block footer {
+  grid-column: 2 / 5;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px;
+  background: var(--panel);
+}
+.gaze-git-workspace .conflict-block footer code {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 10px;
+}
+.gaze-git-workspace .conflict-block footer button {
+  min-height: 23px;
+  font-size: 10px;
+}
+.gaze-git-workspace .gitdock-diff {
+  --diff-background-color: var(--canvas);
+  --diff-text-color: var(--text);
+  --diff-font-family: var(--font-mono);
+  --diff-gutter-insert-background-color: color-mix(in srgb, var(--green) 12%, var(--canvas));
+  --diff-gutter-delete-background-color: var(--danger-soft);
+  --diff-code-insert-background-color: color-mix(in srgb, var(--green) 12%, var(--canvas));
+  --diff-code-insert-text-color: var(--green);
+  --diff-code-delete-background-color: var(--danger-soft);
+  --diff-code-delete-text-color: var(--red);
+  min-width: 100%;
+  width: max-content;
+  table-layout: auto;
+  font-size: 11px;
+}
+.gaze-git-workspace .gitdock-diff col.diff-gutter-col {
+  width: 1px;
+}
+.gaze-git-workspace .gitdock-diff col.diff-gutter-col:first-child {
+  width: 36px;
+}
+.gaze-git-workspace .gitdock-diff .diff-gutter {
+  color: var(--muted);
+  border-right: 1px solid var(--line);
+  text-align: right;
+  padding: 0 4px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.gaze-git-workspace .gitdock-diff .diff-gutter:first-child {
+  min-width: 36px;
+  width: 36px;
+  padding: 0;
+  border-right: 0;
+  text-align: center;
+}
+.gaze-git-workspace .gitdock-diff .diff-code {
+  min-width: 320px;
+  padding: 0 10px;
+  white-space: pre;
+  word-break: normal;
+}
+.gaze-git-workspace .gitdock-diff .diff-decoration-content {
+  background: var(--panel);
+  color: var(--accent);
+}
+.gaze-git-workspace .gitdock-diff pre {
+  margin: 0;
+  padding: 0 10px;
+  white-space: pre;
+}
+.gaze-git-workspace .hunk-decoration {
+  display: flex;
+  min-height: 18px;
+  align-items: center;
+  background: color-mix(in srgb, var(--icon-image) 10%, var(--canvas));
+  color: var(--icon-image);
+}
+.gaze-git-workspace .hunk-decoration code {
+  padding: 0 10px;
+}
+.gaze-git-workspace .diff-section-label {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 4px 10px;
+  background: var(--panel);
+  color: var(--muted);
+  font: 11px/1.4 var(--font-ui);
+  font-weight: 600;
+  border-bottom: 1px solid var(--line);
+}
+.gaze-git-workspace .diff-hunk-actions {
+  display: flex;
+  height: 100%;
+}
+.gaze-git-workspace .diff-hunk-actions .diff-stage {
+  flex: 1;
+  min-width: 0;
+}
+.gaze-git-workspace .diff-stage {
+  width: 100%;
+  min-height: 18px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--green);
+  font-size: 12px;
+  line-height: 18px;
+  padding: 0;
+}
+.gaze-git-workspace .diff-stage.unstage,
+.gaze-git-workspace .diff-stage.discard {
+  color: var(--red);
+}
+.gaze-git-workspace .diff-stage:disabled {
+  opacity: 0.4;
+}
+.gaze-git-workspace .diff-lines .meta {
+  color: var(--muted);
+}
+.gaze-git-workspace .token.keyword,
+.gaze-git-workspace .token.selector,
+.gaze-git-workspace .token.boolean {
+  color: var(--icon-data);
+}
+.gaze-git-workspace .token.string,
+.gaze-git-workspace .token.attr-name {
+  color: var(--green);
+}
+.gaze-git-workspace .token.function,
+.gaze-git-workspace .token.class-name,
+.gaze-git-workspace .token.title {
+  color: var(--icon-image);
+}
+.gaze-git-workspace .token.comment {
+  color: var(--muted);
+  font-style: italic;
+}
+.gaze-git-workspace .token.number,
+.gaze-git-workspace .token.builtin {
+  color: var(--yellow);
+}
+.gaze-git-workspace .token.variable,
+.gaze-git-workspace .token.parameter,
+.gaze-git-workspace .token.property {
+  color: var(--text);
+}
+.gaze-git-workspace .graph-list {
+  position: relative;
+}
+.gaze-git-workspace .virtual-history {
+  position: relative;
+  min-width: 100%;
+}
+.gaze-git-workspace .graph-list > .virtual-history {
+  min-width: max(100%, calc(var(--graph-width, 44px) + 560px));
+}
+.gaze-git-workspace .commit-graph {
+  position: absolute;
+  inset: 0 auto auto 0;
+  z-index: 1;
+  overflow: visible;
+  pointer-events: none;
+}
+.gaze-git-workspace .graph-edge {
+  fill: none;
+  stroke-width: 2;
+}
+.gaze-git-workspace .graph-node {
+  fill: var(--canvas);
+  stroke-width: 2.5;
+}
+.gaze-git-workspace .lane-0 {
+  stroke: var(--accent);
+}
+.gaze-git-workspace .lane-1 {
+  stroke: var(--icon-image);
+}
+.gaze-git-workspace .lane-2 {
+  stroke: var(--green);
+}
+.gaze-git-workspace .lane-3 {
+  stroke: var(--icon-data);
+}
+.gaze-git-workspace .lane-4 {
+  stroke: var(--yellow);
+}
+.gaze-git-workspace .graph-row {
+  display: grid;
+  grid-template-columns: var(--graph-width, 44px) 75px minmax(100px, 1fr) 120px 82px;
+  align-items: center;
+  width: 100%;
+  height: 34px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: 0 10px 0 0;
+  gap: 8px;
+  background: transparent;
+  text-align: left;
+}
+.gaze-git-workspace .graph-row:hover {
+  background: linear-gradient(
+    to right,
+    transparent var(--graph-width, 44px),
+    var(--raised) var(--graph-width, 44px)
+  );
+}
+.gaze-git-workspace .graph-row.selected,
+.gaze-git-workspace .graph-row.selected:hover {
+  background: linear-gradient(
+    to right,
+    transparent var(--graph-width, 44px),
+    var(--sidebar-active) var(--graph-width, 44px)
+  );
+}
+.gaze-git-workspace .graph-row > span,
+.gaze-git-workspace .graph-row time {
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gaze-git-workspace .graph-subject {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+}
+.gaze-git-workspace .graph-subject strong {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gaze-git-workspace .ref-label {
+  flex: none;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 1px 4px;
+  border: 1px solid color-mix(in srgb, var(--icon-image) 10%, var(--canvas));
+  border-radius: var(--radius-small);
+  color: var(--icon-image);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.gaze-git-workspace .ref-label.tag {
+  border-color: var(--yellow);
+  color: var(--yellow);
+}
+.gaze-git-workspace .history-pane {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 37px minmax(0, 1fr);
+}
+.gaze-git-workspace .history-pane > .object-list::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.gaze-git-workspace .history-title {
+  justify-content: flex-start;
+  gap: 8px;
+}
+.gaze-git-workspace .history-title > span,
+.gaze-git-workspace .history-title > code {
+  flex: none;
+}
+.gaze-git-workspace .history-title > code {
+  margin-left: auto;
+}
+.gaze-git-workspace .history-branch-filter {
+  min-width: 0;
+}
+.gaze-git-workspace .history-branch-filter > .row-menu-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+  background: transparent;
+  border-color: transparent;
+}
+.gaze-git-workspace .history-branch-filter > .row-menu-trigger > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gaze-git-workspace .history-branch-filter > .row-menu-trigger > svg {
+  flex-shrink: 0;
+}
+.gaze-git-workspace .history-branch-filter > .row-menu-trigger[aria-expanded="true"] {
+  background: var(--raised);
+  color: var(--text);
+}
+.gaze-git-workspace .history-branch-filter .row-menu-popover {
+  width: 280px;
+  min-width: 0;
+  max-width: calc(100vw - 8px);
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  overflow-x: hidden;
+}
+.gaze-git-workspace .history-branch-filter .row-menu-popover button {
+  display: block;
+  width: 100%;
+  min-height: 24px;
+  padding: 3px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 400;
+}
+.gaze-git-workspace .history-branch-filter .row-menu-popover button[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--sidebar-active);
+}
+.gaze-git-workspace .history-branch-filter .row-menu-popover button > svg {
+  margin-right: 6px;
+  vertical-align: -2px;
+  color: var(--accent);
+}
+.gaze-git-workspace .history-branch-group {
+  margin-top: 4px;
+  padding: 6px 8px 3px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+.gaze-git-workspace .object-list {
+  min-height: 0;
+  overflow: auto;
+}
+.gaze-git-workspace .object-list > button,
+.gaze-git-workspace .object-copy {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  padding: 9px 11px;
+  min-width: 0;
+}
+.gaze-git-workspace .object-list > button:hover,
+.gaze-git-workspace .object-list > button.current,
+.gaze-git-workspace .object-copy.current {
+  background: var(--raised);
+}
+.gaze-git-workspace .object-list strong {
+  font-size: 12px;
+  font-weight: 560;
+}
+.gaze-git-workspace .object-list span {
+  color: var(--muted);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gaze-git-workspace .remote-url {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  column-gap: 5px;
+  align-items: center;
+}
+.gaze-git-workspace .remote-url i {
+  font-style: normal;
+  text-align: center;
+}
+.gaze-git-workspace .object-action-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  border-bottom: 1px solid var(--line);
+}
+.gaze-git-workspace .object-action-row > button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  padding: 9px 11px;
+  min-width: 0;
+}
+.gaze-git-workspace .object-action-row > button:hover,
+.gaze-git-workspace .object-action-row > button.current {
+  background: var(--raised);
+}
+.gaze-git-workspace .object-action-row.selected > button:first-child {
+  background: var(--sidebar-active);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.gaze-git-workspace .history-pane .object-action-row:hover {
+  background: var(--raised);
+}
+.gaze-git-workspace .history-pane .object-action-row.selected {
+  background: var(--sidebar-active);
+}
+.gaze-git-workspace .history-pane .object-action-row > button:hover,
+.gaze-git-workspace .history-pane .object-action-row.selected > button:first-child {
+  background: transparent;
+}
+.gaze-git-workspace .history-pane .object-action-row > button > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gaze-git-workspace .load-more {
+  margin: 8px;
+  width: calc(100% - 16px);
+}
+.gaze-git-workspace .object-action-row:has(> .row-menu-trigger) > button:first-child,
+.gaze-git-workspace .object-action-row:has(> .row-menu-trigger) > .object-copy {
+  padding-right: 40px;
+}
+.gaze-git-workspace .object-action-row > .row-menu-trigger {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 4px;
+  bottom: 0;
+  display: grid;
+  place-items: center;
+  width: 27px;
+  min-height: 27px;
+  height: 27px;
+  margin: auto;
+  padding: 0 0 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  opacity: 0;
+}
+.gaze-git-workspace .object-action-row:hover > .row-menu-trigger,
+.gaze-git-workspace .object-action-row:focus-within > .row-menu-trigger,
+.gaze-git-workspace .object-action-row > .row-menu-trigger[aria-expanded="true"] {
+  opacity: 1;
+  border-color: var(--line);
+  background: var(--raised);
+}
+.gaze-git-workspace .branch-search {
+  padding: 8px 10px;
+}
+.gaze-git-workspace .branch-search .search {
+  width: 100%;
+}
+.gaze-git-workspace .branch-group {
+  padding: 0 6px 6px;
+}
+.gaze-git-workspace .branch-group + .branch-group {
+  margin-top: 6px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line-strong);
+}
+.gaze-git-workspace .branch-group > header {
+  height: 29px;
+  margin: 0 -6px 2px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+.gaze-git-workspace .branch-group > header code {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.gaze-git-workspace .branch-group .object-action-row {
+  border-bottom: 0;
+  border-radius: var(--radius-control);
+}
+.gaze-git-workspace .branch-group .object-action-row + .object-action-row {
+  margin-top: 1px;
+}
+.gaze-git-workspace .branch-group .object-copy {
+  grid-template-columns: 24px minmax(0, 1fr);
+  column-gap: 8px;
+  border-bottom: 0;
+  border-radius: var(--radius-control);
+  padding: 8px 9px;
+}
+.gaze-git-workspace .branch-group .branch-icon {
+  grid-column: 1;
+  grid-row: 1 / 3;
+  place-self: center;
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+}
+.gaze-git-workspace .branch-group .object-copy > strong,
+.gaze-git-workspace .branch-group .object-copy > span {
+  grid-column: 2;
+}
+.gaze-git-workspace .branch-group .remote-prefix {
+  color: var(--muted);
+  font-size: inherit;
+  font-weight: 450;
+}
+.gaze-git-workspace .branch-group .current .branch-icon {
+  color: var(--accent);
+}
+.gaze-git-workspace .new-branch-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 5px;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.gaze-git-workspace .new-branch-form input {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--canvas);
+  color: var(--text);
+  padding: 4px 7px;
+  font-size: 11px;
+}
+.gaze-git-workspace .new-branch-form button {
+  min-height: 25px;
+  font-size: 10px;
+}
+.gaze-git-workspace .segmented {
+  display: flex;
+  margin: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+.gaze-git-workspace .segmented button {
+  flex: 1;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  min-width: 0;
+  padding: 4px 3px;
+  font-size: 10px;
+  text-transform: capitalize;
+}
+.gaze-git-workspace .segmented button:last-child {
+  border-right: 0;
+}
+.gaze-git-workspace .segmented button.active {
+  background: var(--raised);
+  color: var(--text);
+}
+.gaze-git-workspace .stash-row {
+  border-bottom: 1px solid var(--line);
+}
+.gaze-git-workspace .stash-row > .object-copy {
+  border-bottom: 0;
+}
+.gaze-git-workspace .stash-row.selected > .object-copy {
+  background: var(--sidebar-active);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.gaze-git-workspace .stash-row > div:last-child {
+  display: flex;
+  gap: 5px;
+  padding: 0 10px 8px;
+}
+.gaze-git-workspace .stash-row > div button {
+  font-size: 10px;
+  min-height: 22px;
+}
+.gaze-git-workspace .log {
+  height: 190px;
+  overflow: auto;
+  padding: 7px 10px;
+  font: 10px/1.55 var(--font-mono);
+}
+.gaze-git-workspace .log-toolbar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  justify-content: end;
+  gap: 5px;
+}
+.gaze-git-workspace .log-toolbar button {
+  min-height: 21px;
+  font-size: 10px;
+}
+.gaze-git-workspace .log time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.gaze-git-workspace .log-stderr,
+.gaze-git-workspace .log-error {
+  color: var(--red);
+}
+.gaze-git-workspace .log-started {
+  color: var(--icon-image);
+}
+.gaze-git-workspace .log-finished {
+  color: var(--green);
+}
+.gaze-git-workspace .operation-toast {
+  pointer-events: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px 9px 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--green);
+  border-radius: var(--radius-panel);
+  background: var(--panel);
+  box-shadow: 0 8px 24px var(--shadow);
+  backdrop-filter: blur(10px);
+}
+.gaze-git-workspace .operation-toast > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.gaze-git-workspace .operation-toast strong,
+.gaze-git-workspace .operation-toast small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gaze-git-workspace .operation-toast strong {
+  font-size: 12px;
+}
+.gaze-git-workspace .operation-toast small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.gaze-git-workspace .operation-toast > button {
+  min-height: 24px;
+  padding: 1px 7px;
+  border: 0;
+  background: transparent;
+}
+.gaze-git-workspace .confirm-dialog {
+  position: relative;
+  width: min(500px, calc(100vw - 40px));
+  margin: auto;
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-large);
+  overflow: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-shadow: var(--shadow-panel);
+  padding: 22px 24px 18px 29px;
+}
+.gaze-git-workspace .form-dialog::backdrop,
+.gaze-git-workspace .confirm-dialog::backdrop {
+  background: var(--backdrop);
+  backdrop-filter: blur(3px);
+}
+.gaze-git-workspace .risk-stripe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  background: var(--yellow);
+}
+.gaze-git-workspace .risk-destructive .risk-stripe {
+  background: var(--red);
+}
+.gaze-git-workspace .confirm-dialog header span {
+  color: var(--yellow);
+  font-size: 11px;
+  font-weight: 600;
+}
+.gaze-git-workspace .risk-destructive header span {
+  color: var(--red);
+}
+.gaze-git-workspace .confirm-dialog h2 {
+  margin: 6px 0 0;
+  font-size: 19px;
+  text-wrap: balance;
+}
+.gaze-git-workspace .confirm-dialog > p {
+  color: var(--text);
+  white-space: pre-line;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.gaze-git-workspace .impact {
+  display: grid;
+  gap: 5px;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  margin: 10px 0;
+  padding: 8px;
+  max-height: 130px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.gaze-git-workspace .impact > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+.gaze-git-workspace .confirm-dialog footer {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 7px;
+  margin-top: 16px;
+}
+.gaze-git-workspace .confirm-dialog footer span {
+  color: var(--muted);
+  font-size: 10px;
+}
+.gaze-git-workspace .form-dialog {
+  width: min(440px, calc(100vw - 40px));
+  margin: auto;
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-large);
+  overflow: auto;
+  overscroll-behavior: contain;
+  box-shadow: var(--shadow-panel);
+  padding: 20px 22px;
+}
+.gaze-git-workspace .dialog-contents {
+  display: grid;
+  gap: 14px;
+}
+.gaze-git-workspace .form-dialog h2 {
+  margin: 0;
+  font-size: 18px;
+  text-wrap: balance;
+}
+.gaze-git-workspace .form-dialog > p,
+.gaze-git-workspace .form-dialog > .dialog-contents > p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.5;
+}
+.gaze-git-workspace .dialog-field {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.gaze-git-workspace .dialog-field input {
+  width: 100%;
+  min-height: 32px;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+
+.gaze-git-workspace .dialog-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.gaze-git-workspace .dialog-error {
+  color: var(--red) !important;
+}
+.gaze-git-workspace .form-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+.gaze-git-workspace .form-dialog footer button,
+.gaze-git-workspace .confirm-dialog footer button {
+  min-height: 32px;
+  padding: 6px 14px;
+  font-size: 13px;
+  border-radius: var(--radius-control);
+}
+.gaze-git-workspace .pane-empty {
+  margin: 18px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.gaze-git-workspace .skeleton-list {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+}
+.gaze-git-workspace .skeleton-row {
+  height: 34px;
+  border-radius: var(--radius-control);
+  background: var(--raised);
+}
+.gaze-git-workspace .skeleton-row.object {
+  height: 45px;
+}
+.gaze-git-workspace .file-row.menu-open,
+.gaze-git-workspace .object-action-row.menu-open,
+.gaze-git-workspace .object-action-row.menu-open > button,
+.gaze-git-workspace .object-action-row.menu-open > .object-copy,
+.gaze-git-workspace .history-pane .object-action-row.menu-open > button {
+  background: var(--hover);
+}
+.gaze-git-workspace .file-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 34px;
+}
+.gaze-git-workspace .diff-lines > div,
+.gaze-git-workspace .gitdock-diff tr {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 18px;
+}
+.gaze-git-workspace .graph-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 34px;
+}
+.gaze-git-workspace .object-action-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 45px;
+}
+@media (max-width: 1180px) {
+  .gaze-git-workspace .work-area {
+    grid-template-columns: minmax(420px, 1fr) 320px;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .gaze-git-workspace button {
+    transition:
+      background-color 100ms ease,
+      border-color 100ms ease,
+      transform 100ms ease,
+      opacity 100ms ease;
+  }
+  .gaze-git-workspace .skeleton-row {
+    animation: skeleton 1.2s ease-in-out infinite;
+  }
+}
+
+.gaze-git-workspace .rebase-dialog {
+  width: min(560px, calc(100vw - 40px));
+}
+.gaze-git-workspace .rebase-list {
+  display: grid;
+  gap: 4px;
+  max-height: 320px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.gaze-git-workspace .rebase-row {
+  display: grid;
+  grid-template-columns: auto 92px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  padding: 5px 6px;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+}
+.gaze-git-workspace .rebase-row:has(> input) {
+  grid-template-columns: auto 92px minmax(0, 1fr) minmax(120px, 1.4fr);
+}
+.gaze-git-workspace .rebase-order {
+  display: flex;
+  gap: 3px;
+}
+.gaze-git-workspace .rebase-order button {
+  min-height: 22px;
+  min-width: 22px;
+  padding: 0;
+}
+.gaze-git-workspace .rebase-row .app-select-trigger {
+  min-height: 24px;
+  font-size: 10px;
+}
+.gaze-git-workspace .rebase-commit {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.gaze-git-workspace .rebase-commit code {
+  color: var(--muted);
+  font: 10px var(--font-mono);
+}
+.gaze-git-workspace .rebase-commit span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.gaze-git-workspace .rebase-row input {
+  min-height: 24px;
+}
+
+.gaze-git-workspace .file-history-view {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 38px minmax(0, auto) minmax(0, 1fr);
+}
+.gaze-git-workspace .file-history-view .object-list {
+  border-bottom: 1px solid var(--line);
+  max-height: 40%;
+}
+.gaze-git-workspace .file-history-view .raw-diff {
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+}
+.gaze-git-workspace .file-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+}
+.gaze-git-workspace .file-actions button {
+  min-height: 22px;
+  font-size: 10px;
+}
+.gaze-git-workspace .blame-view {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 38px minmax(0, 1fr);
+}
+.gaze-git-workspace .blame-list {
+  min-height: 0;
+  overflow: auto;
+  font: 11px/1.5 var(--font-mono);
+}
+.gaze-git-workspace .blame-row {
+  display: grid;
+  grid-template-columns: 210px 44px minmax(0, 1fr);
+  min-width: 640px;
+  border-bottom: 1px solid var(--line);
+}
+.gaze-git-workspace .blame-row > span {
+  padding: 1px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gaze-git-workspace .blame-author {
+  color: var(--muted);
+  font-size: 10px;
+  border-right: 1px solid var(--line);
+  background: var(--canvas);
+}
+.gaze-git-workspace .blame-line-number {
+  text-align: right;
+  color: var(--muted);
+  border-right: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+.gaze-git-workspace .blame-row code {
+  padding: 1px 8px;
+  white-space: pre;
+}
+
+.gaze-git-workspace .branch-comparison {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 38px minmax(0, 1fr);
+}
+
+.gaze-git-workspace .branch-comparison > .canvas-empty {
+  grid-row: 2 / -1;
+}
+
+.gaze-git-workspace .working-tree-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.gaze-git-workspace .history-branch-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  margin-bottom: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  background: var(--panel);
+  font-size: 12px;
+  font-weight: 400;
+}
+.gaze-git-workspace .history-branch-search:focus-visible {
+  outline: none;
+  border-color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--muted);
+}
+.gaze-git-workspace .history-branch-search::placeholder {
+  color: var(--muted);
+}
+.gaze-git-workspace .history-branch-empty {
+  padding: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.gaze-git-workspace .history-controls {
+  grid-template-rows: 37px auto minmax(0, 1fr);
+}
+.gaze-git-workspace .history-results {
+  grid-template-rows: minmax(0, 1fr);
+}
+.gaze-git-workspace .commit-search {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.gaze-git-workspace .commit-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.gaze-git-workspace .commit-search-row > button {
+  height: 32px;
+  min-height: 32px;
+  padding: 4px 12px;
+  white-space: nowrap;
+}
+.gaze-git-workspace .commit-search-input {
+  position: relative;
+  min-width: 0;
+}
+.gaze-git-workspace .commit-search-input input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 5px 30px 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--canvas);
+  color: var(--text);
+  appearance: none;
+}
+.gaze-git-workspace .commit-search-input input::placeholder {
+  color: var(--muted);
+}
+.gaze-git-workspace .commit-search-input input:focus-visible {
+  border-color: var(--focus);
+}
+.gaze-git-workspace .commit-search-input input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+.gaze-git-workspace .commit-search-input .commit-search-clear {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+}
+.gaze-git-workspace .commit-search-input .commit-search-clear:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.gaze-git-workspace .branch-group .branch-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.gaze-git-workspace .branch-meta .branch-sha,
+.gaze-git-workspace .branch-meta > time,
+.gaze-git-workspace .branch-meta > .branch-date-missing {
+  flex: none;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.gaze-git-workspace .branch-meta .branch-upstream {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gaze-git-workspace button,
+.gaze-git-workspace input,
+.gaze-git-workspace textarea {
+  font-family: var(--font-ui);
+}
+.gaze-git-workspace code,
+.gaze-git-workspace pre,
+.gaze-git-workspace .gitdock-diff {
+  font-family: var(--font-mono);
+}
+.gaze-git-workspace .primary {
+  color: var(--accent-contrast);
+}
+.gaze-git-workspace .git-workspace-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--toolbar-bg);
+}
+.gaze-git-workspace .git-workspace-header > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.gaze-git-workspace .git-workspace-header span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.gaze-git-workspace .git-workspace-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.gaze-git-workspace .git-workspace-branch > svg {
+  flex: none;
+}
+.gaze-git-workspace .git-repository-path {
+  padding: 5px 16px;
+  color: var(--muted);
+  font: 11px/1.6 var(--font-mono);
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--line);
+}
+.gaze-git-workspace .git-workflow-nav {
+  display: flex;
+  gap: 5px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--toolbar-bg);
+}
+.gaze-git-workspace .git-workflow-nav button {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-control);
+  padding: 5px 13px;
+}
+.gaze-git-workspace .git-workflow-nav button[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--tab-active);
+  box-shadow:
+    inset 0 -2px 0 var(--accent),
+    var(--shadow-control);
+}
+.gaze-git-workspace .git-workspace-body {
+  display: grid;
+  grid-template-columns:
+    minmax(0, var(--editor-primary-size, 0.3fr)) 6px
+    minmax(0, var(--editor-secondary-size, 0.7fr));
+  grid-template-rows: minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  min-width: 0;
+}
+.gaze-git-workspace .git-details-pane {
+  background: var(--panel);
+  overflow: auto;
+  min-width: 0;
+  min-height: 0;
+}
+.gaze-git-workspace .editor-split-resizer::after {
+  inset: 0 2px 0 3px;
+  background: var(--line);
+}
+.gaze-git-workspace .editor-split-resizer:hover::after,
+.gaze-git-workspace .editor-split-resizer:focus-visible::after,
+.gaze-git-workspace .is-resizing-editor > .editor-split-resizer::after {
+  background: var(--accent);
+}
+.gaze-git-workspace .git-details-pane > .changes-pane {
+  height: 100%;
+}
+.gaze-git-workspace .git-details-pane .working-tree-title {
+  white-space: normal;
+}
+.gaze-git-workspace .canvas {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+}
+.gaze-git-workspace .canvas-empty {
+  min-height: 180px;
+  flex: 1;
+  padding: 24px;
+}
+.gaze-git-workspace .canvas-empty h2 {
+  font-size: 19px;
+}
+.gaze-git-workspace .canvas-empty p {
+  max-width: 520px;
+  overflow-wrap: anywhere;
+}
+.gaze-git-workspace .git-open-file {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+}
+.gaze-git-workspace .git-output-panel {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 70%;
+  border-top: 1px solid var(--line-strong);
+  background: var(--panel);
+}
+.gaze-git-workspace .git-output-panel[hidden] {
+  display: none;
+}
+.gaze-git-workspace .git-output-resizer {
+  flex: 0 0 5px;
+  margin-top: -3px;
+  cursor: row-resize;
+  outline: none;
+}
+.gaze-git-workspace .git-output-resizer:hover,
+.gaze-git-workspace .git-output-resizer:focus-visible {
+  background: var(--focus);
+  opacity: 0.4;
+}
+.gaze-git-workspace .git-output-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 10px 2px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--toolbar-bg);
+  color: var(--muted);
+  font-size: 11px;
+}
+.gaze-git-workspace .git-output-header > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gaze-git-workspace .git-output-header > div {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+.gaze-git-workspace .git-output-header button {
+  min-height: 21px;
+  padding: 1px 7px;
+  font-size: 10px;
+}
+.gaze-git-workspace .git-output-header .git-output-close {
+  padding: 1px 6px;
+  font-size: 13px;
+  line-height: 1;
+}
+.gaze-git-workspace .git-output-lines {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 12px 10px;
+  color: var(--text);
+  font: 11px/1.65 var(--font-mono);
+  user-select: text;
+}
+.gaze-git-workspace .git-output-line {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.gaze-git-workspace .git-output-line time {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.gaze-git-workspace .git-output-line span {
+  flex: 1;
+  min-width: 0;
+}
+.gaze-git-workspace .git-output-line.is-error {
+  color: var(--danger);
+}
+.gaze-git-workspace .git-output-empty {
+  margin: 0;
+  color: var(--muted);
+}
+.gaze-git-workspace .git-output-toggle[aria-expanded="true"] {
+  background: var(--raised);
+  border-color: var(--line-strong);
+}
+.gaze-git-workspace .git-output-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  margin-left: 5px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: var(--canvas);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.gaze-git-workspace .git-error,
+.gaze-git-workspace .git-operation-status {
+  padding: 8px 16px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+}
+.gaze-git-workspace .git-error {
+  background: var(--danger-soft);
+  color: var(--danger);
+  white-space: pre-wrap;
+}
+.gaze-git-workspace .git-operation-status {
+  background: var(--accent-soft);
+}
+.gaze-git-workspace .git-workspace-body:disabled {
+  opacity: 0.7;
+}
+.gaze-git-workspace .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.gaze-git-workspace .row-menu-popover {
+  max-width: min(400px, calc(100vw - 16px));
+}
+.gaze-git-workspace .confirm-dialog,
+.gaze-git-workspace .form-dialog,
+.gaze-git-workspace .rebase-dialog {
+  max-width: min(700px, calc(100vw - 40px));
+  background: var(--popover-material);
+  box-shadow: var(--shadow-panel);
+  backdrop-filter: blur(24px) saturate(1.2);
+  color: var(--text);
+}
+.gaze-git-workspace .gitdock-diff {
+  --diff-background-color: var(--canvas);
+  --diff-text-color: var(--text);
+  --diff-gutter-insert-background-color: color-mix(in srgb, var(--green) 18%, var(--canvas));
+  --diff-code-insert-background-color: color-mix(in srgb, var(--green) 10%, var(--canvas));
+  --diff-gutter-delete-background-color: color-mix(in srgb, var(--red) 18%, var(--canvas));
+  --diff-code-delete-background-color: color-mix(in srgb, var(--red) 10%, var(--canvas));
+}
+@media (max-width: 1050px) {
+  .gaze-git-workspace .file-row {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}
+
+.gaze-git-workspace.git-sidebar-workspace {
+  --panel: transparent;
+  background: var(--panel);
+  overflow: hidden;
+}
+.git-sidebar-workspace .git-projects {
+  overflow: auto;
+  min-height: 0;
+  padding: 8px;
+}
+.git-sidebar-workspace .git-projects-heading {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 5px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.git-sidebar-workspace .git-projects ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.git-sidebar-workspace .git-project-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(1lh, auto);
+  gap: 5px 8px;
+  position: relative;
+  min-width: 0;
+  width: 100%;
+  padding: 10px 10px 10px 13px;
+  text-align: left;
+  border-color: transparent;
+  border-left: 3px solid var(--line-strong);
+}
+.git-sidebar-workspace .git-project-row.has-changes {
+  border-left-color: var(--yellow);
+  background: var(--hover);
+}
+.git-sidebar-workspace .git-project-row.has-conflicts {
+  border-left-color: var(--red);
+}
+.git-sidebar-workspace .git-project-row[aria-current="true"],
+.git-sidebar-workspace .git-project-row[aria-current="true"]:hover {
+  border-top-color: var(--line-strong);
+  border-right-color: var(--line-strong);
+  border-bottom-color: var(--line-strong);
+  background: var(--sidebar-active);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.git-sidebar-workspace .git-project-row strong,
+.git-sidebar-workspace .git-project-branch {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-sidebar-workspace .git-project-branch {
+  color: var(--muted);
+  font: 11px var(--font-mono);
+}
+.git-sidebar-workspace .git-project-stats {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font: 11px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.git-sidebar-workspace .git-project-additions {
+  color: var(--green);
+}
+.git-sidebar-workspace .git-project-deletions {
+  color: var(--red);
+}
+.git-sidebar-workspace .git-project-row small {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 10px;
+  align-self: center;
+  justify-self: end;
+}
+@media (max-width: 780px) {
+  .gaze-git-workspace .git-workspace-body {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: auto;
+  }
+  .gaze-git-workspace .git-workspace-body > .editor-split-resizer {
+    display: none;
+  }
+  .gaze-git-workspace .git-details-pane {
+    max-height: 300px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .gaze-git-workspace .canvas {
+    min-height: 320px;
+  }
+  .gaze-git-workspace .conflict-column-head,
+  .gaze-git-workspace .conflict-block {
+    min-width: 600px;
+  }
+}
+
+.gaze-git-workspace button.primary {
+  color: var(--accent-contrast);
+  border-color: var(--accent);
+}
+.gaze-git-workspace button.primary:hover:not(:disabled) {
+  color: var(--accent-contrast);
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+.gaze-git-workspace button.danger {
+  color: var(--surface-raised);
+  background: var(--danger);
+  border-color: var(--danger);
+}
+.gaze-git-workspace button.danger:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+.gaze-git-workspace .gitdock-diff {
+  --diff-code-insert-text-color: var(--text);
+  --diff-code-delete-text-color: var(--text);
+  --diff-font-family: var(--font-mono);
+}
+@media (prefers-reduced-motion: reduce) {
+  .gaze-git-workspace *,
+  .gaze-git-workspace *::before,
+  .gaze-git-workspace *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+.gaze-git-workspace .conflict-preview {
+  padding: 12px;
+  background: var(--canvas);
+  border-top: 1px solid var(--line);
+}
+.gaze-git-workspace .conflict-preview pre {
+  white-space: pre;
+  color: var(--text);
+}
+.gaze-git-workspace .group-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.gaze-git-workspace .group-chevron {
+  color: var(--muted);
+}

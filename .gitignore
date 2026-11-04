@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.vite/
+coverage/
+src-tauri/target/
+src-tauri/gen/
+.zcode/
+.DS_Store
+*.local
+.env
+.env.*
+.codegraph

@@ -1,0 +1,489 @@
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, Star } from "lucide-react";
+import type { BranchInfo, CommitInfo, HistorySearch } from "../api";
+import { useI18n } from "../i18n";
+import { rankBranches } from "../lib/search";
+import { GRAPH_EDGE_BUCKET_ROWS, shortOid, type RunOperation } from "../types";
+import { RowMenu } from "./RepositoryPane";
+
+const relativeTimeUnits = [
+  ["day", 86_400_000],
+  ["hour", 3_600_000],
+  ["minute", 60_000],
+  ["second", 1_000],
+] as const;
+function formatRelativeTime(value: string, formatter: Intl.RelativeTimeFormat) {
+  const delta = new Date(value).getTime() - Date.now();
+  const [unit, milliseconds] =
+    relativeTimeUnits.find(([, unitMilliseconds]) => Math.abs(delta) >= unitMilliseconds) ??
+    relativeTimeUnits.at(-1)!;
+  return formatter.format(Math.trunc(delta / milliseconds), unit);
+}
+
+function useVirtualRows(count: number, rowHeight: number, overscan = 12, resetKey?: string) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [range, setRange] = useState({ start: 0, end: Math.min(count, 40) });
+  useEffect(() => {
+    if (containerRef.current) containerRef.current.scrollTop = 0;
+  }, [resetKey]);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    let frame: number | undefined;
+    const update = () => {
+      frame = undefined;
+      const height = container.clientHeight || 680;
+      const start = Math.max(0, Math.floor(container.scrollTop / rowHeight) - overscan);
+      const end = Math.min(count, Math.ceil((container.scrollTop + height) / rowHeight) + overscan);
+      setRange((current) =>
+        current.start === start && current.end === end ? current : { start, end },
+      );
+    };
+    const scheduleUpdate = () => {
+      if (frame === undefined) frame = window.requestAnimationFrame(update);
+    };
+    update();
+    container.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
+    return () => {
+      container.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+      if (frame !== undefined) window.cancelAnimationFrame(frame);
+    };
+  }, [count, rowHeight, overscan, resetKey]);
+  return { containerRef, ...range, totalHeight: count * rowHeight };
+}
+
+export function HistoryCanvas({
+  commits,
+  selectedOid,
+  onSelect,
+}: {
+  commits: CommitInfo[];
+  selectedOid?: string;
+  onSelect: (oid: string) => void;
+}) {
+  const { language, t } = useI18n();
+  const dateFormatter = useMemo(() => new Intl.DateTimeFormat(language), [language]);
+  const rowHeight = 34;
+  const laneGap = 14;
+  const { containerRef, start, end, totalHeight } = useVirtualRows(commits.length, rowHeight);
+  const commitRows = useMemo(
+    () => new Map(commits.map((commit, index) => [commit.oid, index])),
+    [commits],
+  );
+  const graphWidth = useMemo(
+    () =>
+      Math.max(
+        44,
+        24 +
+          commits.reduce(
+            (maximum, commit) =>
+              Math.max(maximum, commit.lane.column, ...commit.lane.parentColumns),
+            0,
+          ) *
+            laneGap,
+      ),
+    [commits],
+  );
+  const laneX = (column: number) => 12 + column * laneGap;
+  const edgeBuckets = useMemo(() => {
+    const buckets = new Map<
+      number,
+      Array<{
+        key: string;
+        row: number;
+        targetRow: number;
+        column: number;
+        routeColumn: number;
+        targetColumn: number;
+      }>
+    >();
+    commits.forEach((commit, row) =>
+      commit.parents.forEach((parent, parentIndex) => {
+        const targetRow = commitRows.get(parent) ?? commits.length;
+        const targetColumn =
+          targetRow === commits.length
+            ? (commit.lane.parentColumns[parentIndex] ?? commit.lane.column)
+            : commits[targetRow]!.lane.column;
+        const routeColumn = Math.max(
+          commit.lane.column,
+          commit.lane.parentColumns[parentIndex] ?? targetColumn,
+        );
+        const edge = {
+          key: `${commit.oid}-${parent}`,
+          row,
+          targetRow,
+          column: commit.lane.column,
+          routeColumn,
+          targetColumn,
+        };
+        for (
+          let bucket = Math.floor(row / GRAPH_EDGE_BUCKET_ROWS);
+          bucket <= Math.floor(targetRow / GRAPH_EDGE_BUCKET_ROWS);
+          bucket += 1
+        ) {
+          const entries = buckets.get(bucket);
+          if (entries) entries.push(edge);
+          else buckets.set(bucket, [edge]);
+        }
+      }),
+    );
+    return buckets;
+  }, [commits, commitRows]);
+  const visibleEdges = useMemo(() => {
+    const edges = new Map<string, NonNullable<ReturnType<typeof edgeBuckets.get>>[number]>();
+    const first = Math.floor(start / GRAPH_EDGE_BUCKET_ROWS);
+    const last = Math.floor(Math.max(start, end - 1) / GRAPH_EDGE_BUCKET_ROWS);
+    for (let bucket = first; bucket <= last; bucket += 1) {
+      for (const edge of edgeBuckets.get(bucket) ?? [])
+        if (edge.row < end && edge.targetRow >= start) edges.set(edge.key, edge);
+    }
+    return [...edges.values()];
+  }, [edgeBuckets, start, end]);
+  return (
+    <div className="history-canvas">
+      <header className="canvas-header">
+        <strong>{t("repositoryGraph")}</strong>
+        <span>
+          {commits.length} {t("commitsLoaded")}
+        </span>
+      </header>
+      <div
+        ref={containerRef}
+        className="graph-list"
+        style={{ "--graph-width": `${graphWidth}px` } as React.CSSProperties}
+      >
+        <div className="virtual-history" style={{ height: totalHeight }}>
+          <svg
+            className="commit-graph"
+            width={graphWidth}
+            height={totalHeight}
+            aria-label={t("repositoryGraph")}
+          >
+            {visibleEdges.map((edge) => {
+              const startX = laneX(edge.column);
+              const routeX = laneX(edge.routeColumn);
+              const startY = edge.row * rowHeight + rowHeight / 2;
+              const endX = laneX(edge.targetColumn);
+              const endY = edge.targetRow * rowHeight + rowHeight / 2;
+              const bend = Math.min(12, (endY - startY) / 4);
+              return (
+                <path
+                  className={`graph-edge lane-${Math.max(edge.column, edge.routeColumn) % 5}`}
+                  key={edge.key}
+                  d={`M ${startX} ${startY} C ${startX} ${startY + bend}, ${routeX} ${startY + bend}, ${routeX} ${startY + bend * 2} L ${routeX} ${endY - bend * 2} C ${routeX} ${endY - bend}, ${endX} ${endY - bend}, ${endX} ${endY}`}
+                />
+              );
+            })}
+            {commits.slice(start, end).map((commit, index) => {
+              const row = start + index;
+              return (
+                <circle
+                  className={`graph-node lane-${commit.lane.column % 5}`}
+                  key={commit.oid}
+                  cx={laneX(commit.lane.column)}
+                  cy={row * rowHeight + rowHeight / 2}
+                  r="4"
+                />
+              );
+            })}
+          </svg>
+          {commits.slice(start, end).map((commit, index) => (
+            <button
+              style={{ position: "absolute", top: (start + index) * rowHeight }}
+              className={`graph-row ${selectedOid === commit.oid ? "selected" : ""}`}
+              key={commit.oid}
+              onClick={() => onSelect(commit.oid)}
+            >
+              <span />
+              <code>{shortOid(commit.oid)}</code>
+              <div
+                className="graph-subject"
+                data-tooltip={[commit.subject, ...commit.refs].join("\n")}
+              >
+                <strong>{commit.subject}</strong>
+                {commit.refs.map((reference) => (
+                  <span
+                    className={`ref-label ${reference.startsWith("tag: ") ? "tag" : ""}`}
+                    key={reference}
+                  >
+                    {reference}
+                  </span>
+                ))}
+              </div>
+              <span data-tooltip={commit.author}>{commit.author}</span>
+              <time dateTime={commit.authoredAt}>
+                {dateFormatter.format(new Date(commit.authoredAt))}
+              </time>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function HistoryPane({
+  branches,
+  branchRef,
+  onBranchChange,
+  commits,
+  selectedOid,
+  loading,
+  hasMore,
+  onLoadMore,
+  onSelect,
+  onRun,
+  search = null,
+  onSearch,
+  error,
+  resultsOnly = false,
+  controlsOnly = false,
+}: {
+  search?: HistorySearch | null;
+  onSearch?: (search: HistorySearch | null) => void;
+  error?: string;
+  resultsOnly?: boolean;
+  controlsOnly?: boolean;
+  branches: BranchInfo[];
+  branchRef: string | null;
+  onBranchChange: (reference: string | null) => void;
+  commits: CommitInfo[];
+  selectedOid?: string;
+  loading: boolean;
+  hasMore: boolean;
+  onLoadMore: () => void;
+  onSelect: (oid: string) => void;
+  onRun: RunOperation;
+}) {
+  const { language, t } = useI18n();
+  const [branchSearch, setBranchSearch] = useState("");
+  const [query, setQuery] = useState(search?.query ?? "");
+  useEffect(() => {
+    setQuery(search?.query ?? "");
+  }, [search]);
+  const branchQuery = branchSearch.trim().toLowerCase();
+  const matchingBranches = branches.filter((branch) =>
+    branch.name.toLowerCase().includes(branchQuery),
+  );
+  const branchSections: Array<{ key: string; label: string | null; matched: BranchInfo[] }> =
+    branchQuery
+      ? [{ key: "matches", label: null, matched: rankBranches(matchingBranches, branchSearch) }]
+      : [false, true].map((remote) => ({
+          key: String(remote),
+          label: t(remote ? "remoteBranches" : "localBranches"),
+          matched: matchingBranches.filter((branch) => branch.remote === remote),
+        }));
+  const relativeTimeFormatter = useMemo(
+    () => new Intl.RelativeTimeFormat(language, { numeric: "auto" }),
+    [language],
+  );
+  const rowHeight = 45;
+  const { containerRef, start, end, totalHeight } = useVirtualRows(
+    commits.length,
+    rowHeight,
+    12,
+    JSON.stringify([branchRef, search]),
+  );
+  const loadMoreRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const target = loadMoreRef.current;
+    if (!target || controlsOnly || !hasMore || !("IntersectionObserver" in window)) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) onLoadMore();
+      },
+      { root: containerRef.current, rootMargin: "180px" },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMore, onLoadMore, containerRef, controlsOnly]);
+  return (
+    <div className={`history-pane${resultsOnly ? " history-results" : " history-controls"}`}>
+      {!resultsOnly && (
+        <>
+          <div className="pane-title history-title">
+            <span>{t("commits")}</span>
+            <div className="history-branch-filter">
+              <RowMenu
+                label={t("historyBranch")}
+                glyph={
+                  <>
+                    <span data-tooltip={branchRef ?? t("allBranches")}>
+                      {branches.find(
+                        (branch) =>
+                          `refs/${branch.remote ? "remotes" : "heads"}/${branch.name}` ===
+                          branchRef,
+                      )?.name ?? t("allBranches")}
+                    </span>
+                    <ChevronDown size={14} aria-hidden />
+                  </>
+                }
+              >
+                <input
+                  type="search"
+                  className="history-branch-search"
+                  aria-label={t("searchBranches")}
+                  placeholder={t("findBranch")}
+                  value={branchSearch}
+                  onChange={(event) => setBranchSearch(event.target.value)}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+                <button aria-pressed={branchRef === null} onClick={() => onBranchChange(null)}>
+                  {t("allBranches")}
+                </button>
+                {branchSections
+                  .filter((section) => section.matched.length > 0)
+                  .map((section) => (
+                    <div role="group" key={section.key} aria-label={section.label ?? t("branches")}>
+                      {section.label && <div className="history-branch-group">{section.label}</div>}
+                      {section.matched.map((branch) => {
+                        const reference = `refs/${branch.remote ? "remotes" : "heads"}/${branch.name}`;
+                        return (
+                          <button
+                            key={reference}
+                            data-tooltip={branch.name}
+                            aria-label={
+                              branch.current
+                                ? `${branch.name} (${t("checkedOutBranch")})`
+                                : undefined
+                            }
+                            aria-pressed={branchRef === reference}
+                            onClick={() => onBranchChange(reference)}
+                          >
+                            {branch.current && <Star size={12} fill="currentColor" aria-hidden />}
+                            {branch.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
+                {!matchingBranches.length && (
+                  <div className="history-branch-empty" role="status">
+                    {t(branchSearch.trim() ? "noMatchingBranches" : "noBranches")}
+                  </div>
+                )}
+              </RowMenu>
+            </div>
+            <code>{commits.length}</code>
+          </div>
+          <form
+            className="commit-search"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const value = query.trim();
+              onSearch?.(
+                value
+                  ? { type: /^[\da-f]{4,64}$/i.test(value) ? "sha" : "message", query: value }
+                  : null,
+              );
+            }}
+          >
+            <div className="commit-search-row">
+              <div className="commit-search-input">
+                <input
+                  type="search"
+                  aria-label={t("searchCommits")}
+                  placeholder={t("searchCommits")}
+                  value={query}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    if (!event.target.value.trim()) onSearch?.(null);
+                  }}
+                />
+                {(query || search) && (
+                  <button
+                    className="commit-search-clear"
+                    type="button"
+                    aria-label={t("clearCommitSearch")}
+                    onClick={() => {
+                      setQuery("");
+                      onSearch?.(null);
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              <button type="submit">{t("search")}</button>
+            </div>
+          </form>
+        </>
+      )}
+      {!controlsOnly && (
+        <div ref={containerRef} className="object-list">
+          {error ? (
+            <p className="pane-empty" role="alert">
+              {error}
+            </p>
+          ) : !loading && !commits.length ? (
+            <p className="pane-empty" role="status">
+              {t(search ? "noMatchingCommits" : "noCommits")}
+            </p>
+          ) : loading && !commits.length ? (
+            <div className="skeleton-list" role="status" aria-label={t("loading")}>
+              {[0, 1, 2, 3, 4, 5].map((index) => (
+                <div className="skeleton-row object" key={index} />
+              ))}
+            </div>
+          ) : (
+            <div className="virtual-history" style={{ height: totalHeight + (hasMore ? 45 : 0) }}>
+              {commits.slice(start, end).map((commit, index) => (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: (start + index) * rowHeight,
+                    width: "100%",
+                    height: rowHeight,
+                  }}
+                  className={`object-action-row ${selectedOid === commit.oid ? "selected" : ""}`}
+                  key={commit.oid}
+                >
+                  <button onClick={() => onSelect(commit.oid)}>
+                    <strong>{commit.subject}</strong>
+                    <span>
+                      {commit.author} · {shortOid(commit.oid)} ·{" "}
+                      <time dateTime={commit.authoredAt}>
+                        {formatRelativeTime(commit.authoredAt, relativeTimeFormatter)}
+                      </time>
+                    </span>
+                  </button>
+                  <RowMenu context label={t("moreActions")} glyph="•••">
+                    <button onClick={() => onRun({ type: "cherryPick", commits: [commit.oid] })}>
+                      {t("cherryPick")}
+                    </button>
+                    {commit.parents.length === 1 && (
+                      <button onClick={() => onRun({ type: "revert", oid: commit.oid })}>
+                        {t("revert")}
+                      </button>
+                    )}
+                  </RowMenu>
+                </div>
+              ))}
+              {hasMore && (
+                <button
+                  ref={loadMoreRef}
+                  style={{ position: "absolute", top: totalHeight }}
+                  className="load-more"
+                  disabled={loading}
+                  onClick={onLoadMore}
+                >
+                  {loading ? t("loading") : t("loadMore")}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export const MemoHistoryCanvas = memo(HistoryCanvas);
+export const MemoHistoryPane = memo(HistoryPane);

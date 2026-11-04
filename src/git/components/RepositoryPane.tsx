@@ -1,0 +1,122 @@
+import { useEffect, useRef, useState } from "react";
+import { useI18n } from "../i18n";
+export function RailMark() {
+  return (
+    <svg className="rail-mark" viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M9 4v18a6 6 0 0 0 6 6h3" />
+      <path d="M23 4v7a5 5 0 0 1-5 5H9" />
+      <circle cx="9" cy="4" r="2.5" />
+      <circle cx="23" cy="4" r="2.5" />
+      <circle cx="20" cy="28" r="2.5" />
+    </svg>
+  );
+}
+
+export function RowMenu({
+  children,
+  label,
+  context,
+  glyph,
+  disabled,
+}: {
+  children: React.ReactNode;
+  label?: string;
+  context?: boolean;
+  glyph?: React.ReactNode;
+  disabled?: boolean;
+}) {
+  const { t } = useI18n();
+  const actualLabel = label ?? t("moreActions");
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const openAt = (
+    anchor: { top: number; bottom: number; left: number; right: number },
+    alignStart = false,
+  ) => {
+    const menu = menuRef.current;
+    if (!menu) return;
+    menu.showPopover();
+    menu.style.height = "0";
+    menu.style.height = `${Math.min(menu.scrollHeight + 2, window.innerHeight - 8)}px`;
+    const bounds = menu.getBoundingClientRect();
+    const top =
+      anchor.bottom + bounds.height + 4 <= window.innerHeight
+        ? anchor.bottom + 4
+        : Math.max(4, anchor.top - bounds.height - 4);
+    menu.style.left = `${Math.max(4, Math.min(alignStart ? anchor.left : anchor.right - bounds.width, window.innerWidth - bounds.width - 4))}px`;
+    menu.style.top = `${top}px`;
+    (menu.querySelector<HTMLInputElement>('input[type="search"]') ?? menu).focus();
+  };
+  const toggle = () => {
+    const button = buttonRef.current;
+    if (!button) return;
+    if (open) {
+      menuRef.current?.hidePopover();
+      return;
+    }
+    openAt(button.getBoundingClientRect());
+  };
+  useEffect(() => {
+    const row = context
+      ? ((menuRef.current?.closest(".file-row, .object-action-row, .repo-row-shell") ??
+          menuRef.current?.parentElement) as HTMLElement | null)
+      : undefined;
+    if (!row) return;
+    const openMenu = (event: MouseEvent) => {
+      event.preventDefault();
+      if (open) menuRef.current?.hidePopover();
+      const anchor = {
+        top: event.clientY,
+        bottom: event.clientY,
+        left: event.clientX,
+        right: event.clientX,
+      };
+      // The right-button pointerdown already registered outside the popover, so opening now would be
+      // light-dismissed by the trailing pointerup. Wait it out; keyboard menu keys open immediately.
+      if (event.button === 2)
+        document.addEventListener("pointerup", () => openAt(anchor, true), { once: true });
+      else openAt(anchor, true);
+    };
+    row.addEventListener("contextmenu", openMenu);
+    return () => row.removeEventListener("contextmenu", openMenu);
+  }, [context, open]);
+  return (
+    <>
+      {(!context || label) && (
+        <button
+          ref={buttonRef}
+          className="row-menu-trigger"
+          type="button"
+          aria-label={actualLabel}
+          aria-expanded={open}
+          disabled={disabled}
+          onClick={toggle}
+        >
+          {glyph ?? (label ? actualLabel : "•••")}
+        </button>
+      )}
+      <div
+        ref={menuRef}
+        className="row-menu-popover"
+        tabIndex={-1}
+        popover="auto"
+        onToggle={(event) => {
+          setOpen(event.newState === "open");
+          if (context)
+            (
+              menuRef.current?.closest(".file-row, .object-action-row, .repo-row-shell") ??
+              menuRef.current?.parentElement
+            )?.classList.toggle("menu-open", event.newState === "open");
+          if (event.newState === "closed" && menuRef.current?.contains(document.activeElement))
+            buttonRef.current?.focus();
+        }}
+        onClick={(event) => {
+          if ((event.target as HTMLElement).closest("button")) menuRef.current?.hidePopover();
+        }}
+      >
+        {children}
+      </div>
+    </>
+  );
+}
