@@ -1,3 +1,4 @@
+import { t, useLanguage } from "../lib/i18n";
 import { useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { FileSearch, LoaderCircle, SearchX } from "lucide-react";
@@ -17,6 +18,7 @@ interface QuickOpenProps {
 }
 
 export function QuickOpen({ open, hasProjects, onClose, onOpen, onImport }: QuickOpenProps) {
+  useLanguage();
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -137,7 +139,7 @@ export function QuickOpen({ open, hasProjects, onClose, onOpen, onImport }: Quic
         className="quick-open"
         role="dialog"
         aria-modal="true"
-        aria-label="快速打开文件"
+        aria-label={t("快速打开文件")}
         tabIndex={-1}
         ref={dialogRef}
         onKeyDown={(event) => {
@@ -165,8 +167,8 @@ export function QuickOpen({ open, hasProjects, onClose, onOpen, onImport }: Quic
                 openSelected();
               }
             }}
-            placeholder="输入文件名或路径"
-            aria-label="输入文件名或路径"
+            placeholder={t("输入文件名或路径")}
+            aria-label={t("输入文件名或路径")}
             spellCheck={false}
             disabled={!hasProjects}
           />
@@ -177,7 +179,7 @@ export function QuickOpen({ open, hasProjects, onClose, onOpen, onImport }: Quic
         {!hasProjects ? (
           <div className="palette-empty">
             <SearchX size={24} strokeWidth={1.4} />
-            <p>工作区中还没有项目</p>
+            <p>{t("工作区中还没有项目")}</p>
             <button
               className="button button-small"
               onClick={() => {
@@ -185,7 +187,7 @@ export function QuickOpen({ open, hasProjects, onClose, onOpen, onImport }: Quic
                 onImport();
               }}
             >
-              导入项目
+              {t("导入项目")}
             </button>
           </div>
         ) : error ? (
@@ -195,17 +197,22 @@ export function QuickOpen({ open, hasProjects, onClose, onOpen, onImport }: Quic
             {indexing ? (
               <>
                 <LoaderCircle size={22} className="spin" />
-                <p>正在建立文件索引…</p>
+                <p>{t("正在建立文件索引…")}</p>
               </>
             ) : (
               <>
                 <SearchX size={22} strokeWidth={1.4} />
-                <p>{query ? "没有匹配的文件" : "尚未发现可打开的文件"}</p>
+                <p>{query ? t("没有匹配的文件") : t("尚未发现可打开的文件")}</p>
               </>
             )}
           </div>
         ) : (
-          <div className="palette-results" ref={listRef} role="listbox" aria-label="文件匹配结果">
+          <div
+            className="palette-results"
+            ref={listRef}
+            role="listbox"
+            aria-label={t("文件匹配结果")}
+          >
             <div className="palette-results-virtual" style={{ height: virtualizer.getTotalSize() }}>
               {virtualizer.getVirtualItems().map((row) => {
                 const hit = hits[row.index];
@@ -237,11 +244,12 @@ export function QuickOpen({ open, hasProjects, onClose, onOpen, onImport }: Quic
 
         <div className="quick-open-footer">
           <span>
-            {indexMessage ?? (indexing ? "文件索引仍在后台更新" : `${hits.length} 个结果`)}
+            {indexMessage ?? (indexing ? t("文件索引仍在后台更新") : t("{0} 个结果", hits.length))}
           </span>
           <span className="palette-hints">
             <kbd>↑</kbd>
-            <kbd>↓</kbd> 导航 <kbd>↵</kbd> 打开
+            <kbd>↓</kbd> {t("导航")}
+            <kbd>↵</kbd> {t("打开")}
           </span>
         </div>
       </div>

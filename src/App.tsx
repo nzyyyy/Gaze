@@ -1,3 +1,4 @@
+import { t, useLanguage, setLanguage, DEFAULT_LANGUAGE } from "./lib/i18n";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -115,29 +116,31 @@ const paneOf = (tab: EditorTab): EditorPane => tab.pane ?? "primary";
 function dialogCopy(action: PendingAction) {
   if (action.kind === "closeTabs") {
     return {
-      title: action.tabs.length === 1 ? `关闭 ${action.tabs[0]!.name}？` : "关闭这些标签页？",
-      message: "文件有未保存的修改，且自动保存没有完成。",
-      saveLabel: "重试保存并关闭",
-      discardLabel: "放弃修改并关闭",
+      title:
+        action.tabs.length === 1 ? t("关闭 {0}？", action.tabs[0]!.name) : t("关闭这些标签页？"),
+      message: t("文件有未保存的修改，且自动保存没有完成。"),
+      saveLabel: t("重试保存并关闭"),
+      discardLabel: t("放弃修改并关闭"),
     };
   }
   if (action.kind === "removeProject") {
     return {
-      title: `移除项目 ${action.project.name}？`,
-      message: "该项目中有未保存的修改，且自动保存没有完成。",
-      saveLabel: "重试保存并移除",
-      discardLabel: "放弃修改并移除",
+      title: t("移除项目 {0}？", action.project.name),
+      message: t("该项目中有未保存的修改，且自动保存没有完成。"),
+      saveLabel: t("重试保存并移除"),
+      discardLabel: t("放弃修改并移除"),
     };
   }
   return {
-    title: "退出 Gaze？",
-    message: "以下文件有未保存的修改，且自动保存没有完成。",
-    saveLabel: "重试保存并退出",
-    discardLabel: "放弃修改并退出",
+    title: t("退出 Gaze？"),
+    message: t("以下文件有未保存的修改，且自动保存没有完成。"),
+    saveLabel: t("重试保存并退出"),
+    discardLabel: t("放弃修改并退出"),
   };
 }
 
 export default function App() {
+  const language = useLanguage();
   useAutoHideScrollbars();
   const [initialSession] = useState(readSession);
   const sessionRestoredRef = useRef(false);
@@ -352,6 +355,7 @@ export default function App() {
       const snapshot = await api.bootstrapWorkspace();
       setLoadState({ status: "ready", snapshot });
       setTheme(snapshot.theme);
+      setLanguage(snapshot.language ?? DEFAULT_LANGUAGE);
       setPreferences(snapshot.preferences ?? DEFAULT_PREFERENCES);
       setColorSchemes(snapshot.colorSchemes ?? DEFAULT_COLOR_SCHEMES);
       setFonts(snapshot.fonts);
@@ -533,13 +537,13 @@ export default function App() {
       const selected = await open({
         directory: true,
         multiple: true,
-        title: "导入项目目录",
+        title: t("导入项目目录"),
       });
       if (!selected) return;
       const paths = Array.isArray(selected) ? selected : [selected];
       const result = await api.importProjects(paths);
       if (result.failures.length > 0) {
-        notify(result.failures[0]?.message ?? "部分目录未能导入。");
+        notify(result.failures[0]?.message ?? t("部分目录未能导入。"));
       }
       const snapshot = await api.bootstrapWorkspace();
       updateSnapshot(snapshot);
@@ -556,7 +560,7 @@ export default function App() {
   const handleOpenProject = useCallback(
     (project: Project) => {
       if (gitOperationBusyRef.current) {
-        notify("Git 操作进行中，请稍候。");
+        notify(t("Git 操作进行中，请稍候。"));
         return;
       }
       if (loadState.status !== "ready" || loadState.snapshot.activeProjectId === project.id) return;
@@ -601,7 +605,7 @@ export default function App() {
       options?: { trackHistory?: boolean; pane?: EditorPane },
     ) => {
       if (gitOperationBusyRef.current) {
-        notify("Git 操作进行中，请稍候。");
+        notify(t("Git 操作进行中，请稍候。"));
         return;
       }
       setSidebarView((view) => (view === "git" ? "files" : view));
@@ -610,7 +614,7 @@ export default function App() {
       const workspaceProject = current.snapshot.projects.find((item) => item.id === projectId);
       const project = workspaceProject ?? temporaryProjectsRef.current.get(projectId);
       if (!project) {
-        notify("该项目已不在工作区中。");
+        notify(t("该项目已不在工作区中。"));
         return;
       }
       const existing = tabsRef.current.find(
@@ -890,7 +894,7 @@ export default function App() {
   const handleOpenMarkdownFile = useCallback(
     (projectId: string, path: string, fragment: string | null) => {
       if (gitOperationBusyRef.current) {
-        notify("Git 操作进行中，请稍候。");
+        notify(t("Git 操作进行中，请稍候。"));
         return;
       }
       const temporary = temporaryProjectsRef.current.get(projectId);
@@ -923,7 +927,7 @@ export default function App() {
     value: string,
   ): Promise<FileOperationResult> => {
     if (fileOperationBusyRef.current || closingTabsRef.current)
-      throw new Error("文件操作进行中，请稍候。");
+      throw new Error(t("文件操作进行中，请稍候。"));
     fileOperationBusyRef.current = true;
     setOperationBusy(true);
     const { project } = operation;
@@ -958,15 +962,15 @@ export default function App() {
                 (absolute(tab) === destination || absolute(tab).startsWith(destination + "/")),
             )
           ) {
-            throw new Error("目标路径在编辑器中仍有未保存内容，请先保存或关闭该标签。");
+            throw new Error(t("目标路径在编辑器中仍有未保存内容，请先保存或关闭该标签。"));
           }
         }
       }
       for (const handle of handles) {
-        if (!handle) throw new Error("编辑器尚未准备好，请稍后再试。");
+        if (!handle) throw new Error(t("编辑器尚未准备好，请稍后再试。"));
         const result = await handle.prepareFileOperation();
         if (result.status !== "saved" && result.status !== "clean")
-          throw new Error(result.message ?? "无法保存修改，请先处理保存问题。");
+          throw new Error(result.message ?? t("无法保存修改，请先处理保存问题。"));
       }
       let entry: DirEntry | undefined;
       if ("parentPath" in operation) {
@@ -1115,7 +1119,7 @@ export default function App() {
 
   const handlePaste = async (project: Project, parent: string, paths?: string[]) => {
     if (fileOperationBusyRef.current || gitOperationBusyRef.current || closingTabsRef.current) {
-      throw new Error("文件或 Git 操作进行中，请稍候。");
+      throw new Error(t("文件或 Git 操作进行中，请稍候。"));
     }
     fileOperationBusyRef.current = true;
     setOperationBusy(true);
@@ -1180,7 +1184,7 @@ export default function App() {
       clear();
       if (event.type === "leave") return;
       if (busy()) {
-        if (event.type === "drop") notify("文件或 Git 操作进行中，请稍候。");
+        if (event.type === "drop") notify(t("文件或 Git 操作进行中，请稍候。"));
         return;
       }
       const current = loadStateRef.current;
@@ -1190,12 +1194,12 @@ export default function App() {
       if (event.type !== "drop") {
         target = drop.element;
         target.classList.add("file-drop-target");
-        setDropHint(drop.kind === "copy" ? "复制并打开" : "打开文件");
+        setDropHint(drop.kind === "copy" ? t("复制并打开") : t("打开文件"));
         return;
       }
       enqueue(async () => {
         if (busy()) {
-          notify("文件或 Git 操作进行中，请稍候。");
+          notify(t("文件或 Git 操作进行中，请稍候。"));
           return;
         }
         if (drop.kind === "open") {
@@ -1203,7 +1207,7 @@ export default function App() {
         } else {
           const project = current.snapshot.projects.find((item) => item.id === drop.projectId);
           if (!project) {
-            notify("请先导入并选择一个项目。");
+            notify(t("请先导入并选择一个项目。"));
             return;
           }
           await fileTreeRef.current?.drop(project, drop.parent, event.paths);
@@ -1280,11 +1284,11 @@ export default function App() {
     const handle = editorsRef.current.get(key);
     if (!tab || !handle) return;
     const result = await handle.save();
-    if (result.status === "saved") notify(`已保存 ${tab.name}`);
-    else if (result.status === "readonly") notify(result.message ?? "当前文件只支持阅读。");
+    if (result.status === "saved") notify(t("已保存 {0}", tab.name));
+    else if (result.status === "readonly") notify(result.message ?? t("当前文件只支持阅读。"));
     else if (result.status === "conflict")
-      notify("文件已在磁盘上修改，请在编辑器中选择覆盖或重新载入。");
-    else if (result.status === "error") notify(result.message ?? "保存失败。");
+      notify(t("文件已在磁盘上修改，请在编辑器中选择覆盖或重新载入。"));
+    else if (result.status === "error") notify(result.message ?? t("保存失败。"));
   }, [notify]);
 
   const runNavigation = useCallback(
@@ -1301,12 +1305,12 @@ export default function App() {
         return;
       const tab = target ? tabsRef.current.find((tab) => tab.key === target.key) : activeTab;
       if (!tab) {
-        notify("请先打开一个文件。");
+        notify(t("请先打开一个文件。"));
         return;
       }
       const position = target?.position ?? editorsRef.current.get(tab.key)?.getCursor();
       if (!position) {
-        notify("代码视图尚未准备好。");
+        notify(t("代码视图尚未准备好。"));
         return;
       }
       setNavigationBusy(true);
@@ -1318,7 +1322,8 @@ export default function App() {
             : kind === "references"
               ? await api.findReferences(tab.projectId, tab.path, position)
               : await api.findImplementations(tab.projectId, tab.path, position);
-        const title = kind === "definition" ? "定义" : kind === "references" ? "引用" : "实现";
+        const title =
+          kind === "definition" ? t("定义") : kind === "references" ? t("引用") : t("实现");
         if (
           kind !== "references" &&
           result.source === "lsp" &&
@@ -1418,7 +1423,7 @@ export default function App() {
           event.preventDefault();
           void api
             .copyEntry(project.id, activeTab.path)
-            .then(() => notify("已复制文件"))
+            .then(() => notify(t("已复制文件")))
             .catch((error) => notify(errorMessage(error)));
           return;
         }
@@ -1494,11 +1499,11 @@ export default function App() {
   const handleRemoveProject = useCallback(
     (project: Project) => {
       if (fileOperationBusyRef.current || closingTabsRef.current) {
-        notify("文件操作进行中，请稍候。");
+        notify(t("文件操作进行中，请稍候。"));
         return;
       }
       if (gitOperationBusyRef.current) {
-        notify("Git 操作进行中，请稍候。");
+        notify(t("Git 操作进行中，请稍候。"));
         return;
       }
       const dirtyTabs = tabsRef.current.filter(
@@ -1514,7 +1519,7 @@ export default function App() {
           if (!result || (result.status !== "saved" && result.status !== "clean")) {
             setActiveKey(tab.key);
             setReveal(null);
-            setDialogError(result?.message ?? `无法保存 ${tab.path}。`);
+            setDialogError(result?.message ?? t("无法保存 {0}。", tab.path));
             setPendingAction({ kind: "removeProject", project });
             return;
           }
@@ -1528,7 +1533,7 @@ export default function App() {
   const handleActivateTab = useCallback(
     (tab: EditorTab, pane: EditorPane = paneOf(tab)) => {
       if (gitOperationBusyRef.current) {
-        notify("Git 操作进行中，请稍候。");
+        notify(t("Git 操作进行中，请稍候。"));
         return;
       }
       const previous = activeKeyRef.current;
@@ -1549,7 +1554,7 @@ export default function App() {
     async (requested: EditorTab[]) => {
       if (closingTabsRef.current) return;
       if (gitOperationBusyRef.current || fileOperationBusyRef.current) {
-        notify("文件或 Git 操作进行中，请稍候。");
+        notify(t("文件或 Git 操作进行中，请稍候。"));
         return;
       }
       const keys = new Set(requested.map((tab) => tab.key));
@@ -1567,7 +1572,7 @@ export default function App() {
           if (handle) handles.push(handle);
           const result = await handle?.prepareFileOperation();
           if (result?.status !== "saved" && result?.status !== "clean") {
-            throw new Error(result?.message ?? `无法保存 ${tab.path}。`);
+            throw new Error(result?.message ?? t("无法保存 {0}。", tab.path));
           }
         }
         await discardTabRecovery(closing);
@@ -1650,12 +1655,12 @@ export default function App() {
       for (const tab of dirtyTabsForAction(action)) {
         const handle = editorsRef.current.get(tab.key);
         if (!handle) {
-          setDialogError(`无法保存 ${tab.path}。`);
+          setDialogError(t("无法保存 {0}。", tab.path));
           return;
         }
         const result = await handle.save();
         if (result.status !== "saved" && result.status !== "clean") {
-          setDialogError(result.message ?? `无法保存 ${tab.path}。`);
+          setDialogError(result.message ?? t("无法保存 {0}。", tab.path));
           return;
         }
       }
@@ -1695,7 +1700,7 @@ export default function App() {
             if (!result || (result.status !== "saved" && result.status !== "clean")) {
               setActiveKey(key);
               setReveal(null);
-              setDialogError(result?.message ?? "有文件无法保存。");
+              setDialogError(result?.message ?? t("有文件无法保存。"));
               setPendingAction({ kind: "quit" });
               return;
             }
@@ -1726,11 +1731,12 @@ export default function App() {
   }, [isTabDirty, preferences.autoSave, persistSession]);
 
   const persistSettings = useCallback(async (next: AppSettings) => {
-    if (settingsBusyRef.current) throw new Error("设置正在保存，请稍候。");
+    if (settingsBusyRef.current) throw new Error(t("设置正在保存，请稍候。"));
     settingsBusyRef.current = true;
     setSettingsBusy(true);
     try {
       await api.saveSettings(next);
+      setLanguage(next.language);
       setFonts(next.fonts);
       setColorSchemes(next.colorSchemes);
       setTheme(next.theme);
@@ -1772,7 +1778,7 @@ export default function App() {
   const prepareGitOperation: PrepareGitOperation = useCallback(
     async (root, request, pathHint) => {
       if (fileOperationBusyRef.current || closingTabsRef.current)
-        throw new Error("另一个文件或 Git 操作正在执行。");
+        throw new Error(t("另一个文件或 Git 操作正在执行。"));
       fileOperationBusyRef.current = true;
       gitOperationBusyRef.current = true;
       setOperationBusy(true);
@@ -1786,7 +1792,7 @@ export default function App() {
       };
       try {
         const current = loadStateRef.current;
-        if (current.status !== "ready") throw new Error("工作区尚未准备好。");
+        if (current.status !== "ready") throw new Error(t("工作区尚未准备好。"));
         const paths =
           "paths" in request && request.paths.length
             ? request.paths
@@ -1806,7 +1812,7 @@ export default function App() {
         });
         const editors = affected.map((tab) => {
           const editor = editorsRef.current.get(tab.key);
-          if (!editor) throw new Error(`编辑器 ${tab.name} 尚未准备好。`);
+          if (!editor) throw new Error(t("编辑器 {0} 尚未准备好。", tab.name));
           return editor;
         });
         const settle = await prepareEditors(editors, request);
@@ -1845,7 +1851,7 @@ export default function App() {
               imported.projects[0] ??
               snapshot.projects.find((item) => insideWorktree(absolute, item.root));
           }
-          if (!project) throw new Error("无法打开仓库根目录。");
+          if (!project) throw new Error(t("无法打开仓库根目录。"));
           const relative = absolute
             .replaceAll("\\", "/")
             .slice(project.root.replaceAll("\\", "/").replace(/\/$/, "").length + 1);
@@ -1935,6 +1941,7 @@ export default function App() {
   const menuCanNavigate = menuHasFile && editorStatus !== null && !navigationBusy;
   const menuState = useMemo<NativeMenuState>(
     () => ({
+      language,
       ready: loadState.status === "ready",
       blocked:
         operationBusy ||
@@ -1959,6 +1966,7 @@ export default function App() {
       showStatusBar: preferences.showStatusBar,
     }),
     [
+      language,
       loadState.status,
       operationBusy,
       settingsBusy,
@@ -2006,7 +2014,7 @@ export default function App() {
           break;
         }
         case "open-file": {
-          const selected = await open({ multiple: true, directory: false, title: "打开文件" });
+          const selected = await open({ multiple: true, directory: false, title: t("打开文件") });
           if (selected) await handleExternalFiles(Array.isArray(selected) ? selected : [selected]);
           break;
         }
@@ -2071,6 +2079,7 @@ export default function App() {
             "status-bar": "showStatusBar",
           } as const;
           await persistSettings({
+            language,
             fonts,
             colorSchemes,
             theme,
@@ -2094,7 +2103,7 @@ export default function App() {
           <BookOpen size={20} />
         </div>
         <LoaderCircle size={20} className="spin" />
-        <span>正在恢复工作区…</span>
+        <span>{t("正在恢复工作区…")}</span>
       </div>
     );
   }
@@ -2103,18 +2112,22 @@ export default function App() {
     return (
       <div className="app-loading app-error">
         <AlertCircle size={28} />
-        <h1>无法启动 Gaze</h1>
+        <h1>{t("无法启动 Gaze")}</h1>
         <p>{loadState.message}</p>
         <button className="button" onClick={() => void loadWorkspace()}>
           <RotateCcw size={14} />
-          重试
+          {t("重试")}
         </button>
       </div>
     );
   }
 
   const themeLabel =
-    theme === "system" ? "主题：跟随系统" : theme === "light" ? "主题：浅色" : "主题：深色";
+    theme === "system"
+      ? t("主题：跟随系统")
+      : theme === "light"
+        ? t("主题：浅色")
+        : t("主题：深色");
   const primaryTabs = tabs.filter((tab) => paneOf(tab) === "primary");
   const secondaryTabs = tabs.filter((tab) => paneOf(tab) === "secondary");
 
@@ -2152,7 +2165,7 @@ export default function App() {
             {pane === "primary" ? (
               <button className="button button-primary" onClick={() => void handleImport()}>
                 <FolderPlus size={15} />
-                导入项目
+                {t("导入项目")}
               </button>
             ) : (
               <>
@@ -2163,11 +2176,11 @@ export default function App() {
                     setQuickOpen(true);
                   }}
                 >
-                  在右侧打开文件
+                  {t("在右侧打开文件")}
                 </button>
                 {primaryTabs.length === 0 && (
                   <button className="button" onClick={toggleSplit}>
-                    关闭右侧编辑区
+                    {t("关闭右侧编辑区")}
                   </button>
                 )}
               </>
@@ -2201,7 +2214,7 @@ export default function App() {
             <span
               className="project-branch"
               role="status"
-              aria-label="当前 Git 分支"
+              aria-label={t("当前 Git 分支")}
               data-tooltip={currentBranch}
               data-tauri-drag-region
             >
@@ -2213,17 +2226,17 @@ export default function App() {
         <button
           className="quick-open-trigger"
           onClick={() => setQuickOpen(true)}
-          aria-label={`快速打开文件（${shortcut("P")}）`}
-          data-tooltip={`快速打开文件（${shortcut("P")}）`}
+          aria-label={t("快速打开文件（{0}）", shortcut("P"))}
+          data-tooltip={t("快速打开文件（{0}）", shortcut("P"))}
         >
           <FileSearch size={14} />
-          <span>快速打开</span>
+          <span>{t("快速打开")}</span>
           <kbd>{shortcut("P")}</kbd>
         </button>
         <div className="topbar-actions">
           {capabilities && !capabilities.ctagsAvailable && (
             <span className="tool-warning" data-tooltip={capabilities.ctagsMessage ?? undefined}>
-              ctags 不可用
+              {t("ctags 不可用")}
             </span>
           )}
         </div>
@@ -2240,8 +2253,8 @@ export default function App() {
                 if (sidebarView === "files") sidebarLayoutRef.current?.toggle();
                 else void selectSidebarView("files");
               }}
-              data-tooltip="项目文件"
-              aria-label="项目文件"
+              data-tooltip={t("项目文件")}
+              aria-label={t("项目文件")}
               aria-pressed={sidebarView === "files"}
               aria-expanded={sidebarExpanded}
               aria-controls="workspace-sidebar"
@@ -2255,8 +2268,8 @@ export default function App() {
                 if (sidebarView === "search") focusGlobalSearch();
                 else void selectSidebarView("search");
               }}
-              data-tooltip={`全局搜索（${shortcut("Shift+F")}）`}
-              aria-label="全局搜索"
+              data-tooltip={t("全局搜索（{0}）", shortcut("Shift+F"))}
+              aria-label={t("全局搜索")}
               aria-pressed={sidebarView === "search"}
             >
               <Search size={17} />
@@ -2264,8 +2277,8 @@ export default function App() {
             <button
               className={`rail-button ${sidebarView === "symbols" ? "is-active" : ""}`}
               onClick={() => void selectSidebarView("symbols")}
-              data-tooltip="符号与大纲"
-              aria-label="符号与大纲"
+              data-tooltip={t("符号与大纲")}
+              aria-label={t("符号与大纲")}
               aria-pressed={sidebarView === "symbols"}
             >
               <Boxes size={17} />
@@ -2273,9 +2286,9 @@ export default function App() {
             <button
               className={`rail-button ${gitOpen ? "is-active" : ""}`}
               onClick={openGit}
-              aria-label="Git 管理"
+              aria-label={t("Git 管理")}
               aria-pressed={gitOpen}
-              data-tooltip={`Git 管理（${shortcut("Shift+G")}）`}
+              data-tooltip={t("Git 管理（{0}）", shortcut("Shift+G"))}
             >
               <GitBranch size={17} />
             </button>
@@ -2299,8 +2312,8 @@ export default function App() {
                 className="rail-button"
                 onClick={() => setSettingsOpen(true)}
                 disabled={settingsBusy}
-                data-tooltip={`设置（${shortcut(",")}）`}
-                aria-label="设置"
+                data-tooltip={t("设置（{0}）", shortcut(","))}
+                aria-label={t("设置")}
               >
                 <Settings size={16} />
               </button>
@@ -2411,7 +2424,7 @@ export default function App() {
               <Suspense
                 fallback={
                   <div className="reader-state" role="status">
-                    正在加载 Git 工作区…
+                    {t("正在加载 Git 工作区…")}
                   </div>
                 }
               >
@@ -2445,26 +2458,26 @@ export default function App() {
           />
           <footer className="statusbar" hidden={!preferences.showStatusBar}>
             <div className="status-left">
-              {editorStatus?.readOnly && <span className="readonly-badge">只读</span>}
+              {editorStatus?.readOnly && <span className="readonly-badge">{t("只读")}</span>}
               {editorStatus?.saving ? (
-                <span className="status-warning">保存中…</span>
+                <span className="status-warning">{t("保存中…")}</span>
               ) : editorStatus?.autoSavePaused ? (
-                <span className="status-warning">自动保存已暂停</span>
+                <span className="status-warning">{t("自动保存已暂停")}</span>
               ) : editorStatus?.dirty ? (
-                <span className="status-dirty">未保存</span>
+                <span className="status-dirty">{t("未保存")}</span>
               ) : null}
               {navigationBusy ? (
-                <span className="status-warning">正在请求符号服务…</span>
+                <span className="status-warning">{t("正在请求符号服务…")}</span>
               ) : editorStatus ? (
                 <>
                   {preferences.showLanguage && <span>{editorStatus.language}</span>}
                   {preferences.showEncoding && <span>{editorStatus.encoding}</span>}
                   {editorStatus.mode !== "normal" && (
-                    <span className="status-warning">大文件纯文本模式</span>
+                    <span className="status-warning">{t("大文件纯文本模式")}</span>
                   )}
                 </>
               ) : (
-                <span>{snapshot?.projects.length ? "选择文件以开始" : "未导入项目"}</span>
+                <span>{snapshot?.projects.length ? t("选择文件以开始") : t("未导入项目")}</span>
               )}
             </div>
             <div className="status-right">
@@ -2473,15 +2486,17 @@ export default function App() {
                   className="status-terminal"
                   onClick={toggleTerminal}
                   aria-pressed={terminalOpen}
-                  data-tooltip={`终端（${terminalShortcut}）`}
-                  aria-label={`终端（${terminalShortcut}）`}
+                  data-tooltip={t("终端（{0}）", terminalShortcut)}
+                  aria-label={t("终端（{0}）", terminalShortcut)}
                 >
                   <Terminal size={12} />
-                  <span>终端</span>
+                  <span>{t("终端")}</span>
                 </button>
               )}
               {preferences.showLineCount && editorStatus && (
-                <span>{editorStatus.lines.toLocaleString()} 行</span>
+                <span>
+                  {editorStatus.lines.toLocaleString()} {t("行")}
+                </span>
               )}
             </div>
           </footer>
@@ -2490,7 +2505,7 @@ export default function App() {
 
       {settingsOpen && (
         <SettingsDialog
-          settings={{ fonts, colorSchemes, theme, preferences }}
+          settings={{ language, fonts, colorSchemes, theme, preferences }}
           onClose={() => setSettingsOpen(false)}
           onSave={async (next, layout) => {
             await persistSettings(next);
@@ -2556,7 +2571,7 @@ export default function App() {
         <div className="toast" role="status" key={toast.id}>
           <AlertCircle size={15} />
           <span>{toast.message}</span>
-          <button className="toast-close" onClick={() => setToast(null)} aria-label="关闭提示">
+          <button className="toast-close" onClick={() => setToast(null)} aria-label={t("关闭提示")}>
             <X size={13} />
           </button>
         </div>

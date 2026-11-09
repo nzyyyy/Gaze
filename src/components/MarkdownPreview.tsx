@@ -1,3 +1,4 @@
+import { t, useLanguage } from "../lib/i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import Markdown, { type Components } from "react-markdown";
@@ -54,21 +55,33 @@ function MarkdownImage({
   remoteTrusted: boolean;
   onTrustRemote: () => void;
 }) {
+  useLanguage();
   const [failed, setFailed] = useState(false);
-  const label = alt || src || "图片";
+  const label = alt || src || t("图片");
   if (overLimit) {
-    return <span className="markdown-image-fallback">[图片超过预览数量上限：{label}]</span>;
+    return (
+      <span className="markdown-image-fallback">
+        {t("[图片超过预览数量上限：")}
+        {label}]
+      </span>
+    );
   }
   if (failed || !src) {
-    return <span className="markdown-image-fallback">[图片无法显示：{label}]</span>;
+    return (
+      <span className="markdown-image-fallback">
+        {t("[图片无法显示：")}
+        {label}]
+      </span>
+    );
   }
   const remote = /^https?:/i.test(src);
   if (remote && !remoteTrusted) {
     return (
       <span className="markdown-image-fallback">
-        [远程图片已阻止：{label}]{" "}
+        {t("[远程图片已阻止：")}
+        {label}]{" "}
         <button type="button" onClick={onTrustRemote}>
-          允许本项目加载远程图片
+          {t("允许本项目加载远程图片")}
         </button>
       </span>
     );
@@ -105,6 +118,7 @@ export default function MarkdownPreview({
   onOpenFile,
   onNotice,
 }: MarkdownPreviewProps) {
+  useLanguage();
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollToFragment = useCallback(
     (fragment: string) => {
@@ -118,7 +132,7 @@ export default function MarkdownPreview({
         (element) => element.id === fragment || element.id === HEADING_PREFIX + fragment,
       );
       if (target) target.scrollIntoView({ block: "start" });
-      else onNotice("没有找到链接指向的标题。");
+      else onNotice(t("没有找到链接指向的标题。"));
     },
     [onNotice],
   );
@@ -187,7 +201,7 @@ export default function MarkdownPreview({
       className="markdown-preview"
       ref={rootRef}
       role="region"
-      aria-label="Markdown 预览"
+      aria-label={t("Markdown 预览")}
       tabIndex={0}
     >
       <article className="markdown-body">

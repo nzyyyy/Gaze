@@ -1,3 +1,4 @@
+import { t, useLanguage } from "../lib/i18n";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 import { LAYOUT_CHANGE_EVENT, readLayout, saveLayout } from "../lib/layout";
@@ -14,6 +15,7 @@ export function SidebarResizer({
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
 } = {}) {
+  useLanguage();
   const separatorRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ pointerId: number; x: number; width: number } | null>(null);
   const [width, setWidth] = useState(() => readLayout().sidebarWidth);
@@ -93,7 +95,7 @@ export function SidebarResizer({
       ref={separatorRef}
       className="sidebar-resizer"
       role="separator"
-      aria-label="调整项目栏宽度"
+      aria-label={t("调整项目栏宽度")}
       aria-orientation="vertical"
       aria-controls="workspace-sidebar"
       aria-valuemin={onCollapsedChange ? 0 : MIN_WIDTH}

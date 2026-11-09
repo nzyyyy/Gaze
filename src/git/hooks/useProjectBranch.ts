@@ -1,9 +1,11 @@
+import { t as tr, useLanguage } from "../../lib/i18n";
 import { useEffect, useState } from "react";
 import { gitApi } from "../../lib/api";
 import type { Project } from "../../lib/types";
 import { shortOid } from "../types";
 
 export function useProjectBranch(project: Project | null) {
+  const language = useLanguage();
   const projectId = project?.id;
   const root = project?.root;
   const [status, setStatus] = useState<{
@@ -25,7 +27,7 @@ export function useProjectBranch(project: Project | null) {
         repositoryId = repository?.id;
         const branch =
           repository?.branch ||
-          (repository?.headOid ? `分离 HEAD · ${shortOid(repository.headOid)}` : null);
+          (repository?.headOid ? tr("分离 HEAD · {0}", shortOid(repository.headOid)) : null);
         setStatus({ projectId, root, branch });
       } catch {
         if (!disposed && request === version) {
@@ -47,7 +49,7 @@ export function useProjectBranch(project: Project | null) {
       window.removeEventListener("focus", focus);
       void unlisten.then((stop) => stop()).catch(() => {});
     };
-  }, [projectId, root]);
+  }, [projectId, root, language]);
 
   return status?.projectId === projectId && status?.root === root ? (status?.branch ?? null) : null;
 }

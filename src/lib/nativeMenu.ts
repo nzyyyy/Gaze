@@ -33,6 +33,7 @@ export type NativeMenuAction =
   | "implementation";
 
 export interface NativeMenuState {
+  language?: import("./i18n").Language;
   ready: boolean;
   blocked: boolean;
   hasFile: boolean;

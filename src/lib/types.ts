@@ -5,6 +5,7 @@ export interface Project {
 }
 
 export interface WorkspaceSnapshot {
+  language?: import("./i18n").Language;
   projects: Project[];
   activeProjectId: string | null;
   theme: ThemePreference;

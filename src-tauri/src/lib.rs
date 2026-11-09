@@ -153,6 +153,12 @@ impl AppState {
             .await?
             .unwrap_or_else(|| "system".to_string());
         Ok(WorkspaceSnapshot {
+            language: self
+                .cache
+                .setting("language")
+                .await?
+                .and_then(|value| serde_json::from_str(&value).ok())
+                .unwrap_or_default(),
             projects,
             active_project_id,
             theme,

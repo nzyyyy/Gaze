@@ -1,3 +1,4 @@
+import { t, useLanguage } from "../lib/i18n";
 import {
   forwardRef,
   useCallback,
@@ -114,6 +115,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
   }: FileTreeProps,
   ref,
 ) {
+  useLanguage();
   const scrollRef = useRef<HTMLDivElement>(null);
   const treeId = useId();
   const requestVersions = useRef(new Map<string, number>());
@@ -362,7 +364,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
 
   const toggleDirectory = (project: Project, entry: DirEntry) => {
     if (entry.isSymlink) {
-      onNotice("为安全起见，文件树不会递归展开符号链接目录。");
+      onNotice(t("为安全起见，文件树不会递归展开符号链接目录。"));
       return;
     }
     const key = directoryKey(project.id, entry.path);
@@ -502,7 +504,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
   const moreButton = (node: FlatNode) => (
     <button
       className="tree-action"
-      aria-label={`${node.entry?.name ?? node.project.name} 的更多操作`}
+      aria-label={t("{0} 的更多操作", node.entry?.name ?? node.project.name)}
       aria-haspopup="menu"
       onClick={(event) => {
         const rect = event.currentTarget.getBoundingClientRect();
@@ -570,7 +572,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
       const pending = failures.map((item) => item.source!);
       setOperation({ ...operation, entry: pending[0]!, entries: pending });
       throw new Error(
-        `已完成 ${completed.length} 项，失败 ${failures.length} 项。重试仅处理失败项。\n` +
+        t("已完成 {0} 项，失败 {1} 项。重试仅处理失败项。\n", completed.length, failures.length) +
           failures
             .map((item) => `${item.source?.path}：${"error" in item ? item.error : ""}`)
             .join("\n"),
@@ -601,7 +603,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
       );
       onNotice(
         [
-          `已${paths ? "复制" : "粘贴"} ${result.entries.length} 项`,
+          t("已{0} {1} 项", paths ? t("复制") : t("粘贴"), result.entries.length),
           ...result.failures.map((failure) => `${failure.name}：${failure.message}`),
         ].join("\n"),
       );
@@ -643,12 +645,15 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
   return (
     <div className="file-tree-pane">
       <div className="pane-heading">
-        <span>项目{selectedNodes.length > 1 ? ` · 已选 ${selectedNodes.length} 项` : ""}</span>
+        <span>
+          {t("项目")}
+          {selectedNodes.length > 1 ? t(" · 已选 {0} 项", selectedNodes.length) : ""}
+        </span>
         <button
           className="icon-button"
           onClick={onImport}
-          data-tooltip="导入项目"
-          aria-label="导入项目"
+          data-tooltip={t("导入项目")}
+          aria-label={t("导入项目")}
         >
           <Plus size={15} />
         </button>
@@ -656,10 +661,10 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
       {projects.length === 0 ? (
         <div className="pane-empty">
           <Folder size={24} strokeWidth={1.4} />
-          <p>还没有导入项目</p>
+          <p>{t("还没有导入项目")}</p>
           <button className="button button-small" onClick={onImport}>
             <Plus size={14} />
-            导入项目
+            {t("导入项目")}
           </button>
         </div>
       ) : (
@@ -668,7 +673,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
           ref={scrollRef}
           role="tree"
           tabIndex={0}
-          aria-label="项目文件树"
+          aria-label={t("项目文件树")}
           aria-multiselectable="true"
           aria-activedescendant={activeDescendant}
           onKeyDown={(event) => {
@@ -759,7 +764,9 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
                     <button
                       className="tree-disclosure"
                       onClick={() => toggleProject(node.project)}
-                      aria-label={open ? `折叠 ${node.project.name}` : `展开 ${node.project.name}`}
+                      aria-label={
+                        open ? t("折叠 {0}", node.project.name) : t("展开 {0}", node.project.name)
+                      }
                     >
                       <ChevronRight size={14} className={open ? "rotated" : ""} />
                     </button>
@@ -777,8 +784,8 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
                     <button
                       className="tree-action"
                       onClick={() => onRemoveProject(node.project)}
-                      data-tooltip={`从工作区移除 ${node.project.name}`}
-                      aria-label={`从工作区移除 ${node.project.name}`}
+                      data-tooltip={t("从工作区移除 {0}", node.project.name)}
+                      aria-label={t("从工作区移除 {0}", node.project.name)}
                     >
                       <X size={13} />
                     </button>
@@ -789,7 +796,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
                 return (
                   <div className="tree-row tree-message" key={node.key} style={style}>
                     <LoaderCircle size={13} className="spin" />
-                    <span>读取目录…</span>
+                    <span>{t("读取目录…")}</span>
                   </div>
                 );
               }
@@ -832,7 +839,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
                     <button
                       className="tree-disclosure"
                       onClick={() => toggleDirectory(node.project, entry)}
-                      aria-label={`${open ? "折叠" : "展开"} ${entry.name}`}
+                      aria-label={`${open ? t("折叠") : t("展开")} ${entry.name}`}
                     >
                       {entry.isSymlink ? (
                         <Link2 size={13} />
@@ -843,7 +850,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
                     <button
                       className="tree-label"
                       onClick={() => toggleDirectory(node.project, entry)}
-                      data-tooltip={`${entry.isSymlink ? "不展开符号链接目录" : entry.path}${gitStatus ? ` · ${gitStatus.label}` : ""}`}
+                      data-tooltip={`${entry.isSymlink ? t("不展开符号链接目录") : entry.path}${gitStatus ? ` · ${gitStatus.label}` : ""}`}
                     >
                       {entry.isSymlink ? (
                         <Link2 size={15} />

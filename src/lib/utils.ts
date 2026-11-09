@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 export function errorCode(error: unknown): string | null {
   if (error && typeof error === "object" && "code" in error && typeof error.code === "string") {
     return error.code;
@@ -6,13 +7,13 @@ export function errorCode(error: unknown): string | null {
 }
 
 export function errorMessage(error: unknown): string {
-  if (typeof error === "string") return error;
+  if (typeof error === "string") return t(error);
   if (error && typeof error === "object") {
-    if ("message" in error && typeof error.message === "string") return error.message;
-    if ("error" in error && typeof error.error === "string") return error.error;
+    if ("message" in error && typeof error.message === "string") return t(error.message);
+    if ("error" in error && typeof error.error === "string") return t(error.error);
   }
-  if (error instanceof Error) return error.message;
-  return "发生了未知错误。";
+  if (error instanceof Error) return t(error.message);
+  return t("发生了未知错误。");
 }
 
 export function basename(path: string): string {

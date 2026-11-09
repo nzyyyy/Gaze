@@ -1,3 +1,4 @@
+import { t as tr } from "../lib/i18n";
 import type { CodeReaderHandle } from "../components/CodeReader";
 import type { OperationRequest } from "./models";
 import type { OperationOutcome } from "./types";
@@ -65,7 +66,7 @@ export async function prepareEditors(
       locked.push(editor);
       const result = await editor.prepareFileOperation({ save });
       if (result.status !== "saved" && result.status !== "clean")
-        throw new Error(result.message ?? "请先处理文件保存问题。");
+        throw new Error(result.message ?? tr("请先处理文件保存问题。"));
     }
   } catch (error) {
     locked.forEach((editor) => editor.finishFileOperation());

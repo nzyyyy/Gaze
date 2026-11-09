@@ -1,3 +1,4 @@
+import { t, useLanguage } from "../lib/i18n";
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, Folder, LoaderCircle } from "lucide-react";
@@ -51,6 +52,7 @@ export function FileOperationDialog({
   onSubmit: (value: string) => Promise<void>;
   onClose: () => void;
 }) {
+  useLanguage();
   const [name, setName] = useState(operation.kind === "rename" ? operation.entry.name : "");
   const [directory, setDirectory] = useState(
     "entry" in operation ? parentPath(operation.entry.path) : "",
@@ -68,7 +70,7 @@ export function FileOperationDialog({
   const isTrash = operation.kind === "trash";
   const entries = operationEntries(operation);
   const subject =
-    entries.length > 1 ? `所选 ${entries.length} 项` : `「${entries[0]?.path ?? ""}」`;
+    entries.length > 1 ? t("所选 {0} 项", entries.length) : `「${entries[0]?.path ?? ""}」`;
 
   useEffect(() => {
     const previous = document.activeElement;
@@ -161,20 +163,23 @@ export function FileOperationDialog({
         }}
       >
         <div className="dialog-body">
-          <h2 id={titleId}>{titles[operation.kind]}</h2>
+          <h2 id={titleId}>{t(titles[operation.kind])}</h2>
           {isTrash ? (
             <p>
-              将{subject}
-              {entries.some((entry) => entry.isDir && !entry.isSymlink) ? "及其全部内容" : ""}
-              移到系统废纸篓？可在系统废纸篓中恢复。
+              {t("将")}
+              {subject}
+              {entries.some((entry) => entry.isDir && !entry.isSymlink) ? t("及其全部内容") : ""}
+              {t("移到系统废纸篓？可在系统废纸篓中恢复。")}
             </p>
           ) : isMove ? (
             <>
               <p>
-                移动{subject}到：
-                {directory || operation.project.name + "（项目根目录）"}
+                {t("移动")}
+                {subject}
+                {t("到：")}
+                {directory || operation.project.name + t("（项目根目录）")}
               </p>
-              <div className="folder-picker" aria-label="目标文件夹">
+              <div className="folder-picker" aria-label={t("目标文件夹")}>
                 <button
                   type="button"
                   className="button button-small"
@@ -182,12 +187,12 @@ export function FileOperationDialog({
                   onClick={() => setDirectory(parentPath(directory))}
                 >
                   <ChevronLeft size={14} />
-                  上一级
+                  {t("上一级")}
                 </button>
                 {listingError ? (
                   <p role="alert">{listingError}</p>
                 ) : listing?.path !== directory ? (
-                  <p role="status">正在读取文件夹…</p>
+                  <p role="status">{t("正在读取文件夹…")}</p>
                 ) : (
                   <div className="folder-picker-list">
                     {listing.entries
@@ -212,7 +217,7 @@ export function FileOperationDialog({
                         </button>
                       ))}
                     {!listing.entries.some((entry) => entry.isDir && !entry.isSymlink) && (
-                      <p>没有子文件夹</p>
+                      <p>{t("没有子文件夹")}</p>
                     )}
                   </div>
                 )}
@@ -220,7 +225,7 @@ export function FileOperationDialog({
             </>
           ) : (
             <>
-              <label htmlFor={nameId}>名称</label>
+              <label htmlFor={nameId}>{t("名称")}</label>
               <input
                 id={nameId}
                 className="file-name-input"
@@ -234,7 +239,7 @@ export function FileOperationDialog({
             </>
           )}
           {entries.length > 1 && (
-            <ul className="file-operation-selection" aria-label="操作项目">
+            <ul className="file-operation-selection" aria-label={t("操作项目")}>
               {entries.map((entry) => (
                 <li key={entry.path}>{entry.path}</li>
               ))}
@@ -248,7 +253,7 @@ export function FileOperationDialog({
         </div>
         <div className="dialog-actions">
           <button type="button" className="button" disabled={busy} onClick={onClose}>
-            取消
+            {t("取消")}
           </button>
           <button
             type="submit"
@@ -256,7 +261,7 @@ export function FileOperationDialog({
             disabled={busy || !ready || (!isTrash && !isMove && !name.trim())}
           >
             {busy && <LoaderCircle size={13} className="spin" />}
-            {isMove ? "移动到此文件夹" : titles[operation.kind]}
+            {isMove ? t("移动到此文件夹") : t(titles[operation.kind])}
           </button>
         </div>
       </form>

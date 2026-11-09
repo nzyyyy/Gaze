@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createRef } from "react";
-import { EditorView } from "@codemirror/view";
+import { EditorView, showTooltip } from "@codemirror/view";
 import { undo } from "@codemirror/commands";
 import { startCompletion } from "@codemirror/autocomplete";
 import { syntaxTree } from "@codemirror/language";
@@ -48,7 +48,7 @@ import { CodeReader, type CodeReaderHandle, type EditorTab, type SaveResult } fr
 import type { TextFile } from "../lib/types";
 import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
 import type { RecoveryRecord } from "../lib/api";
-import { EditorState } from "@codemirror/state";
+import { EditorState, StateEffect } from "@codemirror/state";
 
 const tab: EditorTab = {
   key: "p1\u0000src/a.ts",
@@ -143,6 +143,47 @@ describe("CodeReader editing", () => {
       size: 20,
     });
   });
+
+  it.each([136, 400, 612])(
+    "keeps tooltips inside the editor viewport near vertical position %s",
+    async (top) => {
+      renderReader();
+      const content = await editorContent();
+      const view = EditorView.findFromDOM(content)!;
+      const viewport = new DOMRect(240, 128, 740, 512);
+      vi.spyOn(view.dom, "getBoundingClientRect").mockReturnValue(viewport);
+      vi.spyOn(view.scrollDOM, "getBoundingClientRect").mockReturnValue(viewport);
+      vi.spyOn(view, "inView", "get").mockReturnValue(true);
+      vi.spyOn(view, "coordsAtPos").mockReturnValue({
+        left: 970,
+        right: 978,
+        top,
+        bottom: top + 20,
+      });
+      vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(1280);
+      vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(800);
+      const dom = document.createElement("div");
+      dom.textContent = "function findUser(id: number): User";
+      vi.spyOn(dom, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 200, 100));
+      act(() =>
+        view.dispatch({
+          effects: StateEffect.appendConfig.of(
+            showTooltip.of({ pos: 0, above: true, create: () => ({ dom }) }),
+          ),
+        }),
+      );
+      await waitFor(() =>
+        expect(dom).toHaveClass(top === 136 ? "cm-tooltip-below" : "cm-tooltip-above"),
+      );
+      const absolute = dom.style.position === "absolute";
+      const tooltipTop = parseFloat(dom.style.top) + (absolute ? viewport.top : 0);
+      const tooltipLeft = parseFloat(dom.style.left) + (absolute ? viewport.left : 0);
+      expect(tooltipTop).toBeGreaterThanOrEqual(viewport.top);
+      expect(tooltipTop + 100).toBeLessThanOrEqual(viewport.bottom);
+      expect(tooltipLeft).toBeGreaterThanOrEqual(viewport.left);
+      expect(tooltipLeft + 200).toBeLessThanOrEqual(viewport.right);
+    },
+  );
 
   it.each(["Mac", "Windows"])(
     "jumps from a %s modifier-click using the clicked UTF-16 position",
@@ -360,13 +401,13 @@ describe("CodeReader editing", () => {
         });
     };
     openSearch();
-    const search = screen.getByRole("textbox", { name: "Find" });
+    const search = screen.getByRole("textbox", { name: "查找" });
     expect(search).toHaveFocus();
     await user.type(search, "value");
     expect(search).toHaveValue("value");
     expect(ref.current!.getText()).toBe("const value = 1;\n");
-    expect(screen.queryByRole("textbox", { name: "Replace" }) !== null).toBe(editable);
-    expect(screen.queryByRole("button", { name: "replace all" }) !== null).toBe(editable);
+    expect(screen.queryByRole("textbox", { name: "替换" }) !== null).toBe(editable);
+    expect(screen.queryByRole("button", { name: "全部替换" }) !== null).toBe(editable);
     openSearch();
     expect(search).toHaveFocus();
     expect(container.querySelectorAll(".cm-search")).toHaveLength(1);

@@ -1,3 +1,4 @@
+import { t, useLanguage } from "../lib/i18n";
 import { AlertCircle, LoaderCircle } from "lucide-react";
 import { useEffect, useId, useRef } from "react";
 
@@ -28,6 +29,7 @@ export function UnsavedDialog({
   onDiscard,
   onCancel,
 }: UnsavedDialogProps) {
+  useLanguage();
   const titleId = useId();
   const messageId = useId();
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -81,7 +83,7 @@ export function UnsavedDialog({
         </div>
         <div className="dialog-actions">
           <button className="button" onClick={onCancel} disabled={busy} ref={cancelRef}>
-            取消
+            {t("取消")}
           </button>
           <button className="button" onClick={onDiscard} disabled={busy}>
             {discardLabel}

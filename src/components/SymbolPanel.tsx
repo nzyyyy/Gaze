@@ -1,3 +1,4 @@
+import { t, useLanguage } from "../lib/i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlertCircle, Boxes, LoaderCircle, Search, Workflow } from "lucide-react";
@@ -40,6 +41,7 @@ export function SymbolPanel({
   onFindImplementations,
   onNotice,
 }: SymbolPanelProps) {
+  useLanguage();
   const [outline, setOutline] = useState<OutlineResult | null>(null);
   const [outlineLoading, setOutlineLoading] = useState(false);
   const [outlineError, setOutlineError] = useState<string | null>(null);
@@ -110,7 +112,7 @@ export function SymbolPanel({
 
   const openSymbol = (symbol: SymbolLocation | DocumentSymbol) => {
     if (!project && "projectId" in symbol) {
-      onNotice("该项目已不在工作区中。");
+      onNotice(t("该项目已不在工作区中。"));
       return;
     }
     const projectId = "projectId" in symbol ? symbol.projectId : project?.id;
@@ -128,13 +130,13 @@ export function SymbolPanel({
   return (
     <div className="symbol-panel">
       <div className="pane-heading">
-        <span>符号</span>
+        <span>{t("符号")}</span>
         <button
           className="icon-button"
           onClick={onFindImplementations}
           disabled={!activeTab || navigationBusy}
-          data-tooltip="查找光标位置的实现"
-          aria-label="查找实现"
+          data-tooltip={t("查找光标位置的实现")}
+          aria-label={t("查找实现")}
         >
           {navigationBusy ? <LoaderCircle size={14} className="spin" /> : <Workflow size={15} />}
         </button>
@@ -152,8 +154,8 @@ export function SymbolPanel({
               setQuery("");
             }
           }}
-          placeholder="搜索项目符号"
-          aria-label="搜索项目符号"
+          placeholder={t("搜索项目符号")}
+          aria-label={t("搜索项目符号")}
           spellCheck={false}
           disabled={!project}
         />
@@ -170,10 +172,10 @@ export function SymbolPanel({
       ) : (
         <>
           <div className="symbol-section-heading">
-            <span>当前文件大纲</span>
+            <span>{t("当前文件大纲")}</span>
             {outline && (
               <span className={`source-badge ${outline.source}`}>
-                {outline.source === "lsp" ? "LSP 精确" : "ctags 文本"}
+                {outline.source === "lsp" ? t("LSP 精确") : t("ctags 文本")}
               </span>
             )}
           </div>
@@ -181,25 +183,25 @@ export function SymbolPanel({
           {outlineLoading ? (
             <div className="pane-message">
               <LoaderCircle size={20} className="spin" />
-              <p>正在读取符号…</p>
+              <p>{t("正在读取符号…")}</p>
             </div>
           ) : outlineError ? (
             <div className="pane-message pane-message-error">
               <AlertCircle size={20} />
-              <p>无法读取大纲</p>
+              <p>{t("无法读取大纲")}</p>
               <span>{outlineError}</span>
             </div>
           ) : !activeTab ? (
             <div className="pane-message">
               <Boxes size={23} strokeWidth={1.4} />
-              <p>没有打开的文件</p>
-              <span>打开文件后查看当前文件大纲。</span>
+              <p>{t("没有打开的文件")}</p>
+              <span>{t("打开文件后查看当前文件大纲。")}</span>
             </div>
           ) : flatOutline.length === 0 ? (
             <div className="pane-message">
               <Boxes size={23} strokeWidth={1.4} />
-              <p>没有可显示的符号</p>
-              <span>该文件可能没有受支持的符号，或符号工具不可用。</span>
+              <p>{t("没有可显示的符号")}</p>
+              <span>{t("该文件可能没有受支持的符号，或符号工具不可用。")}</span>
             </div>
           ) : (
             <OutlineList
@@ -222,6 +224,7 @@ function OutlineList({
   project: Project | null;
   onOpen: (symbol: DocumentSymbol) => void;
 }) {
+  useLanguage();
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
     count: symbols.length,
@@ -230,7 +233,7 @@ function OutlineList({
     overscan: 12,
   });
   return (
-    <div className="symbol-results" ref={scrollRef} role="tree" aria-label="文件大纲">
+    <div className="symbol-results" ref={scrollRef} role="tree" aria-label={t("文件大纲")}>
       <div className="symbol-virtual" style={{ height: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map((row) => {
           const entry = symbols[row.index];
@@ -271,6 +274,7 @@ function ProjectSymbolResults({
   error: string | null;
   onOpen: (symbol: SymbolLocation) => void;
 }) {
+  useLanguage();
   const scrollRef = useRef<HTMLDivElement>(null);
   const symbols = useMemo(() => result?.symbols ?? [], [result]);
   const virtualizer = useVirtualizer({
@@ -284,7 +288,7 @@ function ProjectSymbolResults({
     return (
       <div className="pane-message">
         <LoaderCircle size={20} className="spin" />
-        <p>正在索引并搜索符号…</p>
+        <p>{t("正在索引并搜索符号…")}</p>
       </div>
     );
   }
@@ -292,7 +296,7 @@ function ProjectSymbolResults({
     return (
       <div className="pane-message pane-message-error">
         <AlertCircle size={20} />
-        <p>符号搜索失败</p>
+        <p>{t("符号搜索失败")}</p>
         <span>{error}</span>
       </div>
     );
@@ -301,15 +305,20 @@ function ProjectSymbolResults({
     return (
       <div className="pane-message">
         <Boxes size={23} strokeWidth={1.4} />
-        <p>没有匹配的符号</p>
-        <span>{result?.message ?? "尝试更短或更准确的符号名。"}</span>
+        <p>{t("没有匹配的符号")}</p>
+        <span>{result?.message ?? t("尝试更短或更准确的符号名。")}</span>
       </div>
     );
   }
   return (
     <>
       {result?.message && <div className="symbol-message">{result.message}</div>}
-      <div className="symbol-results" ref={scrollRef} role="list" aria-label="项目符号搜索结果">
+      <div
+        className="symbol-results"
+        ref={scrollRef}
+        role="list"
+        aria-label={t("项目符号搜索结果")}
+      >
         <div className="symbol-virtual" style={{ height: virtualizer.getTotalSize() }}>
           {virtualizer.getVirtualItems().map((row) => {
             const symbol = symbols[row.index];
@@ -333,7 +342,7 @@ function ProjectSymbolResults({
           })}
         </div>
       </div>
-      {result?.indexing && <div className="symbol-indexing">符号索引仍在后台更新</div>}
+      {result?.indexing && <div className="symbol-indexing">{t("符号索引仍在后台更新")}</div>}
     </>
   );
 }

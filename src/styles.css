@@ -671,11 +671,6 @@ button:focus-visible,
   overflow-y: hidden;
   background: transparent;
   scrollbar-width: none;
-  scroll-snap-type: x proximity;
-}
-
-.tab-strip.is-dragging {
-  scroll-snap-type: none;
 }
 
 .tab-tools {
@@ -722,7 +717,6 @@ button:focus-visible,
   border-radius: var(--radius-control);
   color: var(--text-faint);
   background: transparent;
-  scroll-snap-align: start;
   transition: transform 160ms cubic-bezier(0.2, 0, 0, 1);
 }
 

@@ -1,3 +1,4 @@
+import { t, useLanguage } from "../lib/i18n";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 import { LAYOUT_CHANGE_EVENT, readLayout, saveLayout } from "../lib/layout";
@@ -7,11 +8,12 @@ const MIN_PANE_WIDTH = 240;
 
 export function EditorSplitResizer({
   layoutKey = "editorSplitRatio",
-  label = "调整左右编辑区宽度",
+  label = t("调整左右编辑区宽度"),
 }: {
   layoutKey?: "editorSplitRatio" | "gitHistorySplitRatio";
   label?: string;
 } = {}) {
+  useLanguage();
   const separatorRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ pointerId: number; x: number; ratio: number; width: number } | null>(
     null,

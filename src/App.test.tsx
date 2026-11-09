@@ -115,6 +115,66 @@ describe("App", () => {
     apiMock.continueSearch.mockResolvedValue(undefined);
   });
 
+  it("restores the saved language and switches only after saving without rebuilding the editor", async () => {
+    const user = userEvent.setup();
+    apiMock.bootstrapWorkspace.mockResolvedValueOnce({
+      projects: [{ id: "p1", name: "Demo", root: "/demo" }],
+      activeProjectId: "p1",
+      theme: "system",
+      language: "en",
+      fonts: DEFAULT_FONT_SETTINGS,
+    });
+    apiMock.readFile.mockResolvedValue({
+      kind: "text",
+      projectId: "p1",
+      path: "README.md",
+      content: "keep this buffer\n",
+      encoding: "UTF-8",
+      encodingKind: "utf8",
+      lineEnding: "lf",
+      mode: "normal",
+      editable: true,
+      editBlockedReason: null,
+      fingerprint: { size: 17, modifiedNs: "1" },
+      size: 17,
+      warnings: [],
+    });
+    localStorage.setItem(
+      "gaze:session",
+      JSON.stringify({
+        version: 1,
+        tabs: [{ projectId: "p1", path: "README.md" }],
+        active: { projectId: "p1", path: "README.md" },
+      }),
+    );
+    const app = render(<App />);
+    try {
+      await screen.findByRole("button", { name: "Settings" });
+      const editor = await screen.findByRole("textbox", { name: "code file README.md" });
+      const view = EditorView.findFromDOM(editor)!;
+      view.dispatch({ selection: { anchor: 5 } });
+      await user.click(screen.getByRole("button", { name: "Settings" }));
+      await user.click(screen.getByRole("combobox", { name: "Language" }));
+      await user.click(screen.getByRole("option", { name: "简体中文" }));
+      apiMock.saveSettings.mockRejectedValueOnce(new Error("Cannot write settings"));
+      await user.click(screen.getByRole("button", { name: "Save settings" }));
+      expect(screen.getByRole("alert")).toHaveTextContent("Save failed");
+      expect(document.documentElement.lang).toBe("en");
+      await user.click(screen.getByRole("button", { name: "Save settings" }));
+      await waitFor(() => expect(document.documentElement.lang).toBe("zh-CN"));
+      expect(apiMock.saveSettings).toHaveBeenLastCalledWith(
+        expect.objectContaining({ language: "zh-CN" }),
+      );
+      expect(screen.getByRole("textbox", { name: "代码文件 README.md" })).toBe(editor);
+      expect(view.state.doc.toString()).toBe("keep this buffer\n");
+      expect(view.state.selection.main.anchor).toBe(5);
+    } finally {
+      app.unmount();
+      const { setLanguage } = await import("./lib/i18n");
+      act(() => setLanguage("zh-CN"));
+    }
+  });
+
   it("shows the current project before its branch in the title bar and hides the branch without a repository", async () => {
     vi.mocked(gitApi.context).mockResolvedValue({
       repository: { id: 1, branch: "feature/title-bar" },

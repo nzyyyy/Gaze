@@ -37,10 +37,10 @@ it("requests unsaved text with UTF-16 positions and renders safe documentation",
   let tooltip!: ReturnType<Tooltip["create"]>;
   await act(async () => {
     tooltip = tip.create(view);
+    expect(tooltip.dom.querySelector("pre")).toHaveTextContent("function findUser");
+    expect(tooltip.dom.querySelector("strong")).toHaveTextContent("Find user");
     document.body.append(tooltip.dom);
   });
-  expect(tooltip.dom.querySelector("pre")).toHaveTextContent("function findUser");
-  expect(tooltip.dom.querySelector("strong")).toHaveTextContent("Find user");
   expect(tooltip.dom).toHaveTextContent("<img src=x onerror=alert(1)>");
   expect(tooltip.dom.querySelector("img, a, script")).toBeNull();
   await act(async () => tooltip.destroy?.());

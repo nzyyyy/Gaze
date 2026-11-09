@@ -1,3 +1,4 @@
+import { t, useLanguage } from "../lib/i18n";
 import {
   lazy,
   Suspense,
@@ -35,6 +36,7 @@ import {
   keymap,
   lineNumbers,
   rectangularSelection,
+  tooltips,
 } from "@codemirror/view";
 import { AlertCircle, FileQuestion, LoaderCircle, RotateCcw } from "lucide-react";
 
@@ -73,7 +75,7 @@ const MarkdownPreview = lazy(() =>
   import("./MarkdownPreview").catch(() => ({
     default: () => (
       <div className="reader-state" role="alert">
-        预览加载失败，请切回源码或重新打开应用。
+        {t("预览加载失败，请切回源码或重新打开应用。")}
       </div>
     ),
   })),
@@ -298,16 +300,17 @@ function initialExtensions(
     history(),
     EditorState.readOnly.of(!editable),
     EditorView.editable.of(editable),
-    EditorView.contentAttributes.of({
-      "aria-label": `${editable ? "" : "只读"}代码文件 ${fileName}`,
+    EditorView.contentAttributes.of(() => ({
+      "aria-label": t("{0}代码文件 {1}", editable ? "" : t("只读"), fileName),
       spellcheck: "false",
       autocapitalize: "off",
       autocorrect: "off",
-    }),
+    })),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) onDocumentChanged(update.view);
     }),
     search({ top: true }),
+    tooltips({ tooltipSpace: (view) => view.scrollDOM.getBoundingClientRect() }),
     highlightSelectionMatches(),
     keymap.of(keyBindings),
     themeCompartment.of(editorTheme(theme === "dark")),
@@ -349,7 +352,7 @@ function preferenceExtensions(
         foldGutter({
           markerDOM(open) {
             const marker = document.createElement("span");
-            marker.dataset.tooltip = open ? "折叠代码" : "展开代码";
+            marker.dataset.tooltip = open ? t("折叠代码") : t("展开代码");
             marker.setAttribute("aria-label", marker.dataset.tooltip);
             const path = open ? "m3 4.5 3 3 3-3" : "m4.5 3 3 3-3 3";
             marker.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="${path}"/></svg>`;
@@ -380,8 +383,10 @@ export function CodeReader({
   onSaved,
   ref,
 }: EditorSurfaceProps) {
+  const language = useLanguage();
   const surfaceRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const localeCompartment = useRef(new Compartment());
   const themeCompartment = useRef(new Compartment());
   const preferencesCompartment = useRef(new Compartment());
   const preferencesRef = useRef(preferences);
@@ -636,7 +641,7 @@ export function CodeReader({
   const save = useCallback(
     async (options?: { force?: boolean; forFileOperation?: boolean }): Promise<SaveResult> => {
       if (operationLockedRef.current && !options?.forFileOperation) {
-        return { status: "error", message: "文件操作进行中，请稍候。" };
+        return { status: "error", message: t("文件操作进行中，请稍候。") };
       }
       clearAutoSaveTimer();
       if (inFlightRef.current) return inFlightRef.current;
@@ -646,7 +651,7 @@ export function CodeReader({
       if (!document.editable) {
         return {
           status: "readonly",
-          message: document.editBlockedReason ?? "当前文件只支持阅读。",
+          message: document.editBlockedReason ?? t("当前文件只支持阅读。"),
         };
       }
       const text = view.state.doc.toString();
@@ -810,7 +815,7 @@ export function CodeReader({
         if (options?.save === false) return { status: "clean" };
         if (!dirtyRef.current) return { status: "clean" };
         if (pauseReasonRef.current === "conflict" || pauseReasonRef.current === "external") {
-          return { status: "conflict", message: "请先处理文件的磁盘冲突，再执行文件操作。" };
+          return { status: "conflict", message: t("请先处理文件的磁盘冲突，再执行文件操作。") };
         }
         return save({ forFileOperation: true });
       },
@@ -916,6 +921,7 @@ export function CodeReader({
       doc: content.content,
       selection: { anchor: Math.min(operationCursorRef.current ?? 0, normalizedContent.length) },
       extensions: [
+        localeCompartment.current.of([]),
         initialExtensions(
           theme,
           content.editable,
@@ -1024,6 +1030,34 @@ export function CodeReader({
     // The editor is rebuilt only when a document revision is loaded.
     // Theme changes are applied through the theme compartment below.
   }, [loaded, tab.name, clearAutoSaveTimer, resumeAutoSave]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: localeCompartment.current.reconfigure(
+        EditorState.phrases.of(
+          language === "zh-CN"
+            ? {
+                Find: "查找",
+                Replace: "替换",
+                next: "下一个",
+                previous: "上一个",
+                all: "全部",
+                "match case": "区分大小写",
+                "by word": "全字匹配",
+                regexp: "正则表达式",
+                replace: "替换",
+                "replace all": "全部替换",
+                close: "关闭",
+                "current match": "当前匹配",
+                "replaced $ matches": "已替换 $ 处匹配",
+                "replaced match on line $": "已替换第 $ 行的匹配",
+                "on line": "所在行",
+              }
+            : {},
+        ),
+      ),
+    });
+  }, [language, loaded]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -1136,7 +1170,7 @@ export function CodeReader({
 
   useEffect(() => {
     if (externalChangeToken === 0 || !dirtyRef.current) return;
-    pauseAutoSave("external", "该文件已在磁盘上被其他程序修改。");
+    pauseAutoSave("external", t("该文件已在磁盘上被其他程序修改。"));
   }, [externalChangeToken, pauseAutoSave]);
 
   useEffect(() => {
@@ -1182,7 +1216,10 @@ export function CodeReader({
     return (
       <div className="reader-placeholder" aria-live="polite">
         <LoaderCircle className="spin" size={20} />
-        <span>正在读取 {tab.name}…</span>
+        <span>
+          {t("正在读取")}
+          {tab.name}…
+        </span>
       </div>
     );
   }
@@ -1191,11 +1228,11 @@ export function CodeReader({
     return (
       <div className="reader-state" role="alert">
         <AlertCircle size={26} />
-        <h2>无法打开文件</h2>
+        <h2>{t("无法打开文件")}</h2>
         <p>{error}</p>
         <button className="button" onClick={() => setRetryToken((value) => value + 1)}>
           <RotateCcw size={14} />
-          重试
+          {t("重试")}
         </button>
       </div>
     );
@@ -1209,9 +1246,13 @@ export function CodeReader({
     return (
       <div className="reader-state">
         <FileQuestion size={30} />
-        <h2>二进制文件</h2>
+        <h2>{t("二进制文件")}</h2>
         <p>
-          {tab.name} 包含二进制数据（{formatBytes(loaded.content.size)}），不会作为文本渲染。
+          {t(
+            "{0} 包含二进制数据（{1}），不会作为文本渲染。",
+            tab.name,
+            formatBytes(loaded.content.size),
+          )}
         </p>
       </div>
     );
@@ -1221,12 +1262,15 @@ export function CodeReader({
   return (
     <section
       className="reader"
-      aria-label={`${tab.name} ${text.editable ? "代码编辑区" : "只读阅读区"}`}
+      aria-label={`${tab.name} ${text.editable ? t("代码编辑区") : t("只读阅读区")}`}
     >
       {recovery && (
         <div className="reader-notice reader-notice-alert" role="alert">
           <span>
-            发现 {new Date(recovery.updatedAtMs).toLocaleString()} 的未保存修改；当前显示磁盘内容。
+            {t(
+              "发现 {0} 的未保存修改；当前显示磁盘内容。",
+              new Date(recovery.updatedAtMs).toLocaleString(language),
+            )}
           </span>
           <div className="reader-notice-actions">
             <button
@@ -1235,22 +1279,22 @@ export function CodeReader({
               disabled={!text.editable}
               onClick={restoreRecovery}
             >
-              恢复未保存修改
+              {t("恢复未保存修改")}
             </button>
             <button
               type="button"
               className="button button-small"
               onClick={() => void discardRecovery()}
             >
-              放弃恢复
+              {t("放弃恢复")}
             </button>
           </div>
         </div>
       )}
       {markdown && (
-        <div className="markdown-toolbar" role="group" aria-label="Markdown 显示方式">
+        <div className="markdown-toolbar" role="group" aria-label={t("Markdown 显示方式")}>
           {text.mode !== "normal" && (
-            <span className="markdown-mode-hint">大文件或超长行文件仅支持源码阅读</span>
+            <span className="markdown-mode-hint">{t("大文件或超长行文件仅支持源码阅读")}</span>
           )}
           <button
             type="button"
@@ -1258,7 +1302,7 @@ export function CodeReader({
             aria-pressed={!previewVisible}
             onClick={() => setPreview(false)}
           >
-            源码
+            {t("源码")}
           </button>
           <button
             type="button"
@@ -1267,7 +1311,7 @@ export function CodeReader({
             disabled={text.mode !== "normal"}
             onClick={showPreview}
           >
-            预览
+            {t("预览")}
           </button>
         </div>
       )}
@@ -1278,17 +1322,17 @@ export function CodeReader({
       )}
       {!text.editable && text.editBlockedReason && (
         <div className="reader-notice" role="status">
-          {text.editBlockedReason}
+          {t(text.editBlockedReason)}
         </div>
       )}
       {pauseReason && (
         <div className="reader-notice reader-notice-alert" role="alert">
           <span>
             {pauseReason === "conflict"
-              ? (saveError ?? "文件已在磁盘上修改，自动保存已暂停。")
+              ? (saveError ?? t("文件已在磁盘上修改，自动保存已暂停。"))
               : pauseReason === "external"
-                ? (saveError ?? "该文件已在磁盘上被其他程序修改，自动保存已暂停。")
-                : `自动保存失败：${saveError ?? "未知错误"}`}
+                ? (saveError ?? t("该文件已在磁盘上被其他程序修改，自动保存已暂停。"))
+                : t("自动保存失败：{0}", saveError ?? t("未知错误"))}
           </span>
           <div className="reader-notice-actions">
             {pauseReason === "error" && (
@@ -1299,30 +1343,30 @@ export function CodeReader({
                   void save();
                 }}
               >
-                重试
+                {t("重试")}
               </button>
             )}
             {pauseReason !== "error" && (
               <button className="button button-small" onClick={() => void save({ force: true })}>
-                覆盖磁盘文件
+                {t("覆盖磁盘文件")}
               </button>
             )}
             <button className="button button-small" onClick={reloadFromDisk}>
-              重新载入
+              {t("重新载入")}
             </button>
           </div>
         </div>
       )}
       {text.warnings.length > 0 && (
         <div className="reader-notice" role="status">
-          {text.warnings.join(" ")}
+          {text.warnings.map((warning) => t(warning)).join(" ")}
         </div>
       )}
       {previewVisible && (
         <Suspense
           fallback={
             <div className="reader-state" role="status">
-              正在加载 Markdown 预览…
+              {t("正在加载 Markdown 预览…")}
             </div>
           }
         >
@@ -1343,7 +1387,7 @@ export function CodeReader({
       >
         <div className="editor-surface" ref={surfaceRef} />
         {gitBlocks.length > 0 && lineCount > 1 && (
-          <div className="git-change-map" role="group" aria-label="变更位置">
+          <div className="git-change-map" role="group" aria-label={t("变更位置")}>
             {gitBlocks.map((block, index) => {
               const lines = block.kind === "deleted" ? 1 : Math.max(1, block.to - block.from + 1);
               const top = ((Math.max(1, block.from) - 1) / lineCount) * 100;
@@ -1354,8 +1398,8 @@ export function CodeReader({
                   type="button"
                   className={`git-change-tick git-change-tick-${block.kind}`}
                   style={{ top: `${top}%`, height: `${height}%` }}
-                  data-tooltip={`${changeLabel(block)}（第 ${Math.max(1, block.from)} 行）`}
-                  aria-label={`${changeLabel(block)}，跳到第 ${Math.max(1, block.from)} 行`}
+                  data-tooltip={t("{0}（第 {1} 行）", changeLabel(block), Math.max(1, block.from))}
+                  aria-label={t("{0}，跳到第 {1} 行", changeLabel(block), Math.max(1, block.from))}
                   onClick={() => jumpToChange(block)}
                 />
               );
@@ -1367,18 +1411,19 @@ export function CodeReader({
         <div
           className="git-change-popover"
           role="dialog"
-          aria-label="代码变更"
+          aria-label={t("代码变更")}
           style={{ left: changePopup.left, top: changePopup.top }}
         >
           <header>
             <span>{changeLabel(changePopup.block)}</span>
             {changePopup.block.oldLines.length > 0 && (
               <span className="git-change-range">
-                原第 {changePopup.block.oldStart}
+                {t("原第")}
+                {changePopup.block.oldStart}
                 {changePopup.block.oldLines.length > 1
                   ? `–${changePopup.block.oldStart + changePopup.block.oldLines.length - 1}`
                   : ""}{" "}
-                行
+                {t("行")}
               </span>
             )}
           </header>
@@ -1392,19 +1437,19 @@ export function CodeReader({
               ))}
             </div>
           ) : (
-            <p className="git-change-empty">这段代码为新增内容，没有更早的版本。</p>
+            <p className="git-change-empty">{t("这段代码为新增内容，没有更早的版本。")}</p>
           )}
           <footer>
             <button
               className="button button-small"
               onClick={() => revertChange(changePopup.block)}
               disabled={!text.editable}
-              data-tooltip={text.editable ? "用原始代码替换此处内容" : "只读文件无法撤销更改"}
+              data-tooltip={text.editable ? t("用原始代码替换此处内容") : t("只读文件无法撤销更改")}
             >
-              撤销此更改
+              {t("撤销此更改")}
             </button>
             <button className="button button-small" onClick={() => setChangePopup(null)}>
-              关闭
+              {t("关闭")}
             </button>
           </footer>
         </div>
@@ -1416,9 +1461,9 @@ export function CodeReader({
 function changeLabel(block: ChangeBlock): string {
   const added = block.newLines.length;
   const removed = block.oldLines.length;
-  if (block.kind === "added") return `新增 ${added} 行`;
-  if (block.kind === "deleted") return `删除 ${removed} 行`;
-  return `修改 ${added} 行（原 ${removed} 行）`;
+  if (block.kind === "added") return t("新增 {0} 行", added);
+  if (block.kind === "deleted") return t("删除 {0} 行", removed);
+  return t("修改 {0} 行（原 {1} 行）", added, removed);
 }
 
 function applyReveal(view: EditorView, request: RevealRequest) {

@@ -1,3 +1,4 @@
+import { t, useLanguage } from "../lib/i18n";
 import { useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { CornerDownLeft, MapPin, X } from "lucide-react";
@@ -20,6 +21,7 @@ export function LocationPicker({
   onClose,
   onSelect,
 }: LocationPickerProps) {
+  useLanguage();
   const scrollRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState(0);
@@ -86,10 +88,12 @@ export function LocationPicker({
           <MapPin size={16} className="quick-open-icon" />
           <span className="location-title">{title}</span>
           <span className={`source-badge ${result.source}`}>
-            {result.source === "lsp" ? "LSP 精确" : "ctags 文本候选"}
+            {result.source === "lsp" ? t("LSP 精确") : t("ctags 文本候选")}
           </span>
-          <span className="location-count">{locations.length} 个位置</span>
-          <button className="icon-button" onClick={onClose} aria-label="关闭">
+          <span className="location-count">
+            {locations.length} {t("个位置")}
+          </span>
+          <button className="icon-button" onClick={onClose} aria-label={t("关闭")}>
             <X size={15} />
           </button>
         </div>
@@ -99,8 +103,8 @@ export function LocationPicker({
         {locations.length === 0 ? (
           <div className="palette-empty">
             <MapPin size={23} strokeWidth={1.4} />
-            <p>没有可跳转的位置</p>
-            <span>{result.message ?? "当前符号没有返回结果。"}</span>
+            <p>{t("没有可跳转的位置")}</p>
+            <span>{result.message ?? t("当前符号没有返回结果。")}</span>
           </div>
         ) : (
           <div className="location-results" ref={scrollRef} role="listbox" aria-label={title}>
@@ -128,7 +132,7 @@ export function LocationPicker({
                         {location.name || location.path.split("/").pop()}
                       </span>
                       <span className="location-file">
-                        {projectNames.get(location.projectId) ?? "未知项目"} / {location.path}
+                        {projectNames.get(location.projectId) ?? t("未知项目")} / {location.path}
                         <span className="symbol-line">:{location.line + 1}</span>
                       </span>
                     </span>
@@ -141,10 +145,12 @@ export function LocationPicker({
         )}
 
         <div className="quick-open-footer">
-          <span>{result.message ?? "选择位置后跳到对应代码"}</span>
+          <span>{result.message ?? t("选择位置后跳到对应代码")}</span>
           <span className="palette-hints">
             <kbd>↑</kbd>
-            <kbd>↓</kbd> 导航 <kbd>↵</kbd> 打开 <kbd>Esc</kbd> 关闭
+            <kbd>↓</kbd> {t("导航")}
+            <kbd>↵</kbd> {t("打开")}
+            <kbd>Esc</kbd> {t("关闭")}
           </span>
         </div>
       </div>

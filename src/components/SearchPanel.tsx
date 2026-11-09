@@ -1,3 +1,4 @@
+import { t, useLanguage } from "../lib/i18n";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlertCircle, LoaderCircle, RotateCcw, Search, SearchX } from "lucide-react";
@@ -54,6 +55,7 @@ export function SearchPanel({
   onUndoReplace,
   onCancelReplace,
 }: SearchPanelProps) {
+  useLanguage();
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -184,7 +186,7 @@ export function SearchPanel({
         0,
       );
       if (applied > 0) setUndoAvailable(true);
-      setReplaceMessage(`已替换 ${applied} 处；${outcomes.length} 个文件已处理。`);
+      setReplaceMessage(t("已替换 {0} 处；{1} 个文件已处理。", applied, outcomes.length));
       const failures = outcomes.filter((item) => item.status !== "applied");
       if (failures.length > 0)
         setReplaceError(
@@ -212,7 +214,7 @@ export function SearchPanel({
       const restored = result.outcomes.filter((item) => item.status === "applied").length;
       const failures = result.outcomes.filter((item) => item.status !== "applied");
       setUndoAvailable(failures.length > 0);
-      setReplaceMessage(`已恢复 ${restored} 个文件。`);
+      setReplaceMessage(t("已恢复 {0} 个文件。", restored));
       if (failures.length > 0)
         setReplaceError(
           failures.map((item) => `${item.path}：${item.message ?? item.status}`).join("\n"),
@@ -239,7 +241,7 @@ export function SearchPanel({
   return (
     <div className="search-panel">
       <div className="pane-heading">
-        <span>全局搜索</span>
+        <span>{t("全局搜索")}</span>
         {state.received > 0 && <span className="pane-count">{state.results.length}</span>}
       </div>
       <div className="search-input-wrap">
@@ -256,20 +258,20 @@ export function SearchPanel({
               setQuery("");
             }
           }}
-          placeholder="在工作区中搜索"
-          aria-label="在工作区中搜索"
+          placeholder={t("在工作区中搜索")}
+          aria-label={t("在工作区中搜索")}
           disabled={!enabled || controlsLocked}
           spellCheck={false}
         />
         {state.status === "running" && <LoaderCircle size={13} className="spin search-spinner" />}
       </div>
-      <div className="search-options" aria-label="搜索选项">
+      <div className="search-options" aria-label={t("搜索选项")}>
         <button
           className={`option-toggle ${caseSensitive ? "is-on" : ""}`}
           onClick={() => setCaseSensitive((value) => !value)}
           aria-pressed={caseSensitive}
-          data-tooltip="区分大小写"
-          aria-label="区分大小写"
+          data-tooltip={t("区分大小写")}
+          aria-label={t("区分大小写")}
           disabled={!enabled || controlsLocked}
         >
           Aa
@@ -278,8 +280,8 @@ export function SearchPanel({
           className={`option-toggle ${regex ? "is-on" : ""}`}
           onClick={() => setRegex((value) => !value)}
           aria-pressed={regex}
-          data-tooltip="使用正则表达式"
-          aria-label="使用正则表达式"
+          data-tooltip={t("使用正则表达式")}
+          aria-label={t("使用正则表达式")}
           disabled={!enabled || controlsLocked}
         >
           .*
@@ -289,39 +291,40 @@ export function SearchPanel({
           className={`option-toggle option-text ${includeHidden ? "is-on" : ""}`}
           onClick={() => setIncludeHidden((value) => !value)}
           aria-pressed={includeHidden}
-          data-tooltip="包含隐藏文件"
-          aria-label="包含隐藏文件"
+          data-tooltip={t("包含隐藏文件")}
+          aria-label={t("包含隐藏文件")}
           disabled={!enabled || controlsLocked}
         >
-          隐藏
+          {t("隐藏")}
         </button>
         <button
           className={`option-toggle option-text ${includeIgnored ? "is-on" : ""}`}
           onClick={() => setIncludeIgnored((value) => !value)}
           aria-pressed={includeIgnored}
-          data-tooltip="包含被 .gitignore 忽略的文件"
-          aria-label="包含被 .gitignore 忽略的文件"
+          data-tooltip={t("包含被 .gitignore 忽略的文件")}
+          aria-label={t("包含被 .gitignore 忽略的文件")}
           disabled={!enabled || controlsLocked}
         >
-          忽略
+          {t("忽略")}
         </button>
       </div>
       <div className="search-scope">
         <select
-          aria-label="搜索范围"
+          aria-label={t("搜索范围")}
           value={scope}
           disabled={controlsLocked}
           onChange={(event) => setScope(event.target.value as "all" | "current")}
         >
-          <option value="all">全部项目</option>
+          <option value="all">{t("全部项目")}</option>
           <option value="current" disabled={!activeProject}>
-            当前项目{activeProject ? `：${activeProject.name}` : ""}
+            {t("当前项目")}
+            {activeProject ? `：${activeProject.name}` : ""}
           </option>
         </select>
         <input
           className="search-input"
-          aria-label="包含文件"
-          placeholder="包含 glob，如 src/**, *.ts"
+          aria-label={t("包含文件")}
+          placeholder={t("包含 glob，如 src/**, *.ts")}
           value={includeGlobs}
           disabled={controlsLocked}
           onChange={(event) => setIncludeGlobs(event.target.value)}
@@ -329,8 +332,8 @@ export function SearchPanel({
         />
         <input
           className="search-input"
-          aria-label="排除文件"
-          placeholder="排除 glob，如 dist/**, *.log"
+          aria-label={t("排除文件")}
+          placeholder={t("排除 glob，如 dist/**, *.log")}
           value={excludeGlobs}
           disabled={controlsLocked}
           onChange={(event) => setExcludeGlobs(event.target.value)}
@@ -342,8 +345,8 @@ export function SearchPanel({
         <div className="replace-box">
           <input
             className="search-input"
-            aria-label="替换为"
-            placeholder="替换为"
+            aria-label={t("替换为")}
+            placeholder={t("替换为")}
             value={replacement}
             onChange={(event) => setReplacement(event.target.value)}
             disabled={!enabled || controlsLocked}
@@ -355,7 +358,11 @@ export function SearchPanel({
               onClick={() => void previewReplacement()}
               disabled={!enabled || !query.trim() || replaceBusy !== null}
             >
-              {replaceBusy === "preview" ? <LoaderCircle size={13} className="spin" /> : "预览替换"}
+              {replaceBusy === "preview" ? (
+                <LoaderCircle size={13} className="spin" />
+              ) : (
+                t("预览替换")
+              )}
             </button>
             <button
               className="button button-small button-primary"
@@ -368,7 +375,11 @@ export function SearchPanel({
                 selectedFiles.size === 0
               }
             >
-              {replaceBusy === "apply" ? <LoaderCircle size={13} className="spin" /> : "应用替换"}
+              {replaceBusy === "apply" ? (
+                <LoaderCircle size={13} className="spin" />
+              ) : (
+                t("应用替换")
+              )}
             </button>
             {undoAvailable && onUndoReplace && (
               <button
@@ -379,7 +390,7 @@ export function SearchPanel({
                 {replaceBusy === "undo" ? (
                   <LoaderCircle size={13} className="spin" />
                 ) : (
-                  "撤销上次替换"
+                  t("撤销上次替换")
                 )}
               </button>
             )}
@@ -389,26 +400,30 @@ export function SearchPanel({
                 onClick={cancelPreview}
                 disabled={replaceBusy === "apply"}
               >
-                取消替换
+                {t("取消替换")}
               </button>
             )}
           </div>
           {replacePreview && (
             <div className="replace-preview">
               <p>
-                {replacePreview.files.length} 个文件，
-                {replacePreview.files.reduce((count, file) => count + file.matchCount, 0)} 处匹配
+                {replacePreview.files.length} {t("个文件，")}
+                {replacePreview.files.reduce((count, file) => count + file.matchCount, 0)}{" "}
+                {t("处匹配")}
               </p>
               {replacePreview.truncated && (
-                <p className="search-truncated">结果过多，已禁止应用；请缩小范围。</p>
+                <p className="search-truncated">{t("结果过多，已禁止应用；请缩小范围。")}</p>
               )}
-              <p>已选择 {selectedFiles.size} 个文件</p>
+              <p>
+                {t("已选择")}
+                {selectedFiles.size} {t("个文件")}
+              </p>
               {replacePreview.files.map((file) => (
                 <div className="replace-file" key={`${file.projectId}:${file.path}`}>
                   <label>
                     <input
                       type="checkbox"
-                      aria-label={`替换 ${file.projectId}/${file.path}`}
+                      aria-label={t("替换 {0}/{1}", file.projectId, file.path)}
                       checked={selectedFiles.has(tabKey(file.projectId, file.path))}
                       disabled={replaceBusy !== null || replacePreview.truncated}
                       onChange={(event) => {
@@ -453,24 +468,24 @@ export function SearchPanel({
       {!enabled ? (
         <div className="pane-message">
           <AlertCircle size={20} />
-          <p>未找到 ripgrep（rg）</p>
-          <span>请安装 ripgrep，或在应用配置文件的 tools.rg 中填写路径。</span>
+          <p>{t("未找到 ripgrep（rg）")}</p>
+          <span>{t("请安装 ripgrep，或在应用配置文件的 tools.rg 中填写路径。")}</span>
         </div>
       ) : state.status === "error" ? (
         <div className="pane-message pane-message-error" role="alert">
           <AlertCircle size={20} />
-          <p>搜索失败</p>
+          <p>{t("搜索失败")}</p>
           <span>{state.error}</span>
           <button className="button button-small" onClick={retry}>
             <RotateCcw size={13} />
-            重试
+            {t("重试")}
           </button>
         </div>
       ) : query.trim().length === 0 ? (
         <div className="pane-message">
           <SearchX size={22} strokeWidth={1.4} />
-          <p>搜索项目内容</p>
-          <span>使用普通文本或正则表达式，结果会随输入流式出现。</span>
+          <p>{t("搜索项目内容")}</p>
+          <span>{t("使用普通文本或正则表达式，结果会随输入流式出现。")}</span>
         </div>
       ) : (
         <>
@@ -485,17 +500,17 @@ export function SearchPanel({
           <div className="search-footer">
             <span>
               {state.status === "paused"
-                ? `已加载 ${state.received.toLocaleString()} 条`
+                ? t("已加载 {0} 条", state.received.toLocaleString())
                 : state.status === "done"
-                  ? `${state.received.toLocaleString()} 条结果`
+                  ? t("{0} 条结果", state.received.toLocaleString())
                   : state.status === "running"
-                    ? "搜索中…"
-                    : "等待输入"}
+                    ? t("搜索中…")
+                    : t("等待输入")}
             </span>
-            {state.truncated && <span className="search-truncated">已达到结果上限</span>}
+            {state.truncated && <span className="search-truncated">{t("已达到结果上限")}</span>}
             {state.status === "paused" && (
               <button className="button button-small" onClick={loadMore}>
-                加载更多
+                {t("加载更多")}
               </button>
             )}
           </div>
@@ -512,6 +527,7 @@ interface SearchResultListProps {
 }
 
 function SearchResultList({ hits, waiting, onOpen }: SearchResultListProps) {
+  useLanguage();
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
     count: hits.length,
@@ -524,7 +540,7 @@ function SearchResultList({ hits, waiting, onOpen }: SearchResultListProps) {
     return (
       <div className="pane-message">
         <LoaderCircle size={20} className="spin" />
-        <p>正在搜索…</p>
+        <p>{t("正在搜索…")}</p>
       </div>
     );
   }
@@ -533,14 +549,14 @@ function SearchResultList({ hits, waiting, onOpen }: SearchResultListProps) {
     return (
       <div className="pane-message">
         <SearchX size={22} strokeWidth={1.4} />
-        <p>没有找到匹配内容</p>
-        <span>尝试更短的文本，或打开“隐藏/忽略”。</span>
+        <p>{t("没有找到匹配内容")}</p>
+        <span>{t("尝试更短的文本，或打开“隐藏/忽略”。")}</span>
       </div>
     );
   }
 
   return (
-    <div className="search-results" ref={scrollRef} role="list" aria-label="搜索结果">
+    <div className="search-results" ref={scrollRef} role="list" aria-label={t("搜索结果")}>
       <div className="search-results-virtual" style={{ height: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map((row) => {
           const hit = hits[row.index];

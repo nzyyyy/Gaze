@@ -1,3 +1,4 @@
+import { t, useLanguage, DEFAULT_LANGUAGE, type Language } from "../lib/i18n";
 import { LoaderCircle, Search, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -70,6 +71,7 @@ const LAYOUT_FIELDS = [
 ] as const;
 
 export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProps) {
+  useLanguage();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState(settings);
@@ -81,7 +83,7 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
   const search = query.trim().toLowerCase();
   const matches = (id: SettingsCategory, text: string) =>
     search
-      ? `${SETTINGS_CATEGORIES.find((item) => item.id === id)!.label} ${text}`
+      ? `${t(SETTINGS_CATEGORIES.find((item) => item.id === id)!.label)} ${text}`
           .toLowerCase()
           .includes(search)
       : category === id;
@@ -102,36 +104,53 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
 
   const sections = SETTINGS_CATEGORIES.map(({ id, label }) => {
     const fields = PREFERENCE_FIELDS.filter(
-      (field) => field.category === id && matches(id, `${field.label} ${field.description}`),
+      (field) => field.category === id && matches(id, `${t(field.label)} ${t(field.description)}`),
     );
     const fonts = AREAS.filter(
       (area) =>
         (area.key === "ui" ? "appearance" : area.key) === id &&
-        matches(id, `${area.label} 字体 Maple Consolas`),
+        matches(id, t("{0} 字体 Maple Consolas", t(area.label))),
     );
-    const colors = id === "appearance" && matches(id, "日间 夜间 配色 GitHub Catppuccin Nord Gaze");
-    const mode = id === "appearance" && matches(id, "主题 模式 跟随系统 日间 夜间");
-    const cursor = id === "terminal" && matches(id, "光标样式 方块 竖线 下划线");
-    const sizes = id === "layout" ? LAYOUT_FIELDS.filter((field) => matches(id, field.label)) : [];
-    if (!fields.length && !fonts.length && !colors && !mode && !cursor && !sizes.length)
+    const colors =
+      id === "appearance" && matches(id, t("日间 夜间 配色 GitHub Catppuccin Nord Gaze"));
+    const locale = id === "appearance" && matches(id, t("语言") + " language 中文 English");
+    const mode = id === "appearance" && matches(id, t("主题 模式 跟随系统 日间 夜间"));
+    const cursor = id === "terminal" && matches(id, t("光标样式 方块 竖线 下划线"));
+    const sizes =
+      id === "layout" ? LAYOUT_FIELDS.filter((field) => matches(id, t(field.label))) : [];
+    if (!fields.length && !fonts.length && !colors && !mode && !locale && !cursor && !sizes.length)
       return null;
     return (
       <section className="settings-section" key={id} aria-labelledby={`settings-${id}-title`}>
-        <h3 id={`settings-${id}-title`}>{label}</h3>
+        <h3 id={`settings-${id}-title`}>{t(label)}</h3>
+        {locale && (
+          <SettingRow id="language" label={t("语言")} description={t("选择界面语言，保存后生效。")}>
+            <Select<Language>
+              id="language"
+              value={draft.language}
+              describedBy="language-description"
+              options={[
+                { value: "zh-CN", label: "简体中文" },
+                { value: "en", label: "English" },
+              ]}
+              onChange={(language) => setDraft({ ...draft, language })}
+            />
+          </SettingRow>
+        )}
         {mode && (
           <SettingRow
             id="theme-mode"
-            label="主题模式"
-            description="选择日间、夜间，或随系统外观自动切换。"
+            label={t("主题模式")}
+            description={t("选择日间、夜间，或随系统外观自动切换。")}
           >
             <Select<AppSettings["theme"]>
               id="theme-mode"
               value={draft.theme}
               describedBy="theme-mode-description"
               options={[
-                { value: "system", label: "跟随系统" },
-                { value: "light", label: "日间模式" },
-                { value: "dark", label: "夜间模式" },
+                { value: "system", label: t("跟随系统") },
+                { value: "light", label: t("日间模式") },
+                { value: "dark", label: t("夜间模式") },
               ]}
               onChange={(theme) => setDraft({ ...draft, theme })}
             />
@@ -139,10 +158,10 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
         )}
         {colors && (
           <div className="settings-color-section">
-            <p className="settings-description">日间与夜间分别选择配色，保存后生效。</p>
+            <p className="settings-description">{t("日间与夜间分别选择配色，保存后生效。")}</p>
             {(["light", "dark"] as const).map((mode) => (
               <fieldset className="settings-colors" key={mode}>
-                <legend>{mode === "light" ? "日间配色" : "夜间配色"}</legend>
+                <legend>{mode === "light" ? t("日间配色") : t("夜间配色")}</legend>
                 <div className="color-scheme-options">
                   {(Object.keys(COLOR_SCHEME_NAMES) as ColorScheme[]).map((scheme) => {
                     const palette = PALETTES[scheme][mode];
@@ -171,7 +190,7 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
                           <span style={{ background: palette.sidebar }} />
                           Aa <i style={{ background: palette.accent }} />
                         </span>
-                        <span>{COLOR_SCHEME_NAMES[scheme][mode]}</span>
+                        <span>{t(COLOR_SCHEME_NAMES[scheme][mode])}</span>
                       </button>
                     );
                   })}
@@ -184,17 +203,17 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
           <SettingRow
             key={key}
             id={`font-${key}`}
-            label={`${label}字体`}
-            description="Maple 已内置；Consolas 缺失时回退到 Maple。"
+            label={t("{0}字体", t(label))}
+            description={t("Maple 已内置；Consolas 缺失时回退到 Maple。")}
           >
             <Select<FontChoice>
               id={`font-${key}`}
               value={draft.fonts[key]}
               describedBy={`font-${key}-description`}
               options={[
-                { value: "system", label: key === "ui" ? "系统默认" : "原有等宽字体" },
-                { value: "maple", label: "Maple Mono NF CN（内置）" },
-                { value: "consolas", label: "Consolas（本机字体）" },
+                { value: "system", label: key === "ui" ? t("系统默认") : t("原有等宽字体") },
+                { value: "maple", label: t("Maple Mono NF CN（内置）") },
+                { value: "consolas", label: t("Consolas（本机字体）") },
               ]}
               onChange={(value) => setDraft({ ...draft, fonts: { ...draft.fonts, [key]: value } })}
             />
@@ -210,8 +229,8 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
           <SettingRow
             key={field.key}
             id={field.key}
-            label={field.label}
-            description={field.description}
+            label={t(field.label)}
+            description={t(field.description)}
           >
             {field.type === "boolean" ? (
               <input
@@ -240,15 +259,19 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
           </SettingRow>
         ))}
         {cursor && (
-          <SettingRow id="terminalCursorStyle" label="光标样式" description="选择终端的光标形状。">
+          <SettingRow
+            id="terminalCursorStyle"
+            label={t("光标样式")}
+            description={t("选择终端的光标形状。")}
+          >
             <Select<Preferences["terminalCursorStyle"]>
               id="terminalCursorStyle"
               value={draft.preferences.terminalCursorStyle}
               describedBy="terminalCursorStyle-description"
               options={[
-                { value: "block", label: "方块" },
-                { value: "bar", label: "竖线" },
-                { value: "underline", label: "下划线" },
+                { value: "block", label: t("方块") },
+                { value: "bar", label: t("竖线") },
+                { value: "underline", label: t("下划线") },
               ]}
               onChange={(value) => updatePreference("terminalCursorStyle", value)}
             />
@@ -258,8 +281,12 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
           <SettingRow
             key={field.key}
             id={field.key}
-            label={field.label}
-            description={`单位 px；实际尺寸会根据窗口可用空间自动限制。范围 ${field.min}–${field.max}。`}
+            label={t(field.label)}
+            description={t(
+              "单位 px；实际尺寸会根据窗口可用空间自动限制。范围 {0}–{1}。",
+              field.min,
+              field.max,
+            )}
           >
             <input
               id={field.key}
@@ -276,7 +303,7 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
         ))}
         {fonts.length > 0 && (
           <details className="settings-license">
-            <summary>Maple Mono 字体许可</summary>
+            <summary>{t("Maple Mono 字体许可")}</summary>
             <pre>{mapleLicense}</pre>
           </details>
         )}
@@ -307,7 +334,7 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
                 layout[field.key] < field.min ||
                 layout[field.key] > field.max,
             )
-              ? "面板尺寸超出允许范围，请检查窗口与布局设置。"
+              ? t("面板尺寸超出允许范围，请检查窗口与布局设置。")
               : null);
           if (invalid) {
             setError(invalid);
@@ -319,7 +346,7 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
             await onSave(draft, layout);
             onClose();
           } catch (error) {
-            setError(`保存失败：${errorMessage(error)}`);
+            setError(t("保存失败：{0}", errorMessage(error)));
           } finally {
             setBusy(false);
           }
@@ -327,13 +354,13 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
       >
         <header className="settings-header">
           <div>
-            <h2 id="settings-title">设置</h2>
-            <p>自定义你的阅读与编辑环境</p>
+            <h2 id="settings-title">{t("设置")}</h2>
+            <p>{t("自定义你的阅读与编辑环境")}</p>
           </div>
           <button
             type="button"
             className="icon-button"
-            aria-label="关闭设置"
+            aria-label={t("关闭设置")}
             onClick={onClose}
             disabled={busy}
           >
@@ -346,8 +373,8 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
               <Search size={14} aria-hidden="true" />
               <input
                 type="search"
-                aria-label="搜索设置"
-                placeholder="搜索设置…"
+                aria-label={t("搜索设置")}
+                placeholder={t("搜索设置…")}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") event.preventDefault();
                 }}
@@ -358,7 +385,7 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
                 }}
               />
             </div>
-            <nav aria-label="设置分类">
+            <nav aria-label={t("设置分类")}>
               {SETTINGS_CATEGORIES.map((item) => (
                 <button
                   type="button"
@@ -370,16 +397,17 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
                     if (contentRef.current) contentRef.current.scrollTop = 0;
                   }}
                 >
-                  {item.label}
+                  {t(item.label)}
                 </button>
               ))}
             </nav>
-            <p className="settings-sidebar-note">更改会在保存后生效</p>
+            <p className="settings-sidebar-note">{t("更改会在保存后生效")}</p>
           </aside>
           <div className="settings-content" ref={contentRef}>
             {search && (
               <p className="settings-search-summary" role="status">
-                搜索“{query.trim()}”
+                {t("搜索“")}
+                {query.trim()}”
               </p>
             )}
             <fieldset className="settings-controls" disabled={busy}>
@@ -387,7 +415,7 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
                 sections
               ) : (
                 <p className="settings-empty" role="status">
-                  没有匹配的设置，试试“字体”“换行”或“终端”。
+                  {t("没有匹配的设置，试试“字体”“换行”或“终端”。")}
                 </p>
               )}
             </fieldset>
@@ -405,6 +433,7 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
             disabled={busy}
             onClick={() => {
               setDraft({
+                language: DEFAULT_LANGUAGE,
                 theme: "system",
                 fonts: { ...DEFAULT_FONT_SETTINGS },
                 colorSchemes: { ...DEFAULT_COLOR_SCHEMES },
@@ -414,15 +443,15 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
               setError(null);
             }}
           >
-            恢复默认
+            {t("恢复默认")}
           </button>
           <span />
           <button type="button" className="button" onClick={onClose} disabled={busy}>
-            取消
+            {t("取消")}
           </button>
           <button type="submit" className="button button-primary" disabled={busy}>
             {busy && <LoaderCircle size={13} className="spin" />}
-            {busy ? "保存中…" : "保存设置"}
+            {busy ? t("保存中…") : t("保存设置")}
           </button>
         </footer>
       </form>

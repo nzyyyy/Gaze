@@ -6,6 +6,8 @@ use crate::preferences::ThemePreference;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub struct NativeMenuState {
+    #[serde(default)]
+    language: crate::preferences::Language,
     ready: bool,
     blocked: bool,
     has_file: bool,
@@ -54,6 +56,71 @@ impl NativeMenuState {
             _ => return None,
         })
     }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn menu_text(text: &str, language: crate::preferences::Language) -> &str {
+    const LABELS: &[(&str, &str)] = &[
+        ("关于 Gaze", "About Gaze"),
+        ("设置…", "Settings…"),
+        ("服务", "Services"),
+        ("隐藏 Gaze", "Hide Gaze"),
+        ("隐藏其他", "Hide Others"),
+        ("全部显示", "Show All"),
+        ("退出 Gaze", "Quit Gaze"),
+        ("文件", "File"),
+        ("打开文件…", "Open File…"),
+        ("导入项目目录…", "Import Project Directory…"),
+        ("保存", "Save"),
+        ("关闭标签页", "Close Tab"),
+        ("自动保存", "Auto save"),
+        ("编辑", "Edit"),
+        ("撤销", "Undo"),
+        ("重做", "Redo"),
+        ("剪切", "Cut"),
+        ("复制", "Copy"),
+        ("粘贴", "Paste"),
+        ("全选", "Select All"),
+        ("文件内查找", "Find in File"),
+        ("工作区搜索", "Search Workspace"),
+        ("主题", "Theme"),
+        ("跟随系统", "Follow system"),
+        ("浅色", "Light"),
+        ("深色", "Dark"),
+        ("视图", "View"),
+        ("文件侧栏", "Files Sidebar"),
+        ("搜索侧栏", "Search Sidebar"),
+        ("符号与大纲", "Symbols and outline"),
+        ("Git 管理", "Git workspace"),
+        ("终端", "Terminal"),
+        ("切换右侧编辑区", "Toggle Right Editor Pane"),
+        ("自动换行", "Word wrap"),
+        ("显示行号", "Show line numbers"),
+        ("显示状态栏", "Show status bar"),
+        ("前往", "Go"),
+        ("后退", "Back"),
+        ("前进", "Forward"),
+        ("快速打开", "Quick open"),
+        ("跳转到定义", "Go to Definition"),
+        ("查找引用", "Find References"),
+        ("查找实现", "Find implementations"),
+        ("窗口", "Window"),
+        ("最小化", "Minimize"),
+        ("缩放", "Zoom"),
+        ("进入全屏", "Enter Full Screen"),
+        ("将全部窗口置于前端", "Bring All to Front"),
+    ];
+    LABELS
+        .iter()
+        .find(|(zh, en)| text == *zh || text == *en)
+        .map(|(zh, en)| {
+            if language == crate::preferences::Language::English {
+                *en
+            } else {
+                *zh
+            }
+        })
+        .unwrap_or(text)
 }
 
 #[cfg(target_os = "macos")]
@@ -234,7 +301,35 @@ mod macos {
         Ok(())
     }
 
+    fn localize(
+        entries: Vec<MenuItemKind<tauri::Wry>>,
+        language: crate::preferences::Language,
+    ) -> tauri::Result<()> {
+        for entry in entries {
+            match entry {
+                MenuItemKind::Submenu(item) => {
+                    item.set_text(super::menu_text(&item.text()?, language))?;
+                    localize(item.items()?, language)?;
+                }
+                MenuItemKind::MenuItem(item) => {
+                    item.set_text(super::menu_text(&item.text()?, language))?
+                }
+                MenuItemKind::Check(item) => {
+                    item.set_text(super::menu_text(&item.text()?, language))?
+                }
+                MenuItemKind::Predefined(item) => {
+                    item.set_text(super::menu_text(&item.text()?, language))?
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     pub fn sync(app: &tauri::AppHandle, state: &NativeMenuState) -> tauri::Result<()> {
+        if let Some(menu) = app.menu() {
+            localize(menu.items()?, state.language)?;
+        }
         for (action, item) in &app.state::<NativeMenu>().0 {
             match item {
                 MenuItemKind::MenuItem(item) => item.set_enabled(state.enabled(action))?,
@@ -277,6 +372,14 @@ mod tests {
             "wordWrap": true, "lineNumbers": true, "showStatusBar": true
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn translates_menus_in_both_directions() {
+        use crate::preferences::Language;
+        assert_eq!(menu_text("设置…", Language::English), "Settings…");
+        assert_eq!(menu_text("Settings…", Language::Chinese), "设置…");
+        assert_eq!(menu_text("Gaze", Language::English), "Gaze");
     }
 
     #[test]

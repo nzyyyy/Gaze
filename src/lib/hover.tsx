@@ -1,4 +1,5 @@
 import { hoverTooltip, type HoverTooltipSource } from "@codemirror/view";
+import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { api } from "./api";
 
@@ -31,20 +32,23 @@ export function lspHoverSource(projectId: string, path: string): HoverTooltipSou
           dom.className = "code-hover";
           dom.setAttribute("role", "tooltip");
           const root = createRoot(dom);
-          root.render(
-            contents.map((block, index) => (
-              <div key={index}>
-                {block.language !== null || block.kind === "plaintext" ? (
-                  <pre>{block.value}</pre>
-                ) : (
-                  <Markdown
-                    components={{ img: () => null, a: ({ children }) => <span>{children}</span> }}
-                  >
-                    {block.value}
-                  </Markdown>
-                )}
-              </div>
-            )),
+          // CodeMirror measures the tooltip as soon as create returns.
+          flushSync(() =>
+            root.render(
+              contents.map((block, index) => (
+                <div key={index}>
+                  {block.language !== null || block.kind === "plaintext" ? (
+                    <pre>{block.value}</pre>
+                  ) : (
+                    <Markdown
+                      components={{ img: () => null, a: ({ children }) => <span>{children}</span> }}
+                    >
+                      {block.value}
+                    </Markdown>
+                  )}
+                </div>
+              )),
+            ),
           );
           return { dom, destroy: () => root.unmount() };
         },

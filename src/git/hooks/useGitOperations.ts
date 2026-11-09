@@ -1,3 +1,4 @@
+import { t as tr } from "../../lib/i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
@@ -90,7 +91,7 @@ export function useGitOperations(
         if (early.current.size > 20) early.current.delete(early.current.keys().next().value!);
       }
       setStatus(event.message);
-      if (outcome === "succeeded") noticeRef.current?.("Git 操作已完成。");
+      if (outcome === "succeeded") noticeRef.current?.(tr("Git 操作已完成。"));
       else setOutputOpen(true);
     });
     ready.current = subscription;
@@ -198,7 +199,8 @@ export function useGitOperations(
   };
   const exportLogs = async () => {
     try {
-      if (await api.exportSessionLog("gaze-git-session.log", logs)) setStatus("Git 日志已导出。");
+      if (await api.exportSessionLog("gaze-git-session.log", logs))
+        setStatus(tr("Git 日志已导出。"));
     } catch (error) {
       reportError(errorMessage(error));
     }

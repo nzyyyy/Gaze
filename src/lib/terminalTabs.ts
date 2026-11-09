@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { PALETTES, type ColorScheme } from "./colorSchemes";
 
 export interface TerminalTab {
@@ -39,7 +40,7 @@ export function shellName(shell: string): string {
 }
 
 export function nextTerminalTitle(tabs: TerminalTab[], shell: string): string {
-  const base = shellName(shell) || "终端";
+  const base = shellName(shell) || t("终端");
   const used = new Set(tabs.map((tab) => tab.title));
   if (!used.has(base)) return base;
   let index = 2;

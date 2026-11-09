@@ -1,3 +1,4 @@
+import { t as tr } from "../lib/i18n";
 import type { FileChange } from "./models";
 
 export interface GitDecoration {
@@ -17,7 +18,7 @@ export function fileTreeStatus(files: FileChange[], prefix: string) {
       if (result.get(current)?.kind !== "conflict")
         result.set(current, {
           kind: conflict ? "conflict" : "modified",
-          label: conflict ? "包含 Git 冲突" : "包含 Git 变更",
+          label: conflict ? tr("包含 Git 冲突") : tr("包含 Git 变更"),
         });
       if (!current) break;
       current = current.includes("/") ? current.slice(0, current.lastIndexOf("/")) : "";
@@ -38,20 +39,25 @@ export function fileTreeStatus(files: FileChange[], prefix: string) {
               ? "renamed"
               : "modified";
       const label = conflict
-        ? "Git 冲突"
+        ? tr("Git 冲突")
         : file.kind === "untracked"
-          ? "未跟踪"
+          ? tr("未跟踪")
           : kind === "added"
-            ? "已新增"
+            ? tr("已新增")
             : kind === "deleted"
-              ? "已删除"
+              ? tr("已删除")
               : kind === "renamed"
-                ? "已重命名"
-                : "已修改";
+                ? tr("已重命名")
+                : tr("已修改");
       result.set(path, {
         kind,
         label:
-          label + (file.staged ? (file.unstaged ? "（部分暂存）" : "（已暂存）") : "（未暂存）"),
+          label +
+          (file.staged
+            ? file.unstaged
+              ? tr("（部分暂存）")
+              : tr("（已暂存）")
+            : tr("（未暂存）")),
       });
       parent(path, conflict);
     }

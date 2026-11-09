@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { foldedRanges, highlightingFor, syntaxTree } from "@codemirror/language";
 import type { EditorState } from "@codemirror/state";
 import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
@@ -46,7 +47,7 @@ class Minimap {
     this.dom.className = "code-minimap";
     this.dom.tabIndex = 0;
     this.dom.setAttribute("role", "slider");
-    this.dom.setAttribute("aria-label", "内容缩略图");
+    this.dom.setAttribute("aria-label", t("内容缩略图"));
     this.dom.setAttribute("aria-orientation", "vertical");
     this.dom.setAttribute("aria-valuemin", "1");
     this.dom.setAttribute("aria-valuemax", String(view.state.doc.lines));
@@ -57,7 +58,7 @@ class Minimap {
     this.selection.className = "code-minimap-selection";
     this.preview.className = "code-minimap-preview";
     this.preview.setAttribute("role", "tooltip");
-    this.preview.setAttribute("aria-label", "代码预览");
+    this.preview.setAttribute("aria-label", t("代码预览"));
     this.preview.hidden = true;
     this.dom.append(this.svg, this.thumb, this.selection, this.caret);
     view.dom.append(this.dom, this.preview);
@@ -120,6 +121,8 @@ class Minimap {
   }
 
   update(update: ViewUpdate) {
+    this.dom.setAttribute("aria-label", t("内容缩略图"));
+    this.preview.setAttribute("aria-label", t("代码预览"));
     this.dirty ||=
       update.docChanged ||
       update.geometryChanged ||
@@ -298,7 +301,7 @@ class Minimap {
         this.dom.setAttribute("aria-valuenow", String(size.first));
         this.dom.setAttribute(
           "aria-valuetext",
-          `第 ${size.first}–${size.last} 行，共 ${view.state.doc.lines} 行`,
+          t("第 {0}–{1} 行，共 {2} 行", size.first, size.last, view.state.doc.lines),
         );
       },
     });
@@ -331,7 +334,7 @@ class Minimap {
       const { state } = this.view;
       const header = document.createElement("div");
       header.className = "code-minimap-preview-header";
-      header.textContent = `第 ${line} 行，共 ${state.doc.lines} 行`;
+      header.textContent = t("第 {0} 行，共 {1} 行", line, state.doc.lines);
       const lines: HTMLElement[] = [header];
       const start = Math.max(1, Math.min(line - 4, state.doc.lines - 10));
       for (let number = start; number <= Math.min(state.doc.lines, start + 10); number++) {

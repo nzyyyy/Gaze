@@ -11,6 +11,7 @@ pub struct Project {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceSnapshot {
+    pub language: crate::preferences::Language,
     pub projects: Vec<Project>,
     pub active_project_id: Option<String>,
     pub theme: String,

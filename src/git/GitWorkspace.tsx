@@ -1,3 +1,4 @@
+import { t as tr, useLanguage } from "../lib/i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { GitBranch } from "lucide-react";
@@ -52,6 +53,7 @@ export default function GitWorkspace({
   onOpenTerminal,
   onNotice,
 }: Props) {
+  const language = useLanguage();
   const [context, setContext] = useState<{ projectId: string; root: string; value: GitContext }>();
   const contextRequest = useRef<{ key: string; promise: Promise<GitContext> } | undefined>(
     undefined,
@@ -99,7 +101,7 @@ export default function GitWorkspace({
       setRepositories([next.summary]);
       setSnapshot(next.snapshot ?? undefined);
       if (next.summary.kind === "workTree" && !next.snapshot)
-        reportError(next.summary.error || "无法读取变更");
+        reportError(next.summary.error || tr("无法读取变更"));
       await reloadOpenDiff(next.snapshot);
     } catch (cause) {
       if (request === generation.current && selectedIdRef.current === id)
@@ -224,15 +226,15 @@ export default function GitWorkspace({
     if (!selected?.branch) return;
     const repository = selected;
     showDialog({
-      title: "带 lease 的强制推送",
-      fields: [{ name: "remote", label: "远程仓库", value: "origin", required: true }],
+      title: tr("带 lease 的强制推送"),
+      fields: [{ name: "remote", label: tr("远程仓库"), value: "origin", required: true }],
       onSubmit: async ({ remote }) => {
         const name = String(remote).trim();
         const branches = await api.getBranches(repository.id);
         const expectedOid = branches.find(
           (branch) => branch.remote && branch.name === `${name}/${repository.branch}`,
         )?.oid;
-        if (!expectedOid) throw new Error("请先 Fetch，确认远程分支的当前提交。");
+        if (!expectedOid) throw new Error(tr("请先 Fetch，确认远程分支的当前提交。"));
         await run({
           type: "forcePushWithLease",
           remote: name,
@@ -330,15 +332,15 @@ export default function GitWorkspace({
       />
     ) : (
       <div className="canvas-empty">
-        <h2>{tab === "branches" ? "分支与引用" : "保存的工作进度"}</h2>
-        <p>选择条目查看详情，保留当前文件与编辑器位置。</p>
+        <h2>{tab === "branches" ? tr("分支与引用") : tr("保存的工作进度")}</h2>
+        <p>{tr("选择条目查看详情，保留当前文件与编辑器位置。")}</p>
       </div>
     );
 
   const sidebar = (
     <section
       className="gaze-git-workspace git-sidebar-workspace"
-      aria-label="Git 管理列表"
+      aria-label={tr("Git 管理列表")}
       hidden={!active}
     >
       <GitProjectList
@@ -354,26 +356,26 @@ export default function GitWorkspace({
   );
 
   return (
-    <I18nProvider language="zh-CN">
+    <I18nProvider language={language}>
       {sidebarContainer && createPortal(sidebar, sidebarContainer)}
-      <section className="gaze-git-workspace" aria-label="Git 工作区" hidden={!active}>
+      <section className="gaze-git-workspace" aria-label={tr("Git 工作区")} hidden={!active}>
         {!project ? (
           <div className="canvas-empty">
-            <h2>请先选择项目</h2>
+            <h2>{tr("请先选择项目")}</h2>
           </div>
         ) : !error &&
           (!contextMatches || (selected?.kind === "workTree" && !workingTree.snapshot)) ? (
           <div className="reader-state" role="status">
-            正在加载 Git 工作区…
+            {tr("正在加载 Git 工作区…")}
           </div>
         ) : !selected ? (
           <div className="canvas-empty">
-            <h2>Git 暂不可用</h2>
-            <p role="status">{error || context?.value.error || "该项目尚未初始化 Git。"}</p>
-            <p>可在终端初始化仓库；找不到 Git 时，在配置中设置 tools.git 路径。</p>
+            <h2>{tr("Git 暂不可用")}</h2>
+            <p role="status">{error || context?.value.error || tr("该项目尚未初始化 Git。")}</p>
+            <p>{tr("可在终端初始化仓库；找不到 Git 时，在配置中设置 tools.git 路径。")}</p>
             <div>
-              <button onClick={onOpenTerminal}>打开终端</button>
-              <button onClick={() => setRetry((value) => value + 1)}>重新检测</button>
+              <button onClick={onOpenTerminal}>{tr("打开终端")}</button>
+              <button onClick={() => setRetry((value) => value + 1)}>{tr("重新检测")}</button>
             </div>
           </div>
         ) : (
@@ -386,10 +388,10 @@ export default function GitWorkspace({
                   {selected.branch
                     ? selected.branch
                     : selected.headOid
-                      ? `分离 HEAD · ${shortOid(selected.headOid)}`
-                      : "尚无提交"}
+                      ? tr("分离 HEAD · {0}", shortOid(selected.headOid))
+                      : tr("尚无提交")}
                 </span>
-                <span data-tooltip="同步数量来自本地跟踪引用；Fetch 后更新。">
+                <span data-tooltip={tr("同步数量来自本地跟踪引用；Fetch 后更新。")}>
                   ↑{selected.ahead} ↓{selected.behind}
                 </span>
               </div>
@@ -419,59 +421,59 @@ export default function GitWorkspace({
                     void refresh();
                   }}
                 >
-                  刷新
+                  {tr("刷新")}
                 </button>
                 <button
                   className="git-output-toggle"
                   aria-expanded={operations.outputOpen}
                   onClick={() => operations.setOutputOpen((value) => !value)}
                 >
-                  输出
+                  {tr("输出")}
                   {errorCount > 0 && (
-                    <span className="git-output-badge" aria-label={`${errorCount} 条错误`}>
+                    <span className="git-output-badge" aria-label={tr("{0} 条错误", errorCount)}>
                       {errorCount}
                     </span>
                   )}
                 </button>
-                <RowMenu label="更多 Git 操作" glyph="•••" disabled={operations.busy}>
+                <RowMenu label={tr("更多 Git 操作")} glyph="•••" disabled={operations.busy}>
                   <button disabled={!selected.branch} onClick={forcePush}>
-                    带 lease 的强制推送
+                    {tr("带 lease 的强制推送")}
                   </button>
                   <button onClick={() => void run({ type: "undoLastCommit" })}>
-                    撤回上次提交（保留修改）
+                    {tr("撤回上次提交（保留修改）")}
                   </button>
-                  <button onClick={onOpenTerminal}>打开终端</button>
+                  <button onClick={onOpenTerminal}>{tr("打开终端")}</button>
                 </RowMenu>
               </div>
             </header>
             <div className="git-repository-path">
-              {selected.path} · 整个仓库
+              {selected.path} {tr("· 整个仓库")}
               {context?.value.projectPrefix
-                ? `（当前项目位于 ${context.value.projectPrefix}）`
+                ? tr("（当前项目位于 {0}）", context.value.projectPrefix)
                 : ""}
-              {selected.kind === "bare" ? " · 裸仓库，只读" : ""}
+              {selected.kind === "bare" ? tr(" · 裸仓库，只读") : ""}
             </div>
 
             {error && (
               <div className="git-error" role="alert">
                 {error}
-                <button onClick={() => setError("")}>关闭提示</button>
+                <button onClick={() => setError("")}>{tr("关闭提示")}</button>
               </div>
             )}
             {operations.busy && (
               <div className="git-operation-status" role="status">
-                Git 操作进行中，相关编辑器已暂停自动保存。
+                {tr("Git 操作进行中，相关编辑器已暂停自动保存。")}
                 <button disabled={operations.operationId == null} onClick={operations.cancel}>
-                  停止操作
+                  {tr("停止操作")}
                 </button>
               </div>
             )}
-            <nav className="git-workflow-nav" aria-label="Git 工作流">
+            <nav className="git-workflow-nav" aria-label={tr("Git 工作流")}>
               {(
                 [
-                  ["changes", "更改"],
-                  ["history", "历史"],
-                  ["branches", "分支"],
+                  ["changes", tr("更改")],
+                  ["history", tr("历史")],
+                  ["branches", tr("分支")],
                   ["stashes", "Stash"],
                 ] as const
               ).map(([value, label]) => (
@@ -491,10 +493,10 @@ export default function GitWorkspace({
               disabled={operations.busy || (selected.kind === "bare" && tab !== "history")}
             >
               <legend className="sr-only">
-                {tab === "history" ? "仓库历史" : "仓库操作与详情"}
+                {tab === "history" ? tr("仓库历史") : tr("仓库操作与详情")}
               </legend>
 
-              <aside className="git-details-pane" aria-label="Git 变更与引用列表">
+              <aside className="git-details-pane" aria-label={tr("Git 变更与引用列表")}>
                 {tab === "changes" && (
                   <MemoChangesPane
                     repository={selected}
@@ -546,12 +548,12 @@ export default function GitWorkspace({
               </aside>
               <EditorSplitResizer
                 layoutKey="gitHistorySplitRatio"
-                label="调整 Git 列表与详情宽度"
+                label={tr("调整 Git 列表与详情宽度")}
               />
               <section className="canvas">
                 {diff && workingTree.diffIsFile && (
                   <div className="git-open-file">
-                    <button onClick={() => openFile(diff.path)}>在编辑器打开</button>
+                    <button onClick={() => openFile(diff.path)}>{tr("在编辑器打开")}</button>
                   </div>
                 )}
                 {canvas}

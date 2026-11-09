@@ -111,6 +111,8 @@ impl Preferences {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AppSettings {
+    #[serde(default)]
+    pub language: Language,
     pub theme: ThemePreference,
     pub fonts: FontSettings,
     pub color_schemes: ColorSchemes,
@@ -123,6 +125,15 @@ pub enum ThemePreference {
     System,
     Light,
     Dark,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub enum Language {
+    #[default]
+    #[serde(rename = "zh-CN")]
+    Chinese,
+    #[serde(rename = "en")]
+    English,
 }
 
 impl AppSettings {
@@ -140,6 +151,7 @@ impl AppSettings {
                     }
                     .to_owned(),
                 ),
+                ("language".into(), value["language"].to_string()),
                 ("fonts".into(), value["fonts"].to_string()),
                 ("color_schemes".into(), value["colorSchemes"].to_string()),
                 ("preferences".into(), value["preferences"].to_string()),
@@ -154,11 +166,17 @@ mod tests {
 
     #[tokio::test]
     async fn preferences_validate_and_round_trip_with_existing_settings() {
+        assert_eq!(
+            serde_json::from_str::<Language>("\"en\"").unwrap(),
+            Language::English
+        );
+        assert!(serde_json::from_str::<Language>("\"fr\"").is_err());
         let defaults = Preferences::default();
         assert_eq!(serde_json::from_str::<Preferences>("{}").unwrap(), defaults);
         assert!(defaults.show_minimap);
         defaults.validate().unwrap();
         let mut settings = AppSettings {
+            language: Language::English,
             theme: ThemePreference::Dark,
             fonts: FontSettings::default(),
             color_schemes: ColorSchemes::default(),
@@ -182,14 +200,31 @@ mod tests {
             .unwrap(),
             settings.preferences
         );
+        assert_eq!(
+            cache.setting("language").await.unwrap().as_deref(),
+            Some("\"en\"")
+        );
         assert!(cache.setting("fonts").await.unwrap().is_some());
         assert!(cache.setting("color_schemes").await.unwrap().is_some());
+        let mut legacy = serde_json::to_value(&settings).unwrap();
+        legacy.as_object_mut().unwrap().remove("language");
+        assert_eq!(
+            serde_json::from_value::<AppSettings>(legacy)
+                .unwrap()
+                .language,
+            Language::Chinese
+        );
+        settings.language = Language::Chinese;
         settings.preferences.tab_size = 2.5;
         settings.theme = ThemePreference::Light;
         assert!(settings.save(&cache).await.is_err());
         assert_eq!(
             cache.setting("theme").await.unwrap().as_deref(),
             Some("dark")
+        );
+        assert_eq!(
+            cache.setting("language").await.unwrap().as_deref(),
+            Some("\"en\"")
         );
         let value = serde_json::to_value(&defaults).unwrap();
         for (key, number) in value.as_object().unwrap() {

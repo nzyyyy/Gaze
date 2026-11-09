@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { ColorSchemes } from "./colorSchemes";
 import type { FontSettings } from "./fonts";
 import type { ThemePreference } from "./types";
@@ -32,6 +33,7 @@ export interface Preferences {
 }
 
 export interface AppSettings {
+  language: import("./i18n").Language;
   theme: ThemePreference;
   fonts: FontSettings;
   colorSchemes: ColorSchemes;
@@ -301,7 +303,13 @@ export function preferencesError(preferences: Preferences): string | null {
       value > field.max ||
       Math.abs(steps - Math.round(steps)) > 0.00001
     ) {
-      return `${field.label}：请输入 ${field.min}–${field.max} 之间、步长为 ${field.step} 的数值。`;
+      return t(
+        "{0}：请输入 {1}–{2} 之间、步长为 {3} 的数值。",
+        t(field.label),
+        field.min,
+        field.max,
+        field.step,
+      );
     }
   }
   return null;

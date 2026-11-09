@@ -1,3 +1,4 @@
+import { useLanguage } from "../../lib/i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { gitApi } from "../../lib/api";
 import type { Project } from "../../lib/types";
@@ -11,6 +12,7 @@ interface ProjectStatus {
 }
 
 export function useFileTreeGit(projects: Project[], refreshToken: number, active = true) {
+  const language = useLanguage();
   const [statuses, setStatuses] = useState<Record<string, ProjectStatus>>({});
   const scheduleRef = useRef(() => {});
   const activeRef = useRef(active);
@@ -138,6 +140,6 @@ export function useFileTreeGit(projects: Project[], refreshToken: number, active
             return [project.id, fileTreeStatus(status.files, status.prefix)] as const;
           }),
       ),
-    [projects, statuses],
+    [projects, statuses, language],
   );
 }

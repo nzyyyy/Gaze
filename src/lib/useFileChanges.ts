@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 import type { EditorTab } from "../components/CodeReader";
@@ -127,8 +128,8 @@ export function useFileChanges({
           ) {
             notify(
               dirtyTabs.some((tab) => tab.key === active.key)
-                ? "当前文件已在磁盘上修改，未保存的编辑已保留。"
-                : "当前文件已在磁盘上删除。",
+                ? t("当前文件已在磁盘上修改，未保存的编辑已保留。")
+                : t("当前文件已在磁盘上删除。"),
             );
           }
         }

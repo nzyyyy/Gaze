@@ -1,3 +1,4 @@
+import { t, useLanguage } from "../lib/i18n";
 import { PanelLeftClose, Pin } from "lucide-react";
 import {
   forwardRef,
@@ -27,6 +28,7 @@ interface SidebarLayoutProps {
 
 export const SidebarLayout = forwardRef<SidebarLayoutHandle, SidebarLayoutProps>(
   function SidebarLayout({ rail, panel, onPreview, children }, ref) {
+    useLanguage();
     const workspaceRef = useRef<HTMLDivElement>(null);
     const panelRef = useRef<HTMLElement>(null);
     const openTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -139,7 +141,7 @@ export const SidebarLayout = forwardRef<SidebarLayoutHandle, SidebarLayoutProps>
       >
         <nav
           className="sidebar-rail"
-          aria-label="侧栏视图"
+          aria-label={t("侧栏视图")}
           onPointerOver={(event) => {
             if (event.target instanceof Element && event.target.closest("[data-sidebar-trigger]")) {
               showPreview();
@@ -157,7 +159,7 @@ export const SidebarLayout = forwardRef<SidebarLayoutHandle, SidebarLayoutProps>
         <aside
           className="sidebar"
           id="workspace-sidebar"
-          aria-label="工作区侧栏"
+          aria-label={t("工作区侧栏")}
           ref={panelRef}
           inert={closed}
           aria-hidden={closed}
@@ -168,8 +170,8 @@ export const SidebarLayout = forwardRef<SidebarLayoutHandle, SidebarLayoutProps>
         >
           <button
             className="icon-button sidebar-toggle"
-            aria-label={collapsed ? "固定项目栏" : "收起项目栏"}
-            data-tooltip={collapsed ? "固定项目栏" : "收起项目栏"}
+            aria-label={collapsed ? t("固定项目栏") : t("收起项目栏")}
+            data-tooltip={collapsed ? t("固定项目栏") : t("收起项目栏")}
             onClick={() => changeCollapsed(!collapsed)}
           >
             {collapsed ? <Pin size={15} /> : <PanelLeftClose size={15} />}

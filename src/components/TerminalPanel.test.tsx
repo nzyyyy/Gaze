@@ -6,6 +6,7 @@ import { DEFAULT_PREFERENCES } from "../lib/preferences";
 import { saveLayout } from "../lib/layout";
 import type { TerminalEvent } from "../lib/types";
 import { act } from "@testing-library/react";
+import { setLanguage } from "../lib/i18n";
 
 const mocks = vi.hoisted(() => ({
   create: vi.fn().mockResolvedValue({ shell: "/bin/zsh" }),
@@ -363,3 +364,38 @@ it("uses the directory reported over OSC 7 and OSC 633 as the tab title", async 
   act(() => mocks.oscHandlers.get(633)!("P;Cwd=/tmp/scratch"));
   expect(await screen.findByRole("tab", { name: "scratch" })).toBeInTheDocument();
 });
+
+it.each([null, "终端", "Terminal"])(
+  "preserves a pending shell and its reported directory across language changes: %s",
+  async (directory) => {
+    let ready!: (info: { shell: string }) => void;
+    mocks.create.mockImplementationOnce(
+      () =>
+        new Promise<{ shell: string }>((resolve) => {
+          ready = resolve;
+        }),
+    );
+    const view = render(
+      <TerminalPanel
+        open
+        project={null}
+        theme="dark"
+        fontFamily="monospace"
+        onHide={vi.fn()}
+        onNotice={vi.fn()}
+      />,
+    );
+    try {
+      await waitFor(() => expect(mocks.create).toHaveBeenCalledOnce());
+      if (directory) act(() => mocks.oscHandlers.get(633)!(`P;Cwd=/tmp/${directory}`));
+      act(() => setLanguage("en"));
+      expect(screen.getByRole("tab", { name: directory ?? "Terminal" })).toBeInTheDocument();
+      await act(async () => ready({ shell: "/bin/zsh" }));
+      expect(screen.getByRole("tab", { name: directory ?? "zsh" })).toBeInTheDocument();
+      expect(mocks.create).toHaveBeenCalledOnce();
+    } finally {
+      view.unmount();
+      act(() => setLanguage("zh-CN"));
+    }
+  },
+);

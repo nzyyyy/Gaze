@@ -1,3 +1,4 @@
+import { t as tr, useLanguage } from "../../lib/i18n";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { LAYOUT_CHANGE_EVENT, readLayout, saveLayout } from "../../lib/layout";
@@ -20,6 +21,7 @@ const time = (timestamp: string) => {
 };
 
 export function GitOutputPanel({ open, logs, status, onClear, onExport, onClose }: Props) {
+  useLanguage();
   const [height, setHeight] = useState(() => readLayout().outputHeight);
   const panelRef = useRef<HTMLElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
@@ -70,13 +72,13 @@ export function GitOutputPanel({ open, logs, status, onClear, onExport, onClose 
       style={{ height }}
       ref={panelRef}
       hidden={!open}
-      aria-label="Git 输出"
+      aria-label={tr("Git 输出")}
     >
       <div
         className="git-output-resizer"
         role="separator"
         aria-orientation="horizontal"
-        aria-label="调整 Git 输出高度"
+        aria-label={tr("调整 Git 输出高度")}
         aria-valuenow={height}
         tabIndex={0}
         onPointerDown={startResize}
@@ -90,22 +92,24 @@ export function GitOutputPanel({ open, logs, status, onClear, onExport, onClose 
         }}
       />
       <header className="git-output-header">
-        <span role="status">{status || "最近一次操作的结果会显示在这里。"}</span>
+        <span role="status">{status || tr("最近一次操作的结果会显示在这里。")}</span>
         <div>
           <button disabled={!logs.length} onClick={onClear}>
-            清空
+            {tr("清空")}
           </button>
           <button disabled={!logs.length} onClick={onExport}>
-            导出日志
+            {tr("导出日志")}
           </button>
-          <button className="git-output-close" aria-label="关闭 Git 输出" onClick={onClose}>
+          <button className="git-output-close" aria-label={tr("关闭 Git 输出")} onClick={onClose}>
             ×
           </button>
         </div>
       </header>
       <div className="git-output-lines" role="log" ref={logRef}>
         {logs.length === 0 ? (
-          <p className="git-output-empty">执行 Fetch、Pull、Push 等操作后，输出会显示在这里。</p>
+          <p className="git-output-empty">
+            {tr("执行 Fetch、Pull、Push 等操作后，输出会显示在这里。")}
+          </p>
         ) : (
           logs.map((line, index) => (
             <div

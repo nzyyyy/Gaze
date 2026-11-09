@@ -8,6 +8,7 @@ import { DEFAULT_LAYOUT } from "../lib/layout";
 import { SettingsDialog } from "./SettingsDialog";
 
 const settings: AppSettings = {
+  language: "zh-CN",
   theme: "system",
   fonts: DEFAULT_FONT_SETTINGS,
   colorSchemes: DEFAULT_COLOR_SCHEMES,
@@ -140,4 +141,29 @@ it("validates hidden category values and gives an empty search state", async () 
   expect(onSave).not.toHaveBeenCalled();
   await user.type(screen.getByRole("searchbox"), "unknown-setting");
   expect(screen.getByText(/没有匹配的设置/)).toBeInTheDocument();
+});
+
+it("saves the selected language and searches translated settings", async () => {
+  const { setLanguage } = await import("../lib/i18n");
+  const user = userEvent.setup();
+  const onSave = vi.fn().mockResolvedValue(undefined);
+  const view = render(<SettingsDialog settings={settings} onSave={onSave} onClose={vi.fn()} />);
+  await user.click(screen.getByRole("combobox", { name: "语言" }));
+  await user.click(screen.getByRole("option", { name: "English" }));
+  expect(screen.getByRole("heading", { name: "设置" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "保存设置" }));
+  expect(onSave).toHaveBeenCalledWith(
+    expect.objectContaining({ language: "en" }),
+    expect.any(Object),
+  );
+  act(() => setLanguage("en"));
+  try {
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "font size");
+    expect(screen.getByRole("spinbutton", { name: "Editor font size" })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "Terminal font size" })).toBeInTheDocument();
+  } finally {
+    view.unmount();
+    act(() => setLanguage("zh-CN"));
+  }
 });

@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { useCallback, useRef, type RefObject } from "react";
 
 import type { CodeReaderHandle, EditorTab } from "../components/CodeReader";
@@ -72,7 +73,7 @@ export function useReplacement({
   const handlePreviewReplace = useCallback(
     async (query: string, replacement: string, options: SearchOptions) => {
       if (fileOperationBusyRef.current || gitOperationBusyRef.current || closingTabsRef.current) {
-        throw new Error("文件或 Git 操作进行中，请稍候。");
+        throw new Error(t("文件或 Git 操作进行中，请稍候。"));
       }
       const operation: ReplacementOperation = {
         requestId: crypto.randomUUID(),
@@ -90,7 +91,7 @@ export function useReplacement({
       setOperationBusy(true);
       try {
         const projects = getProjects();
-        if (!projects) throw new Error("工作区尚未准备好。");
+        if (!projects) throw new Error(t("工作区尚未准备好。"));
         const root = (projectId: string) =>
           projects.find((project) => project.id === projectId)?.root;
         const absolute = (projectId: string, path: string) => {
@@ -107,7 +108,7 @@ export function useReplacement({
             replacement,
             options,
           );
-          if (operation.cancelled) throw new Error("替换预览已取消。");
+          if (operation.cancelled) throw new Error(t("替换预览已取消。"));
           if (preview.truncated || preview.files.length === 0) {
             finishReplacement(operation);
             return preview;
@@ -124,13 +125,13 @@ export function useReplacement({
           }
           for (const tab of affected) {
             const handle = editorsRef.current.get(tab.key);
-            if (!handle) throw new Error(`编辑器 ${tab.path} 尚未准备好。`);
+            if (!handle) throw new Error(t("编辑器 {0} 尚未准备好。", tab.path));
             operation.handles.push({ tab, handle });
             const result = await handle.prepareFileOperation();
             if (result.status !== "clean" && result.status !== "saved") {
-              throw new Error(result.message ?? `无法保存 ${tab.path}。`);
+              throw new Error(result.message ?? t("无法保存 {0}。", tab.path));
             }
-            if (operation.cancelled) throw new Error("替换预览已取消。");
+            if (operation.cancelled) throw new Error(t("替换预览已取消。"));
           }
         }
       } catch (error) {
@@ -144,7 +145,7 @@ export function useReplacement({
   const handleApplyReplace = useCallback(
     async (request: ReplaceApplyRequest): Promise<ReplaceApplyResult> => {
       const operation = replacementRef.current;
-      if (!operation?.preview || operation.applying) throw new Error("请先生成替换预览。");
+      if (!operation?.preview || operation.applying) throw new Error(t("请先生成替换预览。"));
       const applied = new Set<string>();
       operation.applying = true;
       try {
@@ -164,7 +165,7 @@ export function useReplacement({
               ),
           )
         )
-          throw new Error("替换预览已失效，请重新预览。");
+          throw new Error(t("替换预览已失效，请重新预览。"));
         const result = await api.applyReplace(
           operation.query,
           operation.replacement,
@@ -207,9 +208,9 @@ export function useReplacement({
 
   const handleUndoReplace = useCallback(async (): Promise<ReplaceApplyResult> => {
     if (fileOperationBusyRef.current || gitOperationBusyRef.current || closingTabsRef.current)
-      throw new Error("文件或 Git 操作进行中，请稍候。");
+      throw new Error(t("文件或 Git 操作进行中，请稍候。"));
     const targets = lastReplacementRef.current;
-    if (targets.length === 0) throw new Error("没有可撤销的替换。");
+    if (targets.length === 0) throw new Error(t("没有可撤销的替换。"));
     fileOperationBusyRef.current = true;
     gitOperationBusyRef.current = true;
     setOperationBusy(true);
@@ -220,10 +221,10 @@ export function useReplacement({
     const restored = new Set<string>();
     try {
       for (const { tab, handle } of handles) {
-        if (!handle) throw new Error(`编辑器 ${tab.path} 尚未准备好。`);
+        if (!handle) throw new Error(t("编辑器 {0} 尚未准备好。", tab.path));
         const result = await handle.prepareFileOperation();
         if (result.status !== "clean" && result.status !== "saved")
-          throw new Error(result.message ?? `无法保存 ${tab.path}。`);
+          throw new Error(result.message ?? t("无法保存 {0}。", tab.path));
       }
       const result = await api.undoReplace();
       for (const { tab } of handles) {

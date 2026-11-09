@@ -1,3 +1,4 @@
+import { t, useLanguage } from "../lib/i18n";
 import { ChevronLeft, ChevronRight, PanelRight, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -36,10 +37,14 @@ export function TabBar({
   onMoveToOtherPane,
   onReorder,
 }: TabBarProps) {
+  useLanguage();
   const activeTabRef = useRef<HTMLDivElement>(null);
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
   const focusedTabKeyRef = useRef<string | null>(null);
   const stripRef = useRef<HTMLDivElement>(null);
+  const scrollHoldTimerRef = useRef<number | null>(null);
+  const scrollFrameRef = useRef<number | null>(null);
+  const repeatedScrollRef = useRef(false);
   const dragRef = useRef<{
     key: string;
     pointerId: number;
@@ -88,7 +93,17 @@ export function TabBar({
       previous.left === left && previous.right === right ? previous : { left, right },
     );
   }, []);
-  const scrollTabs = (direction: number) => {
+  const stopScrollingTabs = useCallback(() => {
+    if (scrollHoldTimerRef.current !== null) window.clearTimeout(scrollHoldTimerRef.current);
+    if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current);
+    scrollHoldTimerRef.current = null;
+    scrollFrameRef.current = null;
+  }, []);
+  const scrollTabs = (direction: number, detail: number) => {
+    const repeated = repeatedScrollRef.current;
+    repeatedScrollRef.current = false;
+    // A hold's release click must not add another tab-sized jump.
+    if (repeated && detail > 0) return;
     const strip = stripRef.current!;
     const elements = Array.from(strip.querySelectorAll<HTMLElement>(".tab"));
     const target =
@@ -101,6 +116,34 @@ export function TabBar({
         ? "instant"
         : "smooth",
     });
+  };
+  const startScrollingTabs = (direction: number, button: number) => {
+    if (button !== 0) return;
+    stopScrollingTabs();
+    repeatedScrollRef.current = false;
+    scrollHoldTimerRef.current = window.setTimeout(() => {
+      scrollHoldTimerRef.current = null;
+      let previous = performance.now();
+      const scroll = (time: number) => {
+        const strip = stripRef.current;
+        if (!strip) {
+          stopScrollingTabs();
+          return;
+        }
+        const maxScroll = Math.max(0, strip.scrollWidth - strip.clientWidth);
+        repeatedScrollRef.current = true;
+        strip.scrollLeft = Math.max(
+          0,
+          Math.min(maxScroll, strip.scrollLeft + (direction * (time - previous)) / 2),
+        );
+        previous = time;
+        updateScrollEdges();
+        if (direction < 0 ? strip.scrollLeft > 0 : strip.scrollLeft < maxScroll)
+          scrollFrameRef.current = window.requestAnimationFrame(scroll);
+        else stopScrollingTabs();
+      };
+      scrollFrameRef.current = window.requestAnimationFrame(scroll);
+    }, 300);
   };
   useLayoutEffect(() => {
     const positions = positionsRef.current;
@@ -124,6 +167,27 @@ export function TabBar({
     updateScrollEdges();
   }, [tabs, draggingKey, updateScrollEdges]);
   const hasTabs = tabs.length > 0;
+  useEffect(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    const onWheel = (event: WheelEvent) => {
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.deltaX || !event.deltaY)
+        return;
+      const maxScroll = strip.scrollWidth - strip.clientWidth;
+      if (maxScroll <= 0) return;
+      const unit =
+        event.deltaMode === WheelEvent.DOM_DELTA_LINE
+          ? parseFloat(getComputedStyle(strip).lineHeight) || 16
+          : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+            ? strip.clientWidth
+            : 1;
+      event.preventDefault();
+      strip.scrollLeft = Math.max(0, Math.min(maxScroll, strip.scrollLeft + event.deltaY * unit));
+      updateScrollEdges();
+    };
+    strip.addEventListener("wheel", onWheel, { passive: false });
+    return () => strip.removeEventListener("wheel", onWheel);
+  }, [hasTabs, updateScrollEdges]);
   useLayoutEffect(() => {
     const strip = stripRef.current;
     if (!strip) return;
@@ -137,11 +201,18 @@ export function TabBar({
   }, [hasTabs, updateScrollEdges]);
   useEffect(() => {
     window.addEventListener("blur", stopDrag);
+    window.addEventListener("pointerup", stopScrollingTabs);
+    window.addEventListener("pointercancel", stopScrollingTabs);
+    window.addEventListener("blur", stopScrollingTabs);
     return () => {
       window.removeEventListener("blur", stopDrag);
+      window.removeEventListener("pointerup", stopScrollingTabs);
+      window.removeEventListener("pointercancel", stopScrollingTabs);
+      window.removeEventListener("blur", stopScrollingTabs);
+      stopScrollingTabs();
       dragRef.current = null;
     };
-  }, [stopDrag]);
+  }, [hasTabs, stopDrag, stopScrollingTabs]);
   useLayoutEffect(() => {
     activeTabRef.current?.scrollIntoView({
       behavior: "instant",
@@ -191,7 +262,7 @@ export function TabBar({
           ref={stripRef}
           className={`tab-strip${draggingKey ? " is-dragging" : ""}`}
           role="tablist"
-          aria-label="打开的文件"
+          aria-label={t("打开的文件")}
           onScroll={updateScrollEdges}
           onBlur={(event) => {
             if (!event.currentTarget.contains(event.relatedTarget as Node | null))
@@ -309,7 +380,7 @@ export function TabBar({
                   tabIndex={tab.key === activeKey ? 0 : -1}
                   aria-selected={tab.key === activeKey}
                   aria-label={`${showProject ? `${tab.projectName} ` : ""}${tab.name}${
-                    isDirty ? "（未保存）" : ""
+                    isDirty ? t("（未保存）") : ""
                   }`}
                   onPointerDown={(event) => {
                     suppressClickRef.current = false;
@@ -366,7 +437,7 @@ export function TabBar({
                     tabRefs.current.get(target.key)?.focus();
                     onActivate(target);
                   }}
-                  data-tooltip={`${tab.projectName}/${tab.path}${isDirty ? "（未保存）" : ""}`}
+                  data-tooltip={`${tab.projectName}/${tab.path}${isDirty ? t("（未保存）") : ""}`}
                 >
                   <FileIcon name={tab.name} size={14} />
                   {showProject && <span className="tab-project">{tab.projectName}</span>}
@@ -380,8 +451,8 @@ export function TabBar({
                 <button
                   className="tab-close"
                   onClick={() => onClose(tab)}
-                  data-tooltip={`关闭 ${tab.name}`}
-                  aria-label={`关闭 ${tab.name}`}
+                  data-tooltip={t("关闭 {0}", tab.name)}
+                  aria-label={t("关闭 {0}", tab.name)}
                 >
                   <X size={13} />
                 </button>
@@ -394,19 +465,23 @@ export function TabBar({
             <>
               <button
                 className="tab-scroll"
-                aria-label="向左滚动标签页"
-                data-tooltip="向左滚动标签页"
+                aria-label={t("向左滚动标签页")}
+                data-tooltip={t("向左滚动标签页")}
                 disabled={!scrollEdges.left}
-                onClick={() => scrollTabs(-1)}
+                onPointerDown={(event) => startScrollingTabs(-1, event.button)}
+                onPointerLeave={stopScrollingTabs}
+                onClick={(event) => scrollTabs(-1, event.detail)}
               >
                 <ChevronLeft size={14} />
               </button>
               <button
                 className="tab-scroll"
-                aria-label="向右滚动标签页"
-                data-tooltip="向右滚动标签页"
+                aria-label={t("向右滚动标签页")}
+                data-tooltip={t("向右滚动标签页")}
                 disabled={!scrollEdges.right}
-                onClick={() => scrollTabs(1)}
+                onPointerDown={(event) => startScrollingTabs(1, event.button)}
+                onPointerLeave={stopScrollingTabs}
+                onClick={(event) => scrollTabs(1, event.detail)}
               >
                 <ChevronRight size={14} />
               </button>
@@ -416,8 +491,8 @@ export function TabBar({
             <button
               className={`tab-split ${splitOpen ? "is-on" : ""}`}
               onClick={onToggleSplit}
-              data-tooltip={splitOpen ? "关闭右侧编辑区" : "在右侧打开编辑区"}
-              aria-label={splitOpen ? "关闭右侧编辑区" : "在右侧打开编辑区"}
+              data-tooltip={splitOpen ? t("关闭右侧编辑区") : t("在右侧打开编辑区")}
+              aria-label={splitOpen ? t("关闭右侧编辑区") : t("在右侧打开编辑区")}
               aria-pressed={splitOpen}
             >
               <PanelRight size={14} />
@@ -426,7 +501,7 @@ export function TabBar({
         </div>
       </div>
       {menu && target && (
-        <ContextMenu target={menu} label="标签页操作" onClose={closeMenu}>
+        <ContextMenu target={menu} label={t("标签页操作")} onClose={closeMenu}>
           <button
             role="menuitem"
             onClick={() => {
@@ -434,14 +509,14 @@ export function TabBar({
               onClose(target);
             }}
           >
-            关闭
+            {t("关闭")}
           </button>
           <button
             role="menuitem"
             disabled={tabs.length < 2}
             onClick={() => closeGroup(tabs.filter((tab) => tab.key !== target.key))}
           >
-            关闭其他
+            {t("关闭其他")}
           </button>
           {onMoveToOtherPane && (
             <button
@@ -451,7 +526,7 @@ export function TabBar({
                 onMoveToOtherPane(target);
               }}
             >
-              移动到另一编辑区
+              {t("移动到另一编辑区")}
             </button>
           )}
           <button
@@ -459,17 +534,17 @@ export function TabBar({
             disabled={targetIndex === tabs.length - 1}
             onClick={() => closeGroup(tabs.slice(targetIndex + 1))}
           >
-            关闭右侧
+            {t("关闭右侧")}
           </button>
           <button
             role="menuitem"
             disabled={targetIndex === 0}
             onClick={() => closeGroup(tabs.slice(0, targetIndex))}
           >
-            关闭左侧
+            {t("关闭左侧")}
           </button>
           <button role="menuitem" onClick={() => closeGroup(tabs)}>
-            关闭所有
+            {t("关闭所有")}
           </button>
           <button
             role="menuitem"
@@ -477,11 +552,11 @@ export function TabBar({
             onClick={() =>
               nativeAction(
                 () => api.copyEntryPath(target.projectId, target.path, false),
-                "已复制绝对路径",
+                t("已复制绝对路径"),
               )
             }
           >
-            复制绝对路径
+            {t("复制绝对路径")}
           </button>
           <button
             role="menuitem"
@@ -489,18 +564,18 @@ export function TabBar({
             onClick={() =>
               nativeAction(
                 () => api.copyEntryPath(target.projectId, target.path, true),
-                "已复制相对路径",
+                t("已复制相对路径"),
               )
             }
           >
-            复制相对路径
+            {t("复制相对路径")}
           </button>
           <button
             role="menuitem"
             disabled={!/Mac/.test(navigator.userAgent)}
             onClick={() => nativeAction(() => api.revealEntry(target.projectId, target.path))}
           >
-            在访达中打开
+            {t("在访达中打开")}
           </button>
         </ContextMenu>
       )}

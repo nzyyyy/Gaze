@@ -1,3 +1,4 @@
+import { t as tr } from "../lib/i18n";
 import { computeChangeBlocks, type ChangeBlock } from "./lineDiff";
 
 interface PendingRequest {
@@ -24,7 +25,7 @@ function getWorker(): Worker | null {
       else request.resolve(event.data.blocks ?? []);
     };
     worker.onerror = () => {
-      const error = new Error("Git 变更计算线程失败。");
+      const error = new Error(tr("Git 变更计算线程失败。"));
       for (const request of pending.values()) request.reject(error);
       pending.clear();
       worker?.terminate();

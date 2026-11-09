@@ -1,3 +1,4 @@
+import { t as tr, useLanguage } from "../lib/i18n";
 import { useState } from "react";
 import type { ConflictChoice, ConflictDocument, ConflictResolution } from "./api";
 import { useI18n } from "./i18n";
@@ -11,6 +12,7 @@ export function ConflictEditor({
   onBack: () => void;
   onResolve: (choices: ConflictResolution[]) => void;
 }) {
+  useLanguage();
   const { t } = useI18n();
   const blocks = document.segments.filter((segment) => segment.type === "conflict");
   const blockNumbers = new Map(blocks.map((block, index) => [block.id, index + 1]));
@@ -116,8 +118,8 @@ export function ConflictEditor({
           ),
         )}
         {preview !== null && (
-          <section className="conflict-preview" aria-label="合并结果预览">
-            <h3>结果预览</h3>
+          <section className="conflict-preview" aria-label={tr("合并结果预览")}>
+            <h3>{tr("结果预览")}</h3>
             <pre>
               <code>{preview}</code>
             </pre>

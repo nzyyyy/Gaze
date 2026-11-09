@@ -1,3 +1,4 @@
+import { t, useLanguage } from "../lib/i18n";
 import "@xterm/xterm/css/xterm.css";
 
 import type { FitAddon } from "@xterm/addon-fit";
@@ -45,6 +46,7 @@ export function TerminalPanel({
   onHide,
   onNotice,
 }: TerminalPanelProps) {
+  useLanguage();
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [height, setHeight] = useState(() => readLayout().terminalHeight);
@@ -57,7 +59,7 @@ export function TerminalPanel({
     const tab: TerminalTab = {
       id,
       projectId: target?.id ?? null,
-      title: "终端",
+      title: "",
       shell: "",
       exited: false,
       exitCode: null,
@@ -92,13 +94,12 @@ export function TerminalPanel({
               ...tab,
               shell: info.shell,
               // OSC 7/633 可能先于 ready 上报目录，此时不要用 shell 名覆盖目录名。
-              title:
-                tab.title === "终端"
-                  ? nextTerminalTitle(
-                      current.filter((item) => item.id !== id),
-                      info.shell,
-                    )
-                  : tab.title,
+              title: !tab.title
+                ? nextTerminalTitle(
+                    current.filter((item) => item.id !== id),
+                    info.shell,
+                  )
+                : tab.title,
             }
           : tab,
       ),
@@ -170,7 +171,7 @@ export function TerminalPanel({
         className="terminal-resizer"
         role="separator"
         aria-orientation="horizontal"
-        aria-label="调整终端高度"
+        aria-label={t("调整终端高度")}
         aria-valuenow={height}
         tabIndex={0}
         onPointerDown={startResize}
@@ -184,44 +185,47 @@ export function TerminalPanel({
         }}
       />
       <div className="terminal-header">
-        <div className="terminal-tabs" role="tablist" aria-label="终端标签">
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              className={`terminal-tab ${tab.id === activeId ? "is-active" : ""} ${
-                tab.exited ? "is-exited" : ""
-              }`}
-            >
-              <button
-                className="terminal-tab-label"
-                role="tab"
-                aria-selected={tab.id === activeId}
-                onClick={() => setSelectedId(tab.id)}
-                data-tooltip={tab.exited ? `${tab.title}（进程已退出）` : tab.title}
+        <div className="terminal-tabs" role="tablist" aria-label={t("终端标签")}>
+          {tabs.map((tab) => {
+            const title = tab.title || t("终端");
+            return (
+              <div
+                key={tab.id}
+                className={`terminal-tab ${tab.id === activeId ? "is-active" : ""} ${
+                  tab.exited ? "is-exited" : ""
+                }`}
               >
-                <TerminalIcon size={14} />
-                <span>{tab.title}</span>
-                {tab.exited && (
-                  <span className="terminal-exited">
-                    {tab.exitCode === null ? "已退出" : `已退出 ${tab.exitCode}`}
-                  </span>
-                )}
-              </button>
-              <button
-                className="terminal-tab-close"
-                onClick={() => closeTab(tab)}
-                aria-label={`关闭 ${tab.title}`}
-                data-tooltip="关闭终端"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          ))}
+                <button
+                  className="terminal-tab-label"
+                  role="tab"
+                  aria-selected={tab.id === activeId}
+                  onClick={() => setSelectedId(tab.id)}
+                  data-tooltip={tab.exited ? t("{0}（进程已退出）", title) : title}
+                >
+                  <TerminalIcon size={14} />
+                  <span>{title}</span>
+                  {tab.exited && (
+                    <span className="terminal-exited">
+                      {tab.exitCode === null ? t("已退出") : t("已退出 {0}", tab.exitCode)}
+                    </span>
+                  )}
+                </button>
+                <button
+                  className="terminal-tab-close"
+                  onClick={() => closeTab(tab)}
+                  aria-label={t("关闭 {0}", title)}
+                  data-tooltip={t("关闭终端")}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            );
+          })}
           <button
             className="terminal-new"
             onClick={newTerminal}
-            aria-label="新建终端"
-            data-tooltip="新建终端"
+            aria-label={t("新建终端")}
+            data-tooltip={t("新建终端")}
           >
             <Plus size={16} />
           </button>
@@ -229,8 +233,8 @@ export function TerminalPanel({
         <button
           className="terminal-hide"
           onClick={onHide}
-          aria-label="隐藏终端"
-          data-tooltip="隐藏终端"
+          aria-label={t("隐藏终端")}
+          data-tooltip={t("隐藏终端")}
         >
           <ChevronDown size={16} />
         </button>
@@ -253,10 +257,10 @@ export function TerminalPanel({
         ))}
         {tabs.length === 0 && (
           <div className="terminal-empty">
-            <span>还没有终端。</span>
+            <span>{t("还没有终端。")}</span>
             <button className="button button-quiet" onClick={newTerminal}>
               <Plus size={13} />
-              新建终端
+              {t("新建终端")}
             </button>
           </div>
         )}
@@ -290,6 +294,7 @@ function TerminalView({
   onExit,
   onError,
 }: TerminalViewProps) {
+  useLanguage();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);

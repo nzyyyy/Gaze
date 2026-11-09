@@ -1,3 +1,4 @@
+import { t as tr, useLanguage } from "../../lib/i18n";
 import { useEffect, useState } from "react";
 import type { Project } from "../../lib/types";
 import { api, type RepositorySummary, type WorkingTreeSnapshot } from "../api";
@@ -27,6 +28,7 @@ export function GitProjectList({
   busy: boolean;
   onSelect: (project: Project) => void;
 }) {
+  useLanguage();
   const [statuses, setStatuses] = useState<Record<string, ProjectStatus>>({});
   const scope = JSON.stringify(projects.map(({ id, root }) => [id, root]));
 
@@ -54,7 +56,7 @@ export function GitProjectList({
             else
               setStatuses((current) => ({
                 ...current,
-                [project.id]: { root: project.root, error: context.error || "未初始化 Git" },
+                [project.id]: { root: project.root, error: context.error || tr("未初始化 Git") },
               }));
           } catch (cause) {
             if (!disposed)
@@ -80,7 +82,8 @@ export function GitProjectList({
                 snapshot: next.snapshot ?? undefined,
                 error: next.summary.error || undefined,
               };
-              if (next.summary.kind === "workTree" && !next.snapshot) status.error = "无法读取变更";
+              if (next.summary.kind === "workTree" && !next.snapshot)
+                status.error = tr("无法读取变更");
             } catch (cause) {
               status = { error: errorMessage(cause) };
             }
@@ -126,9 +129,10 @@ export function GitProjectList({
   }, [scope, active]);
 
   return (
-    <nav className="git-projects" aria-label="Git 项目">
+    <nav className="git-projects" aria-label={tr("Git 项目")}>
       <div className="git-projects-heading">
-        已导入项目 <span>{projects.length}</span>
+        {tr("已导入项目")}
+        <span>{projects.length}</span>
       </div>
       <ul>
         {projects.map((project) => {
@@ -160,39 +164,46 @@ export function GitProjectList({
                 className={`git-project-row${changed ? " has-changes" : ""}${conflict ? " has-conflicts" : ""}`}
                 aria-current={project.id === selectedProjectId ? "true" : undefined}
                 disabled={busy}
-                data-tooltip={`${project.root} · 整个仓库${error ? ` · ${error}` : ""}`}
+                data-tooltip={tr("{0} · 整个仓库{1}", project.root, error ? ` · ${error}` : "")}
                 onClick={() => onSelect(project)}
               >
                 <strong>{project.name}</strong>
                 <span className="git-project-branch">
                   {summary?.branch ||
                     (summary?.headOid
-                      ? `分离 HEAD · ${shortOid(summary.headOid)}`
+                      ? tr("分离 HEAD · {0}", shortOid(summary.headOid))
                       : summary
-                        ? "尚无提交"
+                        ? tr("尚无提交")
                         : error
-                          ? "Git 不可用"
-                          : "正在读取…")}
+                          ? tr("Git 不可用")
+                          : tr("正在读取…"))}
                 </span>
                 {changed && (
                   <span
                     className="git-project-stats"
-                    aria-label={`新增 ${additions} 行，删除 ${deletions} 行${unknown ? `，${unknown} 个文件无法统计行数` : ""}`}
+                    aria-label={tr(
+                      "新增 {0} 行，删除 {1} 行{2}",
+                      additions,
+                      deletions,
+                      unknown ? tr("，{0} 个文件无法统计行数", unknown) : "",
+                    )}
                   >
                     <span className="git-project-additions">+{additions}</span>
                     <span className="git-project-deletions">−{deletions}</span>
-                    {unknown > 0 && <span data-tooltip={`${unknown} 个文件无法统计行数`}>*</span>}
+                    {unknown > 0 && (
+                      <span data-tooltip={tr("{0} 个文件无法统计行数", unknown)}>*</span>
+                    )}
                   </span>
                 )}
                 <small>
                   {error
-                    ? "读取失败"
+                    ? tr("读取失败")
                     : files
                       ? changed
-                        ? `${files.length} 个变更${conflict ? " · 含冲突" : ""}`
-                        : "工作区干净"
+                        ? tr("{0} 个变更{1}", files.length, conflict ? tr(" · 含冲突") : "")
+                        : tr("工作区干净")
                       : summary?.kind === "bare"
-                        ? "裸仓库 · 只读"
+                        ? tr("裸仓库 · 只读")
                         : ""}
                 </small>
               </button>
@@ -200,7 +211,7 @@ export function GitProjectList({
           );
         })}
       </ul>
-      {!projects.length && <p className="pane-empty">请先导入项目。</p>}
+      {!projects.length && <p className="pane-empty">{tr("请先导入项目。")}</p>}
     </nav>
   );
 }

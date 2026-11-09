@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -8,6 +8,7 @@ import type { EditorTab } from "./CodeReader";
 const nativeApi = vi.hoisted(() => ({ copyEntryPath: vi.fn(), revealEntry: vi.fn() }));
 vi.mock("../lib/api", () => ({ api: nativeApi }));
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -129,6 +130,128 @@ it("shows navigation for clipped tabs and scrolls to a whole tab boundary", asyn
   strip.scrollLeft = 240;
   fireEvent.scroll(strip);
   expect(right).toBeDisabled();
+});
+
+it.each([-1, 1])(
+  "continuously scrolls while holding arrow direction %s without a release jump",
+  (direction) => {
+    vi.useFakeTimers();
+    const { strip, pointer, onActivate } = setupDrag();
+    Object.defineProperties(strip, {
+      clientWidth: { value: 300 },
+      scrollWidth: { value: 1500 },
+    });
+    strip.scrollLeft = 600;
+    strip.scrollTo = vi.fn();
+    fireEvent.scroll(strip);
+    const arrow = screen.getByRole("button", {
+      name: direction < 0 ? "向左滚动标签页" : "向右滚动标签页",
+    });
+    pointer("pointerdown", 0, arrow);
+    act(() => vi.advanceTimersByTime(299));
+    expect(strip.scrollLeft).toBe(600);
+    act(() => vi.advanceTimersByTime(300));
+    expect((strip.scrollLeft - 600) * direction).toBeGreaterThan(0);
+    const first = strip.scrollLeft;
+    act(() => vi.advanceTimersByTime(300));
+    expect((strip.scrollLeft - first) * direction).toBeGreaterThan(0);
+    pointer("pointerup", 0, arrow);
+    fireEvent.click(arrow, { detail: 1 });
+    const released = strip.scrollLeft;
+    act(() => vi.advanceTimersByTime(500));
+    expect(strip.scrollLeft).toBe(released);
+    expect(strip.scrollTo).not.toHaveBeenCalled();
+    expect(onActivate).not.toHaveBeenCalled();
+    fireEvent.click(arrow, { detail: 0 });
+    expect(strip.scrollTo).toHaveBeenCalledOnce();
+  },
+);
+
+it.each(["pointercancel", "blur", "leave", "empty"])(
+  "stops held-arrow scrolling on %s",
+  (reason) => {
+    vi.useFakeTimers();
+    const { strip, pointer, rerenderTabs } = setupDrag();
+    Object.defineProperty(strip, "clientWidth", { value: 300 });
+    fireEvent.scroll(strip);
+    const arrow = screen.getByRole("button", { name: "向右滚动标签页" });
+    pointer("pointerdown", 0, arrow);
+    act(() => vi.advanceTimersByTime(400));
+    expect(strip.scrollLeft).toBeGreaterThan(0);
+    if (reason === "empty") rerenderTabs([]);
+    else if (reason === "leave") fireEvent.pointerOut(arrow, { relatedTarget: document.body });
+    else fireEvent(window, new Event(reason));
+    const stopped = strip.scrollLeft;
+    act(() => vi.advanceTimersByTime(1000));
+    expect(strip.scrollLeft).toBe(stopped);
+    expect(vi.getTimerCount()).toBe(0);
+  },
+);
+
+it("stops held-arrow scrolling at the end of the tab strip", () => {
+  vi.useFakeTimers();
+  const { strip, pointer } = setupDrag();
+  Object.defineProperty(strip, "clientWidth", { value: 300 });
+  fireEvent.scroll(strip);
+  const arrow = screen.getByRole("button", { name: "向右滚动标签页" });
+  pointer("pointerdown", 0, arrow);
+  act(() => vi.advanceTimersByTime(2000));
+  expect(strip.scrollLeft).toBe(240);
+  expect(arrow).toBeDisabled();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("scrolls overflowing tabs with a vertical mouse wheel without activating a tab", () => {
+  const { strip, buttons, onActivate } = setupDrag();
+  Object.defineProperty(strip, "clientWidth", { value: 300 });
+  expect(fireEvent.wheel(buttons[0]!, { deltaY: 120 })).toBe(false);
+  expect(strip.scrollLeft).toBe(120);
+  fireEvent.wheel(strip, { deltaY: -90 });
+  expect(strip.scrollLeft).toBe(30);
+  fireEvent.wheel(strip, { deltaY: 1000 });
+  expect(strip.scrollLeft).toBe(240);
+  expect(screen.getByRole("button", { name: "向右滚动标签页" })).toBeDisabled();
+  fireEvent.wheel(strip, { deltaY: -1000 });
+  expect(strip.scrollLeft).toBe(0);
+  expect(screen.getByRole("button", { name: "向左滚动标签页" })).toBeDisabled();
+  expect(onActivate).not.toHaveBeenCalled();
+});
+
+it.each([
+  [1, 2, 40],
+  [2, 1, 300],
+])("normalizes mouse wheel mode %s", (deltaMode, deltaY, expected) => {
+  const { strip } = setupDrag();
+  Object.defineProperties(strip, {
+    clientWidth: { value: 300 },
+    scrollWidth: { value: 1200 },
+  });
+  strip.style.lineHeight = "20px";
+  expect(fireEvent.wheel(strip, { deltaMode, deltaY })).toBe(false);
+  expect(strip.scrollLeft).toBe(expected);
+});
+
+it.each([
+  { deltaX: 60, deltaY: 0 },
+  { deltaX: 20, deltaY: 30 },
+  { ctrlKey: true, deltaY: 100 },
+  { metaKey: true, deltaY: 100 },
+  { deltaY: 0 },
+])("preserves native horizontal scrolling and zoom gestures: %j", (options) => {
+  const { strip } = setupDrag();
+  Object.defineProperty(strip, "clientWidth", { value: 300 });
+  expect(fireEvent.wheel(strip, options)).toBe(true);
+  expect(strip.scrollLeft).toBe(0);
+});
+
+it("leaves the wheel alone without overflow and removes its handler when tabs disappear", () => {
+  const { strip, rerenderTabs } = setupDrag();
+  expect(fireEvent.wheel(strip, { deltaY: 100 })).toBe(true);
+  expect(strip.scrollLeft).toBe(0);
+  Object.defineProperty(strip, "clientWidth", { value: 300 });
+  rerenderTabs([]);
+  expect(fireEvent.wheel(strip, { deltaY: 100 })).toBe(true);
+  expect(strip.scrollLeft).toBe(0);
 });
 
 it.each([false, true])(
