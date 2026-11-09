@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { nextTerminalTitle, removeTerminal, shellName, type TerminalTab } from "./terminalTabs";
+import {
+  folderName,
+  nextTerminalTitle,
+  parseOsc633Cwd,
+  parseOsc7Cwd,
+  removeTerminal,
+  shellName,
+  type TerminalTab,
+} from "./terminalTabs";
 
 function tab(id: string, projectId: string, title: string): TerminalTab {
   return { id, projectId, title, shell: "/bin/zsh", exited: false, exitCode: null };
@@ -18,6 +26,33 @@ describe("nextTerminalTitle", () => {
     const tabs = [tab("1", "p", "zsh"), tab("2", "q", "zsh 2")];
     expect(nextTerminalTitle(tabs, "/bin/zsh")).toBe("zsh 3");
     expect(nextTerminalTitle([], "/bin/bash")).toBe("bash");
+  });
+});
+
+describe("folderName", () => {
+  it("uses the last path segment as the tab title", () => {
+    expect(folderName("/Users/me/Projects/Gaze")).toBe("Gaze");
+    expect(folderName("/Users/me/Projects/Gaze/")).toBe("Gaze");
+    expect(folderName("C:\\Users\\me\\Gaze")).toBe("Gaze");
+    expect(folderName("/")).toBe("/");
+    expect(folderName("")).toBeNull();
+  });
+});
+
+describe("parseOsc7Cwd", () => {
+  it("reads file URLs and bare paths", () => {
+    expect(parseOsc7Cwd("file://host/Users/me/My%20Project")).toBe("/Users/me/My Project");
+    expect(parseOsc7Cwd("/Users/me/Gaze")).toBe("/Users/me/Gaze");
+    expect(parseOsc7Cwd("relative/path")).toBeNull();
+    expect(parseOsc7Cwd("")).toBeNull();
+  });
+});
+
+describe("parseOsc633Cwd", () => {
+  it("reads the Cwd property from shell integration payloads", () => {
+    expect(parseOsc633Cwd("P;Cwd=/Users/me/Gaze")).toBe("/Users/me/Gaze");
+    expect(parseOsc633Cwd("P;IsWindows=False;Cwd=/tmp/demo")).toBe("/tmp/demo");
+    expect(parseOsc633Cwd("A")).toBeNull();
   });
 });
 

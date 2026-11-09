@@ -11,7 +11,10 @@ import type { ColorScheme } from "../lib/colorSchemes";
 import { LAYOUT_CHANGE_EVENT, readLayout, saveLayout } from "../lib/layout";
 import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
 import {
+  folderName,
   nextTerminalTitle,
+  parseOsc633Cwd,
+  parseOsc7Cwd,
   removeTerminal,
   terminalTheme,
   type TerminalTab,
@@ -88,13 +91,25 @@ export function TerminalPanel({
           ? {
               ...tab,
               shell: info.shell,
-              title: nextTerminalTitle(
-                current.filter((item) => item.id !== id),
-                info.shell,
-              ),
+              // OSC 7/633 可能先于 ready 上报目录，此时不要用 shell 名覆盖目录名。
+              title:
+                tab.title === "终端"
+                  ? nextTerminalTitle(
+                      current.filter((item) => item.id !== id),
+                      info.shell,
+                    )
+                  : tab.title,
             }
           : tab,
       ),
+    );
+  }, []);
+
+  const handleCwd = useCallback((id: string, cwd: string) => {
+    const title = folderName(cwd);
+    if (!title) return;
+    setTabs((current) =>
+      current.map((tab) => (tab.id === id && tab.title !== title ? { ...tab, title } : tab)),
     );
   }, []);
 
@@ -231,6 +246,7 @@ export function TerminalPanel({
             preferences={preferences}
             fontFamily={fontFamily}
             onReady={handleReady}
+            onCwd={handleCwd}
             onExit={handleExit}
             onError={handleError}
           />
@@ -257,6 +273,7 @@ interface TerminalViewProps {
   preferences: Preferences;
   fontFamily: string;
   onReady: (id: string, info: TerminalSessionInfo) => void;
+  onCwd: (id: string, cwd: string) => void;
   onExit: (id: string, exitCode: number | null) => void;
   onError: (id: string, message: string) => void;
 }
@@ -269,6 +286,7 @@ function TerminalView({
   preferences,
   fontFamily,
   onReady,
+  onCwd,
   onExit,
   onError,
 }: TerminalViewProps) {
@@ -276,8 +294,8 @@ function TerminalView({
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const exitedRef = useRef(false);
-  const callbacksRef = useRef({ onReady, onExit, onError });
-  callbacksRef.current = { onReady, onExit, onError };
+  const callbacksRef = useRef({ onReady, onCwd, onExit, onError });
+  callbacksRef.current = { onReady, onCwd, onExit, onError };
   const appearanceRef = useRef({ theme, fontFamily, colorScheme, preferences });
   appearanceRef.current = { theme, fontFamily, colorScheme, preferences };
 
@@ -289,6 +307,8 @@ function TerminalView({
     let resizeFrame = 0;
     let outputFrame: number | null = null;
     let pendingOutput: string[] = [];
+    // onData 是同步连续触发的，并发 invoke 会让 IPC 乱序甚至丢字符，这里串行排队。
+    let writeQueue: Promise<void> = Promise.resolve();
 
     const flushOutput = () => {
       outputFrame = null;
@@ -332,10 +352,26 @@ function TerminalView({
 
       terminal.onData((data) => {
         if (exitedRef.current) return;
-        void api.writeTerminal(tab.id, data).catch(() => undefined);
+        writeQueue = writeQueue.then(() => {
+          if (disposed || exitedRef.current) return;
+          return api.writeTerminal(tab.id, data).catch(() => undefined);
+        });
       });
       terminal.onResize(({ cols, rows }) => {
         void api.resizeTerminal(tab.id, cols, rows).catch(() => undefined);
+      });
+
+      // 目录变化通过 OSC 7 / OSC 633 上报，用于把标签标题换成当前文件夹名。
+      const reportCwd = (cwd: string | null) => {
+        if (cwd) callbacksRef.current.onCwd(tab.id, cwd);
+      };
+      terminal.parser.registerOscHandler(7, (payload) => {
+        reportCwd(parseOsc7Cwd(payload));
+        return true;
+      });
+      terminal.parser.registerOscHandler(633, (payload) => {
+        reportCwd(parseOsc633Cwd(payload));
+        return true;
       });
 
       resizeObserver = new ResizeObserver(() => {

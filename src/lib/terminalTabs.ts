@@ -47,6 +47,36 @@ export function nextTerminalTitle(tabs: TerminalTab[], shell: string): string {
   return `${base} ${index}`;
 }
 
+// 标签显示当前目录的文件夹名；OSC 7 与 OSC 633 都会上报这个路径。
+export function folderName(path: string): string | null {
+  if (!path) return null;
+  const trimmed = path.replace(/[\\/]+$/, "");
+  if (!trimmed) return "/";
+  const segments = trimmed.split(/[\\/]/);
+  return segments[segments.length - 1] || null;
+}
+
+// OSC 7：一般为 file://<host>/<path>，个别 shell 直接发送裸路径。
+export function parseOsc7Cwd(payload: string): string | null {
+  const value = payload.trim();
+  if (!value) return null;
+  if (!value.startsWith("file://")) return value.startsWith("/") ? value : null;
+  try {
+    const url = new URL(value);
+    return decodeURIComponent(url.pathname) || null;
+  } catch {
+    return null;
+  }
+}
+
+// OSC 633：VS Code 风格的 Shell Integration，目录放在 633;P;Cwd=<path>。
+export function parseOsc633Cwd(payload: string): string | null {
+  for (const part of payload.split(";")) {
+    if (part.startsWith("Cwd=")) return part.slice(4) || null;
+  }
+  return null;
+}
+
 export function removeTerminal(
   tabs: TerminalTab[],
   activeId: string | null,

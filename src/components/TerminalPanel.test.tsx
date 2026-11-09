@@ -10,17 +10,23 @@ import { act } from "@testing-library/react";
 const mocks = vi.hoisted(() => ({
   create: vi.fn().mockResolvedValue({ shell: "/bin/zsh" }),
   close: vi.fn().mockResolvedValue(undefined),
+  writeTerminal: vi.fn().mockResolvedValue(undefined),
+  resizeTerminal: vi.fn().mockResolvedValue(undefined),
   fit: vi.fn(),
   write: vi.fn(),
   dispose: vi.fn(),
   onTerminalEvent: vi.fn().mockResolvedValue(() => undefined),
   options: {} as { fontFamily?: string; theme?: unknown },
+  oscHandlers: new Map<number, (payload: string) => boolean>(),
+  onData: null as ((data: string) => void) | null,
 }));
 
 vi.mock("../lib/api", () => ({
   api: {
     createTerminal: mocks.create,
     closeTerminal: mocks.close,
+    writeTerminal: mocks.writeTerminal,
+    resizeTerminal: mocks.resizeTerminal,
     onTerminalEvent: mocks.onTerminalEvent,
   },
 }));
@@ -29,12 +35,20 @@ vi.mock("@xterm/xterm", () => ({
     options: typeof mocks.options;
     cols = 80;
     rows = 24;
+    parser = {
+      registerOscHandler: (identifier: number, handler: (payload: string) => boolean) => {
+        mocks.oscHandlers.set(identifier, handler);
+        return { dispose() {} };
+      },
+    };
     constructor(options: typeof mocks.options) {
       this.options = mocks.options = options;
     }
     loadAddon() {}
     open() {}
-    onData() {}
+    onData(handler: (data: string) => void) {
+      mocks.onData = handler;
+    }
     onResize() {}
     focus() {}
     write = mocks.write;
@@ -51,6 +65,9 @@ import { TerminalPanel } from "./TerminalPanel";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.oscHandlers.clear();
+  mocks.onData = null;
+  mocks.writeTerminal.mockReset().mockResolvedValue(undefined);
   mocks.onTerminalEvent.mockResolvedValue(() => undefined);
 });
 
@@ -292,4 +309,57 @@ it("keeps an existing shell active when starting another shell fails", async () 
   await waitFor(() => expect(props.onNotice).toHaveBeenCalledWith("无法启动 shell"));
   expect(screen.getAllByRole("tab")).toEqual([tab]);
   expect(tab).toHaveAttribute("aria-selected", "true");
+});
+
+it("serializes terminal input so writes reach the shell in typing order", async () => {
+  const pending: Array<{ data: string; resolve: () => void }> = [];
+  mocks.writeTerminal.mockImplementation(
+    (_sessionId: string, data: string) =>
+      new Promise<void>((resolve) => pending.push({ data, resolve })),
+  );
+  render(
+    <TerminalPanel
+      open
+      project={{ id: "p1", name: "Demo", root: "/demo" }}
+      theme="dark"
+      fontFamily="monospace"
+      onHide={vi.fn()}
+      onNotice={vi.fn()}
+    />,
+  );
+  await waitFor(() => expect(mocks.onData).toBeTypeOf("function"));
+
+  await act(async () => {
+    mocks.onData?.("a");
+    mocks.onData?.("b");
+    mocks.onData?.("c");
+  });
+  // 前一次写入未完成时，后续按键必须排队等待，避免 IPC 并发导致乱序或丢字符。
+  expect(pending.map((item) => item.data)).toEqual(["a"]);
+
+  await act(async () => pending.shift()!.resolve());
+  await waitFor(() => expect(pending.map((item) => item.data)).toEqual(["b"]));
+  await act(async () => pending.shift()!.resolve());
+  await waitFor(() => expect(pending.map((item) => item.data)).toEqual(["c"]));
+  await act(async () => pending.shift()!.resolve());
+});
+
+it("uses the directory reported over OSC 7 and OSC 633 as the tab title", async () => {
+  render(
+    <TerminalPanel
+      open
+      project={{ id: "p1", name: "Demo", root: "/demo" }}
+      theme="dark"
+      fontFamily="monospace"
+      onHide={vi.fn()}
+      onNotice={vi.fn()}
+    />,
+  );
+  await screen.findByRole("tab", { name: "zsh" });
+
+  act(() => mocks.oscHandlers.get(7)!("file://host/Users/me/Projects/Gaze"));
+  expect(await screen.findByRole("tab", { name: "Gaze" })).toBeInTheDocument();
+
+  act(() => mocks.oscHandlers.get(633)!("P;Cwd=/tmp/scratch"));
+  expect(await screen.findByRole("tab", { name: "scratch" })).toBeInTheDocument();
 });
