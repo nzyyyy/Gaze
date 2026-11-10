@@ -103,6 +103,37 @@ beforeEach(() => {
 });
 afterEach(() => sidebarContainer.remove());
 
+it.each([
+  [3, 0],
+  [0, 2],
+  [3, 2],
+  [0, 0],
+])("highlights pending sync counts and actions for ahead=%i behind=%i", async (ahead, behind) => {
+  const next = await api.refreshRepository(1);
+  vi.mocked(api.refreshRepository).mockResolvedValue({
+    ...next,
+    summary: { ...next.summary, ahead, behind },
+  });
+  const { container } = render(<GitWorkspace project={project} active {...callbacks} />);
+  await screen.findByRole("button", { name: "src/a.ts" });
+  const header = within(container.querySelector(".git-workspace-header")!);
+  const push = header.getByRole("button", { name: `Push ↑${ahead}` });
+  const pull = header.getByRole("button", { name: `Pull ↓${behind}` });
+  const pushCount = header.getByLabelText(`待推送 ${ahead} 个提交`);
+  const pullCount = header.getByLabelText(`待拉取 ${behind} 个提交`);
+  for (const [count, elements] of [
+    [ahead, [push, pushCount]],
+    [behind, [pull, pullCount]],
+  ] as const) {
+    for (const element of elements) {
+      if (count > 0) expect(element).toHaveClass("has-pending");
+      else expect(element).not.toHaveClass("has-pending");
+    }
+  }
+  expect(push).toBeEnabled();
+  expect(pull).toBeEnabled();
+});
+
 it("uses consistent SVG icons for the header, local, current, and remote branches", async () => {
   vi.mocked(api.getBranches).mockResolvedValue(
     ["main", "develop", "origin/topic"].map((name) => ({

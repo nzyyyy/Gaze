@@ -391,8 +391,22 @@ export default function GitWorkspace({
                       ? tr("分离 HEAD · {0}", shortOid(selected.headOid))
                       : tr("尚无提交")}
                 </span>
-                <span data-tooltip={tr("同步数量来自本地跟踪引用；Fetch 后更新。")}>
-                  ↑{selected.ahead} ↓{selected.behind}
+                <span
+                  className="git-sync-counts"
+                  data-tooltip={tr("同步数量来自本地跟踪引用；Fetch 后更新。")}
+                >
+                  <span
+                    className={`git-sync-count${selected.ahead > 0 ? " has-pending" : ""}`}
+                    aria-label={tr("待推送 {0} 个提交", selected.ahead)}
+                  >
+                    ↑{selected.ahead}
+                  </span>
+                  <span
+                    className={`git-sync-count${selected.behind > 0 ? " has-pending" : ""}`}
+                    aria-label={tr("待拉取 {0} 个提交", selected.behind)}
+                  >
+                    ↓{selected.behind}
+                  </span>
                 </span>
               </div>
               <div className="git-sync-actions">
@@ -403,12 +417,14 @@ export default function GitWorkspace({
                   Fetch
                 </button>
                 <button
+                  className={selected.behind > 0 ? "has-pending" : undefined}
                   disabled={operations.busy || !selected.capabilities.canWriteWorkTree}
                   onClick={() => void run({ type: "pull", strategy: "fastForwardOnly" })}
                 >
                   Pull ↓{selected.behind}
                 </button>
                 <button
+                  className={selected.ahead > 0 ? "has-pending" : undefined}
                   disabled={operations.busy || !selected.branch}
                   onClick={() => void run({ type: "push", remote: null, branch: null })}
                 >

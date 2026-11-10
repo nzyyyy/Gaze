@@ -100,6 +100,28 @@ it("lists all imported projects, deduplicates shared worktrees and sums known li
   expect(props.onSelect).toHaveBeenCalledWith(projects[1]);
 });
 
+it("shows pending sync counts for shared repositories and clears them after syncing", async () => {
+  vi.mocked(api.refreshRepository).mockImplementation(async (id) => {
+    const next = refresh(id);
+    return { ...next, summary: { ...next.summary, ahead: id === 1 ? 3 : 0, behind: 2 } };
+  });
+  render(<GitProjectList {...props} />);
+  await screen.findAllByLabelText("待推送 3 个提交");
+  for (const name of ["Gaze", "Gaze source"]) {
+    expect(within(row(name)).getByLabelText("待推送 3 个提交")).toHaveTextContent("↑3");
+    expect(within(row(name)).getByLabelText("待拉取 2 个提交")).toHaveTextContent("↓2");
+  }
+  expect(within(row("Clean")).queryByText("↑0")).not.toBeInTheDocument();
+  expect(within(row("Clean")).getByLabelText("待拉取 2 个提交")).toBeInTheDocument();
+  expect(row("Notes").querySelector(".git-sync-counts")).toBeNull();
+  expect(api.refreshRepository).toHaveBeenCalledTimes(2);
+  vi.mocked(api.refreshRepository).mockImplementation(async (id) => refresh(id));
+  act(() => vi.mocked(api.onRepositoryChange).mock.calls[0]![0](1));
+  await waitFor(() => expect(row("Gaze").querySelector(".git-sync-counts")).toBeNull());
+  expect(row("Gaze source").querySelector(".git-sync-counts")).toBeNull();
+  expect(within(row("Clean")).getByLabelText("待拉取 2 个提交")).toBeInTheDocument();
+});
+
 it("keeps branches and totals visible while refreshing on return", async () => {
   vi.mocked(api.refreshRepository).mockImplementation(async (id) => refresh(id, [file()]));
   const { rerender } = render(<GitProjectList {...props} />);
@@ -168,12 +190,14 @@ it("uses a newer selected snapshot immediately and prevents project switches whi
     <GitProjectList
       {...props}
       busy
-      selectedRepository={next.summary}
+      selectedRepository={{ ...next.summary, ahead: 4, behind: 1 }}
       snapshot={{ ...next.snapshot!, id: 5 }}
     />,
   );
   expect(screen.getAllByLabelText("新增 10 行，删除 4 行")).toHaveLength(2);
   expect(row("Gaze")).toHaveClass("has-conflicts");
+  expect(screen.getAllByLabelText("待推送 4 个提交")).toHaveLength(2);
+  expect(screen.getAllByLabelText("待拉取 1 个提交")).toHaveLength(2);
   fireEvent.click(row("Clean"));
   expect(props.onSelect).not.toHaveBeenCalled();
   expect(row("Clean")).toBeDisabled();

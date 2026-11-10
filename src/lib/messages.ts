@@ -447,6 +447,8 @@ export const english: Record<string, string> = {
   尚无提交: "No commits yet",
   "同步数量来自本地跟踪引用；Fetch 后更新。":
     "Sync counts come from local tracking references and update after Fetch.",
+  "待推送 {0} 个提交": "{0} commits to push",
+  "待拉取 {0} 个提交": "{0} commits to pull",
   刷新: "Refresh",
   输出: "Output",
   "{0} 条错误": "{0} errors",

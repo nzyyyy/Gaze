@@ -167,7 +167,32 @@ export function GitProjectList({
                 data-tooltip={tr("{0} · 整个仓库{1}", project.root, error ? ` · ${error}` : "")}
                 onClick={() => onSelect(project)}
               >
-                <strong>{project.name}</strong>
+                <span className="git-project-heading">
+                  <strong>{project.name}</strong>
+                  {!error && summary && (summary.ahead > 0 || summary.behind > 0) && (
+                    <span
+                      className="git-sync-counts"
+                      data-tooltip={tr("同步数量来自本地跟踪引用；Fetch 后更新。")}
+                    >
+                      {summary.ahead > 0 && (
+                        <span
+                          className="git-sync-count has-pending"
+                          aria-label={tr("待推送 {0} 个提交", summary.ahead)}
+                        >
+                          ↑{summary.ahead}
+                        </span>
+                      )}
+                      {summary.behind > 0 && (
+                        <span
+                          className="git-sync-count has-pending"
+                          aria-label={tr("待拉取 {0} 个提交", summary.behind)}
+                        >
+                          ↓{summary.behind}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </span>
                 <span className="git-project-branch">
                   {summary?.branch ||
                     (summary?.headOid
