@@ -122,3 +122,21 @@ it("cancels a pending confirmation when the repository changes", async () => {
   expect(completed).toHaveBeenCalledWith("cancelled");
   expect(api.startOperation).not.toHaveBeenCalled();
 });
+
+it("ignores operation output and completion from other repositories", () => {
+  const notice = vi.fn();
+  const { result } = renderHook(() => useGitOperations(repository, vi.fn(), vi.fn(), notice));
+  act(() =>
+    receive({
+      operationId: 20,
+      repositoryId: 2,
+      kind: "finished",
+      message: "other",
+      outcome: "succeeded",
+      exitCode: 0,
+    }),
+  );
+  expect(result.current.logs).toEqual([]);
+  expect(result.current.status).toBe("");
+  expect(notice).not.toHaveBeenCalled();
+});

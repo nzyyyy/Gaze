@@ -54,7 +54,7 @@ const refresh = (id: number, files: FileChange[] = []): RepositoryRefresh => ({
   },
   snapshot: { id: 1, repositoryId: id, headOid: "abcdef123", files },
 });
-const props = { projects, active: true, busy: false, onSelect: vi.fn(), selectedProjectId: "p1" };
+const props = { projects, active: true, onSelect: vi.fn(), selectedProjectId: "p1" };
 const row = (name: string) => screen.getByText(name, { selector: "strong" }).closest("button")!;
 
 beforeEach(() => {
@@ -182,14 +182,13 @@ it("refreshes only the changed repository and clears its highlight when clean", 
   expect(vi.mocked(api.refreshRepository).mock.calls.map(([id]) => id)).toEqual([1, 2, 1]);
 });
 
-it("uses a newer selected snapshot immediately and prevents project switches while busy", async () => {
+it("uses a newer selected snapshot immediately and keeps project navigation available", async () => {
   const { rerender } = render(<GitProjectList {...props} />);
   await screen.findAllByText("工作区干净");
   const next = refresh(1, [file({ additions: 10, deletions: 4, conflict: true })]);
   rerender(
     <GitProjectList
       {...props}
-      busy
       selectedRepository={{ ...next.summary, ahead: 4, behind: 1 }}
       snapshot={{ ...next.snapshot!, id: 5 }}
     />,
@@ -199,8 +198,8 @@ it("uses a newer selected snapshot immediately and prevents project switches whi
   expect(screen.getAllByLabelText("待推送 4 个提交")).toHaveLength(2);
   expect(screen.getAllByLabelText("待拉取 1 个提交")).toHaveLength(2);
   fireEvent.click(row("Clean"));
-  expect(props.onSelect).not.toHaveBeenCalled();
-  expect(row("Clean")).toBeDisabled();
+  expect(props.onSelect).toHaveBeenCalledWith(projects[2]);
+  expect(row("Clean")).toBeEnabled();
 });
 
 it("removes old totals on failure even when the selected snapshot still contains changes", async () => {

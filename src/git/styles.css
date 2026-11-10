@@ -327,8 +327,11 @@
 }
 .gaze-git-workspace .changes-pane {
   display: grid;
-  grid-template-rows: 37px 1fr auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   height: 100%;
+}
+.gaze-git-workspace .changes-pane > .pane-title {
+  gap: 6px;
 }
 .gaze-git-workspace .change-groups {
   overflow: auto;
@@ -370,7 +373,24 @@
   gap: 6px;
 }
 .gaze-git-workspace .batch-actions {
-  gap: 2px;
+  flex: none;
+  margin-left: auto;
+  max-width: 140px;
+  gap: 0;
+  white-space: nowrap;
+}
+.gaze-git-workspace .batch-actions > button:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.gaze-git-workspace .batch-actions > .row-menu-trigger {
+  flex: none;
+  margin-left: -1px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
 }
 .gaze-git-workspace .change-group header code {
   font-variant-numeric: tabular-nums;
@@ -1822,9 +1842,18 @@
 
 .gaze-git-workspace .working-tree-title {
   display: flex;
+  flex: 1;
+  min-width: 0;
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+}
+.gaze-git-workspace .working-tree-title > input {
+  flex: none;
+}
+.gaze-git-workspace .working-tree-title > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .gaze-git-workspace .history-branch-search {
@@ -2068,9 +2097,6 @@
 }
 .gaze-git-workspace .git-details-pane > .changes-pane {
   height: 100%;
-}
-.gaze-git-workspace .git-details-pane .working-tree-title {
-  white-space: normal;
 }
 .gaze-git-workspace .canvas {
   display: flex;

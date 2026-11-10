@@ -36,6 +36,12 @@ struct Registry {
     common_dirs: HashMap<RepositoryId, PathBuf>,
 }
 
+#[derive(Default)]
+struct WriteLocks {
+    operations: HashMap<PathBuf, bool>,
+    editors: HashSet<PathBuf>,
+}
+
 pub struct AppState {
     cache: crate::cache::Cache,
     registry: Mutex<Registry>,
@@ -45,7 +51,7 @@ pub struct AppState {
     next_repository_id: AtomicU64,
     next_snapshot_id: AtomicU64,
     next_operation_id: AtomicU64,
-    write_locks: Mutex<HashSet<PathBuf>>,
+    write_locks: Mutex<WriteLocks>,
     mutating_repositories: Mutex<HashSet<RepositoryId>>,
     running: Mutex<HashMap<OperationId, process::RunningOperation>>,
     watchers: Mutex<HashMap<RepositoryId, RecommendedWatcher>>,
@@ -79,7 +85,7 @@ impl AppState {
             next_repository_id: AtomicU64::new(1),
             next_snapshot_id: AtomicU64::new(1),
             next_operation_id: AtomicU64::new(1),
-            write_locks: Mutex::new(HashSet::new()),
+            write_locks: Mutex::new(WriteLocks::default()),
             mutating_repositories: Mutex::new(HashSet::new()),
             running: Mutex::new(HashMap::new()),
             watchers: Mutex::new(HashMap::new()),
@@ -190,10 +196,13 @@ impl AppState {
             .write_locks
             .lock()
             .map_err(|_| "Repository lock is busy")?;
-        if paths.iter().any(|path| locks.contains(path)) {
+        if paths
+            .iter()
+            .any(|path| locks.editors.contains(path) || locks.operations.get(path) == Some(&true))
+        {
             return Err("Git 操作进行中，请稍后保存或修改文件。".into());
         }
-        locks.extend(paths.iter().cloned());
+        locks.editors.extend(paths.iter().cloned());
         Ok(EditorWriteGuard { state: self, paths })
     }
 
@@ -314,7 +323,7 @@ impl Drop for EditorWriteGuard<'_> {
     fn drop(&mut self) {
         if let Ok(mut locks) = self.state.write_locks.lock() {
             for path in &self.paths {
-                locks.remove(path);
+                locks.editors.remove(path);
             }
         }
     }
@@ -441,10 +450,23 @@ mod tests {
             .validate_trash_targets(&inspection.root, &["src/file.ts".into()])
             .is_ok());
         let lock = state.editor_guard(Path::new(&a.root)).unwrap();
-        assert!(process::acquire_lock(&state, &inspection.common_git_dir).is_err());
+        assert!(process::acquire_lock(&state, &inspection.common_git_dir, true).is_err());
         drop(lock);
-        process::acquire_lock(&state, &inspection.common_git_dir).unwrap();
+        process::acquire_lock(&state, &inspection.common_git_dir, true).unwrap();
         assert!(state.editor_guard(Path::new(&b.root)).is_err());
+        process::release_lock(&state, &inspection.common_git_dir);
+        process::acquire_lock(&state, &inspection.common_git_dir, false).unwrap();
+        let editor = state.editor_guard(Path::new(&b.root)).unwrap();
+        assert!(process::acquire_lock(&state, &inspection.common_git_dir, false).is_err());
+        drop(editor);
+        assert!(process::acquire_lock(&state, &inspection.common_git_dir, true).is_err());
+        let editor = state.editor_guard(Path::new(&a.root)).unwrap();
+        process::release_lock(&state, &inspection.common_git_dir);
+        assert!(process::acquire_lock(&state, &inspection.common_git_dir, true).is_err());
+        drop(editor);
+        process::acquire_lock(&state, &inspection.common_git_dir, true).unwrap();
+        let unrelated = tempfile::tempdir().unwrap();
+        assert!(state.editor_guard(unrelated.path()).is_ok());
         process::release_lock(&state, &inspection.common_git_dir);
         cache.delete_project("a").await.unwrap();
         assert!(state.record(one.id).is_ok());

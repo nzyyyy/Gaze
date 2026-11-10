@@ -1,3 +1,4 @@
+import { OperationButton } from "./components/OperationButton";
 import { t as tr, useLanguage } from "../lib/i18n";
 import { useState } from "react";
 import type { ConflictChoice, ConflictDocument, ConflictResolution } from "./api";
@@ -44,9 +45,9 @@ export function ConflictEditor({
         <button onClick={onBack}>← {t("back")}</button>
         <strong>{document.path}</strong>
         <span>{remaining ? `${remaining} ${t("blocksRemaining")}` : t("readyToResolve")}</span>
-        <button className="primary" disabled={remaining > 0} onClick={resolve}>
+        <OperationButton className="primary" disabled={remaining > 0} onClick={resolve}>
           {t("resolveAndStage")}
-        </button>
+        </OperationButton>
       </header>
       <div className="conflict-scroll">
         <div className="conflict-column-head">

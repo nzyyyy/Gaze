@@ -126,6 +126,7 @@ export interface CodeReaderHandle {
 
 interface EditorSurfaceProps {
   tab: EditorTab;
+  gitLocked?: boolean;
   active: boolean;
   theme: ResolvedTheme;
   fontFamily?: string;
@@ -366,6 +367,7 @@ function preferenceExtensions(
 
 export function CodeReader({
   tab,
+  gitLocked = false,
   active,
   theme,
   fontFamily,
@@ -395,6 +397,8 @@ export function CodeReader({
   const languageCompartment = useRef(new Compartment());
   const operationCompartment = useRef(new Compartment());
   const operationLockedRef = useRef(false);
+  const gitLockedRef = useRef(gitLocked);
+  gitLockedRef.current = gitLocked;
   const operationCursorRef = useRef<number | null>(null);
   const initialViewRef = useRef(initialView);
   const initialViewDocumentRef = useRef<LoadedState | null>(null);
@@ -540,7 +544,8 @@ export function CodeReader({
       !preferencesRef.current.autoSave ||
       !documentRef.current?.editable ||
       pauseReasonRef.current ||
-      operationLockedRef.current
+      operationLockedRef.current ||
+      gitLockedRef.current
     )
       return;
     const wait = Math.max(
@@ -560,6 +565,17 @@ export function CodeReader({
   }, [clearAutoSaveTimer]);
 
   scheduleAutoSaveRef.current = scheduleAutoSave;
+
+  useEffect(() => {
+    const locked = gitLocked || operationLockedRef.current;
+    if (locked) clearAutoSaveTimer();
+    viewRef.current?.dispatch({
+      effects: operationCompartment.current.reconfigure(
+        locked ? Prec.highest([EditorState.readOnly.of(true), EditorView.editable.of(false)]) : [],
+      ),
+    });
+    if (!locked && dirtyRef.current) scheduleAutoSaveRef.current();
+  }, [gitLocked, clearAutoSaveTimer]);
 
   const refreshGitChanges = useCallback((view: EditorView) => {
     const request = ++gitDiffRequestRef.current;
@@ -614,7 +630,13 @@ export function CodeReader({
 
   const revertChange = useCallback((block: ChangeBlock) => {
     const view = viewRef.current;
-    if (!view || !documentRef.current?.editable || operationLockedRef.current) return;
+    if (
+      !view ||
+      !documentRef.current?.editable ||
+      operationLockedRef.current ||
+      gitLockedRef.current
+    )
+      return;
     const doc = view.state.doc;
     if (block.kind === "deleted") {
       const text = block.oldLines.join("\n");
@@ -640,7 +662,7 @@ export function CodeReader({
 
   const save = useCallback(
     async (options?: { force?: boolean; forFileOperation?: boolean }): Promise<SaveResult> => {
-      if (operationLockedRef.current && !options?.forFileOperation) {
+      if ((operationLockedRef.current || gitLockedRef.current) && !options?.forFileOperation) {
         return { status: "error", message: t("文件操作进行中，请稍候。") };
       }
       clearAutoSaveTimer();
@@ -834,7 +856,13 @@ export function CodeReader({
           reloadFromDisk();
         }
         operationLockedRef.current = false;
-        viewRef.current?.dispatch({ effects: operationCompartment.current.reconfigure([]) });
+        viewRef.current?.dispatch({
+          effects: operationCompartment.current.reconfigure(
+            gitLockedRef.current
+              ? Prec.highest([EditorState.readOnly.of(true), EditorView.editable.of(false)])
+              : [],
+          ),
+        });
         if (dirtyRef.current) scheduleAutoSaveRef.current();
       },
     }),
@@ -963,7 +991,9 @@ export function CodeReader({
           ? definitionLink(
               tab.projectId,
               tab.path,
-              () => !operationLockedRef.current && !!onGoToDefinitionRef.current,
+              () =>
+                (!operationLockedRef.current || gitLockedRef.current) &&
+                !!onGoToDefinitionRef.current,
               (position) => onGoToDefinitionRef.current?.(position),
               (path, fragment) => onOpenFileLinkRef.current?.(tab.projectId, path, fragment),
             )
@@ -981,12 +1011,14 @@ export function CodeReader({
           ),
         ),
         operationCompartment.current.of(
-          operationLockedRef.current
+          operationLockedRef.current || gitLockedRef.current
             ? Prec.highest([EditorState.readOnly.of(true), EditorView.editable.of(false)])
             : [],
         ),
         EditorState.transactionFilter.of((transaction) =>
-          transaction.docChanged && operationLockedRef.current ? [] : transaction,
+          transaction.docChanged && (operationLockedRef.current || gitLockedRef.current)
+            ? []
+            : transaction,
         ),
       ],
     });

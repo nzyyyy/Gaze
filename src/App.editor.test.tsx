@@ -5,6 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FileOperation, FileOperationResult } from "./components/FileOperationDialog";
 import type { DirEntry, EditorStatus, Project } from "./lib/types";
 import type { NativeMenuAction, NativeMenuState } from "./lib/nativeMenu";
+import type { PrepareGitOperation } from "./git/editorOperations";
+import type { OperationRequest } from "./git/models";
+
+const gitPreparation = vi.hoisted(() => ({ current: null as PrepareGitOperation | null }));
+const openFileHandler = vi.hoisted(() => ({
+  current: null as ((project: Project, entry: DirEntry) => void) | null,
+}));
 
 const nativeMenu = vi.hoisted(() => ({
   state: null as NativeMenuState | null,
@@ -105,13 +112,16 @@ vi.mock("./git/GitWorkspace", async () => {
       project,
       projects,
       onSelectProject,
+      prepareOperation,
     }: {
       active: boolean;
       preload?: boolean;
       project: Project | null;
       projects: Project[];
       onSelectProject: (project: Project) => void;
+      prepareOperation: PrepareGitOperation;
     }) {
+      gitPreparation.current = prepareOperation;
       const [position, setPosition] = useState("");
       return (
         <section
@@ -168,6 +178,7 @@ vi.mock("./components/FileTree", async () => {
       create: (project, parent, isDir) => createSpy(project.id, parent, isDir),
     }));
     fileOperationHandler.current = props.onFileOperation;
+    openFileHandler.current = props.onOpenFile;
     const project = props.projects[0];
     const open = (name: string) =>
       project &&
@@ -198,6 +209,7 @@ vi.mock("./components/CodeReader", async () => {
       onDirtyChange: (dirty: boolean) => void;
       onStatus: (status: EditorStatus | null) => void;
       reloadToken: number;
+      gitLocked?: boolean;
       externalChangeToken: number;
       previewRequest?: { fragment: string | null; nonce: number } | null;
       initialView?: { line: number; character: number; scrollTop: number };
@@ -248,7 +260,7 @@ vi.mock("./components/CodeReader", async () => {
     return (
       <div
         data-testid={`editor-${props.tab.key}`}
-        data-locked={String(locked)}
+        data-locked={String(locked || !!props.gitLocked)}
         data-reload={props.reloadToken}
         data-external={props.externalChangeToken}
         data-preview-fragment={props.previewRequest?.fragment}
@@ -1900,6 +1912,89 @@ describe("App editor panes", () => {
       "true",
     );
   });
+
+  it.each([
+    { type: "fetch", remote: null, prune: false },
+    { type: "push", remote: null, branch: null },
+  ] satisfies OperationRequest[])("allows editing and navigation during $type", async (request) => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByText("README.md"));
+    await user.click(screen.getByRole("button", { name: "Git 管理" }));
+    await screen.findByRole("region", { name: "Git 工作区" });
+    let finish!: Awaited<ReturnType<PrepareGitOperation>>;
+    await act(async () => {
+      finish = await gitPreparation.current!(project.root, request);
+    });
+    await user.click(screen.getByRole("button", { name: "项目文件" }));
+    await user.click(screen.getByRole("button", { name: "package.json" }));
+    expect(screen.getByTestId("editor-p1\u0000README.md")).toHaveAttribute("data-locked", "false");
+    expect(screen.getByTestId("editor-p1\u0000package.json")).toHaveAttribute(
+      "data-locked",
+      "false",
+    );
+    expect(nativeMenu.state?.blocked).toBe(false);
+    expect(saveSpy).not.toHaveBeenCalled();
+    await act(async () => finish("succeeded"));
+  });
+
+  it.each(["succeeded", "failed", "cancelled"] as const)(
+    "limits Pull locks to its repository and releases them on %s",
+    async (outcome) => {
+      const user = userEvent.setup();
+      const second = { id: "p2", name: "Second", root: "/second" };
+      apiMock.bootstrapWorkspace.mockResolvedValue({
+        projects: [project, second],
+        activeProjectId: project.id,
+        theme: "system",
+        fonts: DEFAULT_FONT_SETTINGS,
+      });
+      render(<App />);
+      await user.click(await screen.findByText("README.md"));
+      await user.click(screen.getByRole("button", { name: "Git 管理" }));
+      await screen.findByRole("region", { name: "Git 工作区" });
+      let finish!: Awaited<ReturnType<PrepareGitOperation>>;
+      await act(async () => {
+        finish = await gitPreparation.current!(project.root, {
+          type: "pull",
+          strategy: "fastForwardOnly",
+        });
+      });
+      expect(screen.getByTestId("editor-p1\u0000README.md")).toHaveAttribute("data-locked", "true");
+      await user.click(screen.getByRole("button", { name: "Git 项目 Second" }));
+      expect(screen.getByRole("region", { name: "Git 工作区" })).toHaveAttribute(
+        "data-root",
+        second.root,
+      );
+      await user.click(screen.getByRole("button", { name: "项目文件" }));
+      act(() => openFileHandler.current!(second, entry("other.ts")));
+      expect(screen.getByTestId("editor-p2\u0000other.ts")).toHaveAttribute("data-locked", "false");
+      let finishSecond!: Awaited<ReturnType<PrepareGitOperation>>;
+      await act(async () => {
+        finishSecond = await gitPreparation.current!(second.root, {
+          type: "switchBranch",
+          name: "topic",
+        });
+      });
+      act(() => openFileHandler.current!(project, entry("package.json")));
+      expect(screen.getByTestId("editor-p1\u0000package.json")).toHaveAttribute(
+        "data-locked",
+        "true",
+      );
+      await act(async () => finish(outcome));
+      expect(screen.getByTestId("editor-p1\u0000README.md")).toHaveAttribute(
+        "data-locked",
+        "false",
+      );
+      expect(screen.getByTestId("editor-p1\u0000package.json")).toHaveAttribute(
+        "data-locked",
+        "false",
+      );
+      expect(screen.getByTestId("editor-p2\u0000other.ts")).toHaveAttribute("data-locked", "true");
+      await act(async () => finishSecond("succeeded"));
+      expect(screen.getByTestId("editor-p2\u0000other.ts")).toHaveAttribute("data-locked", "false");
+    },
+  );
 
   it("preloads only the default Git project in idle time without changing the visible view", async () => {
     let idle!: IdleRequestCallback;

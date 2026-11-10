@@ -1,3 +1,4 @@
+import { OperationButton } from "./OperationButton";
 import { memo, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, type RepositorySummary, type StashInfo } from "../api";
@@ -82,9 +83,9 @@ export function StashesPane({
     <div>
       <div className="pane-title">
         <span>{t("stashes")}</span>
-        <button aria-label={`${t("create")} ${t("stashes")}`} onClick={create}>
+        <OperationButton aria-label={`${t("create")} ${t("stashes")}`} onClick={create}>
           ＋
-        </button>
+        </OperationButton>
       </div>
       <div className="object-list">
         {stashes === undefined ? (
@@ -106,19 +107,19 @@ export function StashesPane({
                 <span>{stash.subject}</span>
               </button>
               <div>
-                <button
+                <OperationButton
                   onClick={() => onRun({ type: "stashApply", index: stash.index, pop: false })}
                 >
                   {t("apply")}
-                </button>
-                <button
+                </OperationButton>
+                <OperationButton
                   onClick={() => onRun({ type: "stashApply", index: stash.index, pop: true })}
                 >
                   {t("pop")}
-                </button>
-                <button onClick={() => onRun({ type: "stashDrop", index: stash.index })}>
+                </OperationButton>
+                <OperationButton onClick={() => onRun({ type: "stashDrop", index: stash.index })}>
                   {t("drop")}
-                </button>
+                </OperationButton>
               </div>
             </div>
           ))

@@ -2,7 +2,14 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import GitWorkspace from "./GitWorkspace";
 import { listen } from "@tauri-apps/api/event";
-import { api, type GitContext, type RepositoryRefresh, type RepositorySummary } from "./api";
+import {
+  api,
+  type GitContext,
+  type OperationEvent,
+  type OperationPreview,
+  type RepositoryRefresh,
+  type RepositorySummary,
+} from "./api";
 
 vi.mock("./api", () => ({
   api: {
@@ -17,6 +24,8 @@ vi.mock("./api", () => ({
     getRemotes: vi.fn(),
     getSubmodules: vi.fn(),
     getStashes: vi.fn(),
+    previewOperation: vi.fn(),
+    startOperation: vi.fn(),
   },
 }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
@@ -102,6 +111,46 @@ beforeEach(() => {
   });
 });
 afterEach(() => sidebarContainer.remove());
+
+it("keeps projects, diffs and history browsable while disabling repository writes", async () => {
+  let receive!: (event: OperationEvent) => void;
+  vi.mocked(api.onOperationEvent).mockImplementation(async (handler) => {
+    receive = handler;
+    return () => {};
+  });
+  vi.mocked(api.previewOperation).mockResolvedValue({
+    requiresConfirmation: false,
+  } as OperationPreview);
+  vi.mocked(api.startOperation).mockResolvedValue({ operationId: 9, accepted: true });
+  vi.mocked(api.getHistory).mockResolvedValue({ commits: [], nextCursor: null });
+  vi.mocked(api.getBranches).mockResolvedValue([]);
+  const second = { id: "p2", name: "Second", root: "/second" };
+  render(<GitWorkspace project={project} active {...callbacks} projects={[project, second]} />);
+  await screen.findByRole("button", { name: "src/a.ts" });
+  fireEvent.click(screen.getByRole("button", { name: "Fetch" }));
+  await waitFor(() => expect(api.startOperation).toHaveBeenCalled());
+  expect(screen.getByRole("button", { name: "暂存 src/a.ts" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "src/a.ts" }));
+  expect(await screen.findByRole("button", { name: "文件历史" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "在编辑器打开" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "历史" }));
+  await waitFor(() => expect(api.getHistory).toHaveBeenCalled());
+  expect(screen.getByRole("button", { name: "历史" })).toBeEnabled();
+  const row = screen.getByText(second.name, { selector: "strong" }).closest("button")!;
+  expect(row).toBeEnabled();
+  fireEvent.click(row);
+  expect(callbacks.onSelectProject).toHaveBeenCalledWith(second);
+  await act(async () =>
+    receive({
+      operationId: 9,
+      repositoryId: 1,
+      kind: "finished",
+      message: "done",
+      outcome: "succeeded",
+      exitCode: 0,
+    }),
+  );
+});
 
 it.each([
   [3, 0],

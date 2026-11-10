@@ -1,4 +1,5 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { GitBusyContext, OperationButton } from "./OperationButton";
+import { memo, useContext, useEffect, useRef, useState } from "react";
 import type { FileChange, RepositorySummary, WorkingTreeSnapshot } from "../api";
 import { useI18n } from "../i18n";
 import type { RunOperation } from "../types";
@@ -178,38 +179,38 @@ export function ChangesPane({
     <div className="changes-pane">
       <div className="pane-title">
         {title}
-        <span className="batch-actions">
-          {hasSelection && (
-            <>
-              <button
-                disabled={!stageSelection.length}
-                onClick={() => batch({ type: "stageFiles", paths: stageSelection })}
+        {hasSelection && (
+          <span className="batch-actions" role="group" aria-label={t("batchActions")}>
+            <OperationButton
+              disabled={!stageSelection.length}
+              aria-label={`${t("stageSelected")} (${stageSelection.length})`}
+              data-tooltip={`${t("stageSelected")} (${stageSelection.length})`}
+              onClick={() => batch({ type: "stageFiles", paths: stageSelection })}
+            >
+              {t("stage")} ({stageSelection.length})
+            </OperationButton>
+            <RowMenu label={t("batchActions")} glyph="▾">
+              <OperationButton
+                disabled={!unstageSelection.length}
+                onClick={() => batch({ type: "unstageFiles", paths: unstageSelection })}
               >
-                {t("stageSelected")} ({stageSelection.length})
-              </button>
-              <RowMenu label={t("batchActions")} glyph="▾">
-                <button
-                  disabled={!unstageSelection.length}
-                  onClick={() => batch({ type: "unstageFiles", paths: unstageSelection })}
-                >
-                  {t("unstageSelected")} ({unstageSelection.length})
-                </button>
-                <button
-                  disabled={!discardPaths.length}
-                  onClick={() => batch({ type: "discardTracked", paths: discardPaths })}
-                >
-                  {t("discard")} ({discardPaths.length})
-                </button>
-                <button
-                  disabled={!trashPaths.length}
-                  onClick={() => batch({ type: "trashUntracked", paths: trashPaths })}
-                >
-                  {t("trash")} ({trashPaths.length})
-                </button>
-              </RowMenu>
-            </>
-          )}
-        </span>
+                {t("unstageSelected")} ({unstageSelection.length})
+              </OperationButton>
+              <OperationButton
+                disabled={!discardPaths.length}
+                onClick={() => batch({ type: "discardTracked", paths: discardPaths })}
+              >
+                {t("discard")} ({discardPaths.length})
+              </OperationButton>
+              <OperationButton
+                disabled={!trashPaths.length}
+                onClick={() => batch({ type: "trashUntracked", paths: trashPaths })}
+              >
+                {t("trash")} ({trashPaths.length})
+              </OperationButton>
+            </RowMenu>
+          </span>
+        )}
       </div>
       <div className="change-groups">
         {repository?.ongoing && (
@@ -218,19 +219,25 @@ export function ChangesPane({
               {repository.ongoing.kind} {t("inProgress")}
             </strong>
             {repository.ongoing.canContinue && !files.some((file) => file.conflict) && (
-              <button onClick={() => onRun({ type: "continue", kind: repository.ongoing!.kind })}>
+              <OperationButton
+                onClick={() => onRun({ type: "continue", kind: repository.ongoing!.kind })}
+              >
                 {t("continue")}
-              </button>
+              </OperationButton>
             )}
             {repository.ongoing.canSkip && (
-              <button onClick={() => onRun({ type: "skip", kind: repository.ongoing!.kind })}>
+              <OperationButton
+                onClick={() => onRun({ type: "skip", kind: repository.ongoing!.kind })}
+              >
                 {t("skip")}
-              </button>
+              </OperationButton>
             )}
             {repository.ongoing.canAbort && (
-              <button onClick={() => onRun({ type: "abort", kind: repository.ongoing!.kind })}>
+              <OperationButton
+                onClick={() => onRun({ type: "abort", kind: repository.ongoing!.kind })}
+              >
                 {t("abort")}
-              </button>
+              </OperationButton>
             )}
           </div>
         )}
@@ -304,6 +311,7 @@ function CommitBox({
   onRun: RunOperation;
 }) {
   const { t } = useI18n();
+  const busy = useContext(GitBusyContext);
   const messages = useRef<Record<number, string>>({});
   const textarea = useRef<HTMLTextAreaElement>(null);
   const activeRepositoryId = useRef(repositoryId);
@@ -317,7 +325,7 @@ function CommitBox({
   const commitRunning = repositoryId ? committingRepositories.has(repositoryId) : false;
   const commit = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!repositoryId) return;
+    if (!repositoryId || busy) return;
     const submittedMessage = textarea.current?.value ?? messages.current[repositoryId] ?? "";
     const submittedRepositoryId = repositoryId;
     messages.current[submittedRepositoryId] = submittedMessage;
@@ -342,6 +350,7 @@ function CommitBox({
     });
   };
   const canCommit =
+    !busy &&
     repositoryId != null &&
     !commitRunning &&
     nonemptyRepositories.has(repositoryId) &&
@@ -401,13 +410,13 @@ function CommitBox({
           {t("signOff")}
         </label>
       </div>
-      <button
+      <OperationButton
         className="primary"
         disabled={!canCommit}
         aria-keyshortcuts="Meta+Enter Control+Enter"
       >
         {commitRunning ? `${t("running")}…` : t("commitStaged")}
-      </button>
+      </OperationButton>
     </form>
   );
 }
@@ -525,13 +534,13 @@ function ChangeGroup({
             <FileRowActions additions={file.additions} deletions={file.deletions}>
               {type === "staged" ? (
                 <>
-                  <button
+                  <OperationButton
                     className="stage-icon"
                     aria-label={`${t("unstage")} ${file.path}`}
                     onClick={() => onRun({ type: "unstageFiles", paths: [file.path] })}
                   >
                     −
-                  </button>
+                  </OperationButton>
                   <RowMenu context>
                     <button onClick={() => onFileHistory(file.path)}>{t("fileHistory")}</button>
                     <button onClick={() => onBlame(file.path)}>{t("blame")}</button>
@@ -539,20 +548,20 @@ function ChangeGroup({
                 </>
               ) : type === "mixed" ? (
                 <>
-                  <button
+                  <OperationButton
                     className="stage-icon"
                     aria-label={`${t("stage")} ${file.path}`}
                     onClick={() => onRun({ type: "stageFiles", paths: [file.path] })}
                   >
                     ＋
-                  </button>
-                  <button
+                  </OperationButton>
+                  <OperationButton
                     className="stage-icon"
                     aria-label={`${t("unstage")} ${file.path}`}
                     onClick={() => onRun({ type: "unstageFiles", paths: [file.path] })}
                   >
                     −
-                  </button>
+                  </OperationButton>
                   <RowMenu context>
                     <button onClick={() => onFileHistory(file.path)}>{t("fileHistory")}</button>
                     <button onClick={() => onBlame(file.path)}>{t("blame")}</button>
@@ -560,64 +569,66 @@ function ChangeGroup({
                 </>
               ) : type === "untracked" ? (
                 <>
-                  <button
+                  <OperationButton
                     className="stage-icon"
                     aria-label={`${t("stage")} ${file.path}`}
                     onClick={() => onRun({ type: "stageFiles", paths: [file.path] })}
                   >
                     ＋
-                  </button>
-                  <button
+                  </OperationButton>
+                  <OperationButton
                     className="danger-icon"
                     aria-label={`${t("trash")} ${file.path}`}
                     onClick={() => onRun({ type: "trashUntracked", paths: [file.path] })}
                   >
                     ⌫
-                  </button>
+                  </OperationButton>
                 </>
               ) : type === "conflict" ? (
                 <RowMenu context label={t("resolve")}>
                   <button onClick={() => onOpen(file, false)}>{t("openInternalEditor")}</button>
-                  <button
+                  <OperationButton
                     onClick={() =>
                       onRun({ type: "chooseConflictSide", path: file.path, side: "ours" })
                     }
                   >
                     {t("useCurrent")}
-                  </button>
-                  <button
+                  </OperationButton>
+                  <OperationButton
                     onClick={() =>
                       onRun({ type: "chooseConflictSide", path: file.path, side: "theirs" })
                     }
                   >
                     {t("useIncoming")}
-                  </button>
+                  </OperationButton>
                   <button onClick={() => onOpenExternal(file.path)}>{t("openExternal")}</button>
-                  <button onClick={() => onRun({ type: "runMergetool", path: file.path })}>
+                  <OperationButton onClick={() => onRun({ type: "runMergetool", path: file.path })}>
                     {t("runMergetool")}
-                  </button>
-                  <button onClick={() => onRun({ type: "markResolved", paths: [file.path] })}>
+                  </OperationButton>
+                  <OperationButton
+                    onClick={() => onRun({ type: "markResolved", paths: [file.path] })}
+                  >
                     {t("markResolved")}
-                  </button>
+                  </OperationButton>
                   <button onClick={() => onFileHistory(file.path)}>{t("fileHistory")}</button>
                   <button onClick={() => onBlame(file.path)}>{t("blame")}</button>
                 </RowMenu>
               ) : type === "ignored" ? null : (
                 <>
-                  <button
+                  <OperationButton
                     className="stage-icon"
                     aria-label={`${t("stage")} ${file.path}`}
                     onClick={() => onRun({ type: "stageFiles", paths: [file.path] })}
                   >
                     ＋
-                  </button>
-                  <button
+                  </OperationButton>
+                  <OperationButton
                     className="danger-icon"
                     aria-label={`${t("discard")} ${file.path}`}
                     onClick={() => onRun({ type: "discardTracked", paths: [file.path] })}
                   >
                     ↶
-                  </button>
+                  </OperationButton>
                   <RowMenu context>
                     <button onClick={() => onFileHistory(file.path)}>{t("fileHistory")}</button>
                     <button onClick={() => onBlame(file.path)}>{t("blame")}</button>

@@ -27,6 +27,7 @@ interface UseReplacementOptions {
   editorsRef: RefObject<Map<string, CodeReaderHandle>>;
   tabsRef: RefObject<EditorTab[]>;
   getProjects: () => Project[] | null;
+  isPathLocked: (path: string) => boolean;
   fileOperationBusyRef: RefObject<boolean>;
   gitOperationBusyRef: RefObject<boolean>;
   closingTabsRef: RefObject<boolean>;
@@ -38,6 +39,7 @@ export function useReplacement({
   editorsRef,
   tabsRef,
   getProjects,
+  isPathLocked,
   fileOperationBusyRef,
   gitOperationBusyRef,
   closingTabsRef,
@@ -113,6 +115,13 @@ export function useReplacement({
             finishReplacement(operation);
             return preview;
           }
+          if (
+            preview.files.some((file) => {
+              const path = absolute(file.projectId, file.path);
+              return path != null && isPathLocked(path);
+            })
+          )
+            throw new Error(t("Git 操作进行中，请稍候。"));
           const paths = new Set(preview.files.map((file) => absolute(file.projectId, file.path)));
           const affected = tabsRef.current.filter(
             (tab) =>
@@ -139,7 +148,7 @@ export function useReplacement({
         throw error;
       }
     },
-    [finishReplacement, getProjects],
+    [finishReplacement, getProjects, isPathLocked],
   );
 
   const handleApplyReplace = useCallback(
@@ -211,6 +220,13 @@ export function useReplacement({
       throw new Error(t("文件或 Git 操作进行中，请稍候。"));
     const targets = lastReplacementRef.current;
     if (targets.length === 0) throw new Error(t("没有可撤销的替换。"));
+    if (
+      targets.some((target) => {
+        const project = getProjects()?.find((item) => item.id === target.projectId);
+        return project && isPathLocked(`${project.root}/${target.path}`);
+      })
+    )
+      throw new Error(t("Git 操作进行中，请稍候。"));
     fileOperationBusyRef.current = true;
     gitOperationBusyRef.current = true;
     setOperationBusy(true);
@@ -255,7 +271,7 @@ export function useReplacement({
       setOperationBusy(false);
       flushFsChanges();
     }
-  }, [flushFsChanges, setOperationBusy]);
+  }, [flushFsChanges, setOperationBusy, getProjects, isPathLocked]);
 
   const shouldBlockKeyboard = useCallback(() => {
     const operation = replacementRef.current;

@@ -84,7 +84,13 @@ type LoadState =
   | { status: "error"; message: string };
 
 const GitWorkspace = lazy(() => import("./git/GitWorkspace"));
-import { insideWorktree, prepareEditors, type PrepareGitOperation } from "./git/editorOperations";
+import {
+  changesWorktree,
+  insideWorktree,
+  locksEditors,
+  prepareEditors,
+  type PrepareGitOperation,
+} from "./git/editorOperations";
 
 type SidebarView = "files" | "search" | "symbols" | "git";
 
@@ -207,6 +213,8 @@ export default function App() {
   const fileOperationBusyRef = useRef(false);
   const closingTabsRef = useRef(false);
   const gitOperationBusyRef = useRef(false);
+  const gitLockedRootsRef = useRef(new Set<string>());
+  const [gitLockedRoots, setGitLockedRoots] = useState<string[]>([]);
   const fileTreeRef = useRef<FileTreeHandle>(null);
   const tabsRef = useRef(tabs);
   const activeKeyRef = useRef(activeKey);
@@ -320,6 +328,24 @@ export default function App() {
   }, []);
 
   const isWorkspaceReady = useCallback(() => loadStateRef.current.status === "ready", []);
+  const gitBlocksPath = useCallback(
+    (path: string) =>
+      [...gitLockedRootsRef.current].some(
+        (root) => insideWorktree(path, root) || insideWorktree(root, path),
+      ),
+    [],
+  );
+  const isGitProjectLocked = useCallback(
+    (projectId: string) => {
+      const current = loadStateRef.current;
+      const project =
+        current.status === "ready"
+          ? current.snapshot.projects.find((item) => item.id === projectId)
+          : undefined;
+      return !!project && gitBlocksPath(project.root);
+    },
+    [gitBlocksPath],
+  );
   const {
     refreshToken,
     treeRefresh,
@@ -334,6 +360,7 @@ export default function App() {
     tabsRef,
     activeKeyRef,
     fileOperationBusyRef,
+    isProjectLocked: isGitProjectLocked,
     isWorkspaceReady,
     isTabDirty,
     notify,
@@ -926,6 +953,7 @@ export default function App() {
     operation: FileOperation,
     value: string,
   ): Promise<FileOperationResult> => {
+    if (gitBlocksPath(operation.project.root)) throw new Error(t("Git 操作进行中，请稍候。"));
     if (fileOperationBusyRef.current || closingTabsRef.current)
       throw new Error(t("文件操作进行中，请稍候。"));
     fileOperationBusyRef.current = true;
@@ -1110,6 +1138,7 @@ export default function App() {
     editorsRef,
     tabsRef,
     getProjects: getWorkspaceProjects,
+    isPathLocked: gitBlocksPath,
     fileOperationBusyRef,
     gitOperationBusyRef,
     closingTabsRef,
@@ -1118,6 +1147,7 @@ export default function App() {
   });
 
   const handlePaste = async (project: Project, parent: string, paths?: string[]) => {
+    if (gitBlocksPath(`${project.root}/${parent}`)) throw new Error(t("Git 操作进行中，请稍候。"));
     if (fileOperationBusyRef.current || gitOperationBusyRef.current || closingTabsRef.current) {
       throw new Error(t("文件或 Git 操作进行中，请稍候。"));
     }
@@ -1502,7 +1532,7 @@ export default function App() {
         notify(t("文件操作进行中，请稍候。"));
         return;
       }
-      if (gitOperationBusyRef.current) {
+      if (gitOperationBusyRef.current || gitBlocksPath(project.root)) {
         notify(t("Git 操作进行中，请稍候。"));
         return;
       }
@@ -1527,7 +1557,7 @@ export default function App() {
         await performRemoveProject(project);
       })();
     },
-    [performRemoveProject],
+    [performRemoveProject, gitBlocksPath],
   );
 
   const handleActivateTab = useCallback(
@@ -1560,6 +1590,10 @@ export default function App() {
       const keys = new Set(requested.map((tab) => tab.key));
       const closing = tabsRef.current.filter((tab) => keys.has(tab.key));
       if (!closing.length) return;
+      if (closing.some((tab) => isGitProjectLocked(tab.projectId))) {
+        notify(t("Git 操作进行中，请稍候。"));
+        return;
+      }
       closingTabsRef.current = true;
       setOperationBusy(true);
       let saving: EditorTab | undefined;
@@ -1590,7 +1624,7 @@ export default function App() {
         setOperationBusy(false);
       }
     },
-    [closeTabs, discardTabRecovery, isTabDirty, notify],
+    [closeTabs, discardTabRecovery, isTabDirty, isGitProjectLocked, notify],
   );
 
   const handleCloseTab = useCallback(
@@ -1683,7 +1717,11 @@ export default function App() {
     void (async () => {
       const release = await getCurrentWindow().onCloseRequested((event) => {
         persistSession();
-        if (fileOperationBusyRef.current || closingTabsRef.current) {
+        if (
+          fileOperationBusyRef.current ||
+          closingTabsRef.current ||
+          gitLockedRootsRef.current.size > 0
+        ) {
           event.preventDefault();
           return;
         }
@@ -1777,15 +1815,29 @@ export default function App() {
 
   const prepareGitOperation: PrepareGitOperation = useCallback(
     async (root, request, pathHint) => {
+      if (!locksEditors(request)) return async () => {};
       if (fileOperationBusyRef.current || closingTabsRef.current)
         throw new Error(t("另一个文件或 Git 操作正在执行。"));
-      fileOperationBusyRef.current = true;
-      gitOperationBusyRef.current = true;
-      setOperationBusy(true);
+      if (gitBlocksPath(root)) throw new Error(t("另一个文件或 Git 操作正在执行。"));
+      gitLockedRootsRef.current.add(root);
+      setGitLockedRoots([...gitLockedRootsRef.current]);
       const flush = () => {
-        gitOperationBusyRef.current = false;
-        fileOperationBusyRef.current = false;
-        setOperationBusy(false);
+        gitLockedRootsRef.current.delete(root);
+        setGitLockedRoots([...gitLockedRootsRef.current]);
+        if (changesWorktree(request))
+          reloadFiles(
+            tabsRef.current.filter((tab) => {
+              const current = loadStateRef.current;
+              const projectRoot =
+                current.status === "ready"
+                  ? current.snapshot.projects.find((item) => item.id === tab.projectId)?.root
+                  : undefined;
+              const tabRoot = projectRoot ?? tab.root;
+              return (
+                tabRoot && insideWorktree(`${tabRoot}/${tab.path}`, root) && !isTabDirty(tab.key)
+              );
+            }),
+          );
         flushFsChanges();
         refreshFiles();
         setSymbolRefreshToken((value) => value + 1);
@@ -1828,7 +1880,7 @@ export default function App() {
         throw error;
       }
     },
-    [flushFsChanges, refreshFiles],
+    [flushFsChanges, refreshFiles, reloadFiles, gitBlocksPath, isTabDirty],
   );
 
   const openGitFile = useCallback(
@@ -2382,6 +2434,8 @@ export default function App() {
             {splitOpen && <EditorSplitResizer />}
             {tabs.map((tab) => {
               const pane = paneOf(tab);
+              const tabRoot =
+                snapshot?.projects.find((item) => item.id === tab.projectId)?.root ?? tab.root;
               const visible = tab.key === paneActive[pane];
               const isActive = visible && pane === activePane && !gitOpen;
               return (
@@ -2395,6 +2449,9 @@ export default function App() {
                   <CodeReader
                     ref={(handle) => registerEditor(tab.key, handle)}
                     tab={tab}
+                    gitLocked={gitLockedRoots.some(
+                      (root) => tabRoot && insideWorktree(`${tabRoot}/${tab.path}`, root),
+                    )}
                     active={isActive}
                     theme={resolvedTheme}
                     fontFamily={fontStack(fonts.editor, "editor")}

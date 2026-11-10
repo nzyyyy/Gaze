@@ -9,6 +9,7 @@ import { ConflictEditor } from "./ConflictEditor";
 import { BranchComparisonView, DiffView } from "./DiffView";
 import { I18nProvider } from "./i18n";
 import { GitProjectList } from "./components/GitProjectList";
+import { GitBusyContext } from "./components/OperationButton";
 import { MemoBranchesPane } from "./components/BranchesPane";
 import { MemoChangesOverview, MemoChangesPane } from "./components/ChangesPane";
 import { BlameView } from "./components/BlameView";
@@ -349,13 +350,12 @@ export default function GitWorkspace({
         selectedRepository={selected}
         snapshot={workingTree.snapshot}
         active={active}
-        busy={operations.busy}
         onSelect={onSelectProject}
       />
     </section>
   );
 
-  return (
+  const workspace = (
     <I18nProvider language={language}>
       {sidebarContainer && createPortal(sidebar, sidebarContainer)}
       <section className="gaze-git-workspace" aria-label={tr("Git 工作区")} hidden={!active}>
@@ -431,7 +431,6 @@ export default function GitWorkspace({
                   Push ↑{selected.ahead}
                 </button>
                 <button
-                  disabled={operations.busy}
                   onClick={() => {
                     setError("");
                     void refresh();
@@ -478,7 +477,7 @@ export default function GitWorkspace({
             )}
             {operations.busy && (
               <div className="git-operation-status" role="status">
-                {tr("Git 操作进行中，相关编辑器已暂停自动保存。")}
+                {tr("Git 操作进行中，可继续浏览。")}
                 <button disabled={operations.operationId == null} onClick={operations.cancel}>
                   {tr("停止操作")}
                 </button>
@@ -493,12 +492,7 @@ export default function GitWorkspace({
                   ["stashes", "Stash"],
                 ] as const
               ).map(([value, label]) => (
-                <button
-                  key={value}
-                  aria-pressed={tab === value}
-                  disabled={operations.busy}
-                  onClick={() => switchTab(value)}
-                >
+                <button key={value} aria-pressed={tab === value} onClick={() => switchTab(value)}>
                   {label}
                   {value === "changes" ? ` ${selected.changedCount}` : ""}
                 </button>
@@ -506,7 +500,7 @@ export default function GitWorkspace({
             </nav>
             <fieldset
               className="git-workspace-body"
-              disabled={operations.busy || (selected.kind === "bare" && tab !== "history")}
+              disabled={selected.kind === "bare" && tab !== "history"}
             >
               <legend className="sr-only">
                 {tab === "history" ? tr("仓库历史") : tr("仓库操作与详情")}
@@ -604,4 +598,5 @@ export default function GitWorkspace({
       </section>
     </I18nProvider>
   );
+  return <GitBusyContext value={operations.busy}>{workspace}</GitBusyContext>;
 }

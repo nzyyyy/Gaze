@@ -91,7 +91,7 @@ pub(crate) fn start_operation(
         choices,
     } = request
     {
-        acquire_lock(&state, &inspection.common_git_dir)?;
+        acquire_lock(&state, &inspection.common_git_dir, true)?;
         suppress_watch(&state, repository_id);
         let root = inspection.root.clone();
         let common = inspection.common_git_dir.clone();
@@ -151,7 +151,7 @@ pub(crate) fn start_operation(
         });
     }
     if let OperationRequest::TrashUntracked { paths } = request {
-        acquire_lock(&state, &inspection.common_git_dir)?;
+        acquire_lock(&state, &inspection.common_git_dir, true)?;
         suppress_watch(&state, repository_id);
         let root = inspection.root.clone();
         let common = inspection.common_git_dir.clone();
@@ -206,7 +206,13 @@ pub(crate) fn start_operation(
 
     let spec = command_spec(&state, repository_id, &inspection.root, &request)?;
     let cleanup_dir = spec.cleanup_dir.clone();
-    if let Err(error) = acquire_lock(&state, &inspection.common_git_dir) {
+    let blocks_editor_writes = !matches!(
+        request,
+        OperationRequest::Fetch { .. }
+            | OperationRequest::Push { .. }
+            | OperationRequest::ForcePushWithLease { .. }
+    );
+    if let Err(error) = acquire_lock(&state, &inspection.common_git_dir, blocks_editor_writes) {
         remove_dir(&cleanup_dir);
         return Err(error);
     }

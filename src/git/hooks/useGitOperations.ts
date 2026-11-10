@@ -28,6 +28,8 @@ export function useGitOperations(
   const [status, setStatus] = useState("");
   const [outputOpen, setOutputOpen] = useState(false);
   const reserved = useRef(false);
+  const repositoryIdRef = useRef(repository?.id);
+  repositoryIdRef.current = repository?.id;
   const completions = useRef(new Map<number, (outcome: OperationOutcome) => void>());
   const early = useRef(new Map<number, OperationOutcome>());
   const ready = useRef<Promise<() => void> | null>(null);
@@ -74,7 +76,7 @@ export function useGitOperations(
   useEffect(() => {
     let disposed = false;
     const subscription = api.onOperationEvent((event: OperationEvent) => {
-      if (disposed) return;
+      if (disposed || event.repositoryId !== repositoryIdRef.current) return;
       appendLog({
         timestamp: new Date().toISOString(),
         kind: event.kind,

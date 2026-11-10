@@ -457,8 +457,7 @@ export const english: Record<string, string> = {
   "· 整个仓库": "· Entire repository",
   "（当前项目位于 {0}）": "(current project at {0})",
   " · 裸仓库，只读": " · Bare repository, read-only",
-  "Git 操作进行中，相关编辑器已暂停自动保存。":
-    "Git operation in progress. Auto save is paused for affected editors.",
+  "Git 操作进行中，可继续浏览。": "Git operation in progress. You can continue browsing.",
   停止操作: "Stop operation",
   "Git 工作流": "Git workflow",
   更改: "Changes",

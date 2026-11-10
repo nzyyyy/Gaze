@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { insideWorktree, prepareEditors } from "./editorOperations";
 import type { SaveResult } from "../components/CodeReader";
+import type { OperationRequest } from "./models";
 
 const editor = (dirty = false) => ({
   isDirty: () => dirty,
@@ -9,6 +10,17 @@ const editor = (dirty = false) => ({
 });
 
 describe("Git editor coordination", () => {
+  it.each([
+    { type: "fetch", remote: null, prune: false },
+    { type: "push", remote: null, branch: null },
+    { type: "forcePushWithLease", remote: "origin", branch: "main", expectedOid: "abc" },
+  ] satisfies OperationRequest[])("does not lock or save editors for $type", async (request) => {
+    const handle = editor(true);
+    const finish = await prepareEditors([handle], request);
+    finish("succeeded");
+    expect(handle.prepareFileOperation).not.toHaveBeenCalled();
+    expect(handle.finishFileOperation).not.toHaveBeenCalled();
+  });
   it("keeps unsaved work out of an index-only commit", async () => {
     const handle = editor(true);
     const finish = await prepareEditors([handle], {

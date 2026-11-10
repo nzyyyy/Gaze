@@ -29,12 +29,17 @@ const worktreeOperations = new Set<OperationRequest["type"]>([
   "revert",
   "runMergetool",
   "pull",
+  "submoduleUpdate",
 ]);
 
 export function changesWorktree(request: OperationRequest) {
   return (
     worktreeOperations.has(request.type) || (request.type === "createBranch" && request.checkout)
   );
+}
+
+export function locksEditors(request: OperationRequest) {
+  return !["fetch", "push", "forcePushWithLease"].includes(request.type);
 }
 
 export function insideWorktree(absolute: string, root: string) {
@@ -52,14 +57,9 @@ export async function prepareEditors(
   editors: Pick<CodeReaderHandle, "prepareFileOperation" | "finishFileOperation" | "isDirty">[],
   request: OperationRequest,
 ) {
+  if (!locksEditors(request)) return () => {};
   const discard = ["discardHunk", "discardTracked", "trashUntracked"].includes(request.type);
-  const save =
-    !discard &&
-    request.type !== "commit" &&
-    request.type !== "undoLastCommit" &&
-    request.type !== "fetch" &&
-    request.type !== "push" &&
-    request.type !== "forcePushWithLease";
+  const save = !discard && request.type !== "commit" && request.type !== "undoLastCommit";
   const locked: typeof editors = [];
   try {
     for (const editor of editors) {

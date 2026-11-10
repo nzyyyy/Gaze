@@ -8,7 +8,7 @@ import { useFileChanges } from "./useFileChanges";
 const apiMock = vi.hoisted(() => ({ onFsChange: vi.fn() }));
 vi.mock("./api", () => ({ api: apiMock }));
 
-function setup() {
+function setup(isProjectLocked?: (projectId: string) => boolean) {
   const tab = (path: string, projectId = "p1"): EditorTab => ({
     key: `${projectId}\u0000${path}`,
     projectId,
@@ -23,6 +23,7 @@ function setup() {
     tabsRef: { current: [clean, dirty, other] },
     activeKeyRef: { current: dirty.key },
     fileOperationBusyRef: { current: false },
+    isProjectLocked,
     isWorkspaceReady: vi.fn(() => true),
     isTabDirty: vi.fn((key: string) => key === dirty.key),
     notify: vi.fn(),
@@ -54,6 +55,21 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+});
+
+it("queues only locked repositories and leaves other projects live", () => {
+  let locked = true;
+  const { result, emit, clean, other } = setup((id) => locked && id === "p1");
+  act(() => {
+    emit({ changedFiles: [clean.path] });
+    emit({ projectId: "p2", changedFiles: [other.path] });
+  });
+  expect(result.current.fileRevisions).toEqual({ [other.key]: 1 });
+  act(() => result.current.flushFsChanges());
+  expect(result.current.fileRevisions[clean.key]).toBeUndefined();
+  locked = false;
+  act(() => result.current.flushFsChanges());
+  expect(result.current.fileRevisions).toEqual({ [clean.key]: 1, [other.key]: 1 });
 });
 
 it("reloads clean files while preserving dirty buffers on directory removal and overflow", () => {

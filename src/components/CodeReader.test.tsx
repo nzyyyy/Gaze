@@ -797,6 +797,26 @@ describe("CodeReader editing", () => {
     expect(apiMock.writeFile).not.toHaveBeenCalled();
   });
 
+  it("keeps newly opened Git-locked files read-only until the repository is released", async () => {
+    const { ref, props, rerender } = renderReader();
+    rerender(<CodeReader {...props} gitLocked />);
+    const content = await editorContent();
+    const view = EditorView.findFromDOM(content)!;
+    const text = ref.current!.getText();
+    expect(content).toHaveAttribute("contenteditable", "false");
+    act(() => view.dispatch({ changes: { from: 0, insert: "blocked" } }));
+    expect(ref.current!.getText()).toBe(text);
+    expect((await ref.current!.save()).status).toBe("error");
+    await act(async () => {
+      await ref.current!.prepareFileOperation({ save: false });
+    });
+    act(() => ref.current!.finishFileOperation());
+    expect(content).toHaveAttribute("contenteditable", "false");
+    rerender(<CodeReader {...props} />);
+    expect(content).toHaveAttribute("contenteditable", "true");
+    expect(apiMock.writeFile).not.toHaveBeenCalled();
+  });
+
   it("paints local changes in the gutter and reverts a block from the popover", async () => {
     gitApiMock.getFileBase.mockResolvedValue({
       content: "const value = 1;\n",

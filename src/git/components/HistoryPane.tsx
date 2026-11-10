@@ -1,3 +1,4 @@
+import { OperationButton } from "./OperationButton";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Star } from "lucide-react";
 import type { BranchInfo, CommitInfo, HistorySearch } from "../api";
@@ -455,13 +456,15 @@ export function HistoryPane({
                     </span>
                   </button>
                   <RowMenu context label={t("moreActions")} glyph="•••">
-                    <button onClick={() => onRun({ type: "cherryPick", commits: [commit.oid] })}>
+                    <OperationButton
+                      onClick={() => onRun({ type: "cherryPick", commits: [commit.oid] })}
+                    >
                       {t("cherryPick")}
-                    </button>
+                    </OperationButton>
                     {commit.parents.length === 1 && (
-                      <button onClick={() => onRun({ type: "revert", oid: commit.oid })}>
+                      <OperationButton onClick={() => onRun({ type: "revert", oid: commit.oid })}>
                         {t("revert")}
-                      </button>
+                      </OperationButton>
                     )}
                   </RowMenu>
                 </div>

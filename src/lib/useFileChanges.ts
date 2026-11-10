@@ -12,6 +12,7 @@ interface UseFileChangesOptions {
   tabsRef: RefObject<EditorTab[]>;
   activeKeyRef: RefObject<string | null>;
   fileOperationBusyRef: RefObject<boolean>;
+  isProjectLocked?: (projectId: string) => boolean;
   isWorkspaceReady: () => boolean;
   isTabDirty: (key: string) => boolean;
   notify: (message: string) => void;
@@ -21,6 +22,7 @@ export function useFileChanges({
   tabsRef,
   activeKeyRef,
   fileOperationBusyRef,
+  isProjectLocked,
   isWorkspaceReady,
   isTabDirty,
   notify,
@@ -143,7 +145,8 @@ export function useFileChanges({
     let unlisten: (() => void) | null = null;
     api
       .onFsChange((event) => {
-        if (fileOperationBusyRef.current) queuedFsChangesRef.current.push(event);
+        if (fileOperationBusyRef.current || isProjectLocked?.(event.projectId))
+          queuedFsChangesRef.current.push(event);
         else processFsChange(event);
       })
       .then((fn) => {
@@ -158,11 +161,15 @@ export function useFileChanges({
       treeFlushRef.current = null;
       treeDirsRef.current.clear();
     };
-  }, [fileOperationBusyRef, processFsChange]);
+  }, [fileOperationBusyRef, isProjectLocked, processFsChange]);
 
   const flushFsChanges = useCallback(() => {
-    for (const event of queuedFsChangesRef.current.splice(0)) processFsChange(event);
-  }, [processFsChange]);
+    for (const event of queuedFsChangesRef.current.splice(0)) {
+      if (fileOperationBusyRef.current || isProjectLocked?.(event.projectId))
+        queuedFsChangesRef.current.push(event);
+      else processFsChange(event);
+    }
+  }, [fileOperationBusyRef, isProjectLocked, processFsChange]);
 
   return {
     refreshToken,

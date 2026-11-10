@@ -1,3 +1,4 @@
+import { OperationButton } from "./OperationButton";
 import { memo, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { CircleCheck, Cloud, GitBranch } from "lucide-react";
@@ -336,19 +337,23 @@ export function BranchesPane({
                                     </button>
                                   )}
                                   {currentBranch && !branch.current && (
-                                    <button onClick={() => onInteractiveRebase(branch.name)}>
+                                    <OperationButton
+                                      onClick={() => onInteractiveRebase(branch.name)}
+                                    >
                                       {t("interactiveRebase")}
-                                    </button>
+                                    </OperationButton>
                                   )}
-                                  <button onClick={() => newBranchFrom(branch.name)}>
+                                  <OperationButton onClick={() => newBranchFrom(branch.name)}>
                                     {t("newBranch")}
-                                  </button>
+                                  </OperationButton>
                                   {!branch.name.endsWith("/HEAD") && (
-                                    <button onClick={() => switchRemoteBranch(branch.name)}>
+                                    <OperationButton
+                                      onClick={() => switchRemoteBranch(branch.name)}
+                                    >
                                       {t("switch")}
-                                    </button>
+                                    </OperationButton>
                                   )}
-                                  <button
+                                  <OperationButton
                                     onClick={() => {
                                       const [remote = "", ...parts] = branch.name.split("/");
                                       onRun({
@@ -359,7 +364,7 @@ export function BranchesPane({
                                     }}
                                   >
                                     {t("deleteRemoteBranch")}
-                                  </button>
+                                  </OperationButton>
                                 </>
                               ) : (
                                 <>
@@ -369,24 +374,26 @@ export function BranchesPane({
                                     </button>
                                   )}
                                   {currentBranch && !branch.current && (
-                                    <button onClick={() => onInteractiveRebase(branch.name)}>
+                                    <OperationButton
+                                      onClick={() => onInteractiveRebase(branch.name)}
+                                    >
                                       {t("interactiveRebase")}
-                                    </button>
+                                    </OperationButton>
                                   )}
-                                  <button onClick={() => newBranchFrom(branch.name)}>
+                                  <OperationButton onClick={() => newBranchFrom(branch.name)}>
                                     {t("newBranch")}
-                                  </button>
+                                  </OperationButton>
                                   {!branch.current && (
-                                    <button
+                                    <OperationButton
                                       onClick={() =>
                                         onRun({ type: "switchBranch", name: branch.name })
                                       }
                                     >
                                       {t("switch")}
-                                    </button>
+                                    </OperationButton>
                                   )}
                                   {!branch.current && (
-                                    <button
+                                    <OperationButton
                                       onClick={() =>
                                         onRun({
                                           type: "merge",
@@ -396,10 +403,10 @@ export function BranchesPane({
                                       }
                                     >
                                       {t("merge")}
-                                    </button>
+                                    </OperationButton>
                                   )}
                                   {!branch.current && (
-                                    <button
+                                    <OperationButton
                                       onClick={() =>
                                         onRun({
                                           type: "merge",
@@ -409,10 +416,10 @@ export function BranchesPane({
                                       }
                                     >
                                       {t("fastForward")}
-                                    </button>
+                                    </OperationButton>
                                   )}
                                   {!branch.current && (
-                                    <button
+                                    <OperationButton
                                       onClick={() =>
                                         onRun({
                                           type: "merge",
@@ -422,20 +429,20 @@ export function BranchesPane({
                                       }
                                     >
                                       {t("squashMerge")}
-                                    </button>
+                                    </OperationButton>
                                   )}
                                   {!branch.current && (
-                                    <button
+                                    <OperationButton
                                       onClick={() => onRun({ type: "rebase", onto: branch.name })}
                                     >
                                       {t("rebaseOnto")}
-                                    </button>
+                                    </OperationButton>
                                   )}
-                                  <button onClick={() => renameBranch(branch.name)}>
+                                  <OperationButton onClick={() => renameBranch(branch.name)}>
                                     {t("rename")}
-                                  </button>
+                                  </OperationButton>
                                   {!branch.current && (
-                                    <button
+                                    <OperationButton
                                       onClick={() =>
                                         onRun({
                                           type: "deleteBranch",
@@ -445,10 +452,10 @@ export function BranchesPane({
                                       }
                                     >
                                       {t("delete")}
-                                    </button>
+                                    </OperationButton>
                                   )}
                                   {!branch.current && (
-                                    <button
+                                    <OperationButton
                                       onClick={() =>
                                         onRun({
                                           type: "deleteBranch",
@@ -458,7 +465,7 @@ export function BranchesPane({
                                       }
                                     >
                                       {t("forceDelete")}
-                                    </button>
+                                    </OperationButton>
                                   )}
                                 </>
                               )}
@@ -477,9 +484,9 @@ export function BranchesPane({
         <>
           <div className="pane-title">
             <span>{t("tags")}</span>
-            <button aria-label={`${t("create")} ${t("tags")}`} onClick={createTag}>
+            <OperationButton aria-label={`${t("create")} ${t("tags")}`} onClick={createTag}>
               ＋
-            </button>
+            </OperationButton>
           </div>
           <div className="object-list">
             {loading ? (
@@ -494,10 +501,14 @@ export function BranchesPane({
                     <span>{tag.subject || shortOid(tag.oid)}</span>
                   </div>
                   <RowMenu context label={t("moreActions")} glyph="•••">
-                    <button onClick={() => pushTag(tag.name)}>{t("pushTag")}</button>
-                    <button onClick={() => onRun({ type: "deleteLocalTag", name: tag.name })}>
+                    <OperationButton onClick={() => pushTag(tag.name)}>
+                      {t("pushTag")}
+                    </OperationButton>
+                    <OperationButton
+                      onClick={() => onRun({ type: "deleteLocalTag", name: tag.name })}
+                    >
                       {t("deleteLocalTag")}
-                    </button>
+                    </OperationButton>
                   </RowMenu>
                 </div>
               ))
@@ -509,9 +520,9 @@ export function BranchesPane({
         <>
           <div className="pane-title">
             <span>{t("remotes")}</span>
-            <button aria-label={`${t("add")} ${t("remotes")}`} onClick={addRemote}>
+            <OperationButton aria-label={`${t("add")} ${t("remotes")}`} onClick={addRemote}>
               ＋
-            </button>
+            </OperationButton>
           </div>
           <div className="object-list">
             {loading ? (
@@ -531,12 +542,16 @@ export function BranchesPane({
                     ))}
                   </div>
                   <RowMenu context label={t("moreActions")} glyph="•••">
-                    <button onClick={() => editRemote(remote.name, remote.fetchUrls[0] ?? "")}>
+                    <OperationButton
+                      onClick={() => editRemote(remote.name, remote.fetchUrls[0] ?? "")}
+                    >
                       {t("editUrl")}
-                    </button>
-                    <button onClick={() => onRun({ type: "removeRemote", name: remote.name })}>
+                    </OperationButton>
+                    <OperationButton
+                      onClick={() => onRun({ type: "removeRemote", name: remote.name })}
+                    >
                       {t("removeRemote")}
-                    </button>
+                    </OperationButton>
                   </RowMenu>
                 </div>
               ))
@@ -549,13 +564,17 @@ export function BranchesPane({
           <div className="pane-title">
             <span>{t("submodules")}</span>
             <span>
-              <button onClick={() => onRun({ type: "submoduleInit", paths: [], recursive: false })}>
+              <OperationButton
+                onClick={() => onRun({ type: "submoduleInit", paths: [], recursive: false })}
+              >
                 {t("init")}
-              </button>
-              <button onClick={() => onRun({ type: "submoduleSync", paths: [], recursive: false })}>
+              </OperationButton>
+              <OperationButton
+                onClick={() => onRun({ type: "submoduleSync", paths: [], recursive: false })}
+              >
                 {t("sync")}
-              </button>
-              <button onClick={updateSubmodules}>{t("update")}</button>
+              </OperationButton>
+              <OperationButton onClick={updateSubmodules}>{t("update")}</OperationButton>
             </span>
           </div>
           <div className="object-list">

@@ -36,20 +36,29 @@ pub(crate) struct CommandSpec {
     pub(crate) cleanup_dir: Option<PathBuf>,
 }
 
-pub(crate) fn acquire_lock(state: &AppState, common: &Path) -> Result<(), String> {
+pub(crate) fn acquire_lock(
+    state: &AppState,
+    common: &Path,
+    blocks_editor_writes: bool,
+) -> Result<(), String> {
     let mut locks = state
         .write_locks
         .lock()
         .map_err(|_| "Repository lock is busy")?;
-    if !locks.insert(common.to_path_buf()) {
+    if locks.operations.contains_key(common)
+        || (blocks_editor_writes && locks.editors.contains(common))
+    {
         Err("Another write operation is already running in this repository".into())
     } else {
+        locks
+            .operations
+            .insert(common.to_path_buf(), blocks_editor_writes);
         Ok(())
     }
 }
 pub(crate) fn release_lock(state: &AppState, common: &Path) {
     if let Ok(mut locks) = state.write_locks.lock() {
-        locks.remove(common);
+        locks.operations.remove(common);
     }
 }
 
@@ -409,10 +418,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let state = test_state(git, dir.path().join("config.json"));
         let common = dir.path().join("common.git");
-        acquire_lock(&state, &common).unwrap();
-        assert!(acquire_lock(&state, &common).is_err());
+        acquire_lock(&state, &common, true).unwrap();
+        assert!(acquire_lock(&state, &common, true).is_err());
         release_lock(&state, &common);
-        acquire_lock(&state, &common).unwrap();
+        acquire_lock(&state, &common, true).unwrap();
     }
 
     #[cfg(unix)]

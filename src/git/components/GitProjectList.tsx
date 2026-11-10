@@ -17,7 +17,6 @@ export function GitProjectList({
   selectedRepository,
   snapshot,
   active,
-  busy,
   onSelect,
 }: {
   projects: Project[];
@@ -25,7 +24,6 @@ export function GitProjectList({
   selectedRepository?: RepositorySummary;
   snapshot?: WorkingTreeSnapshot;
   active: boolean;
-  busy: boolean;
   onSelect: (project: Project) => void;
 }) {
   useLanguage();
@@ -163,7 +161,6 @@ export function GitProjectList({
               <button
                 className={`git-project-row${changed ? " has-changes" : ""}${conflict ? " has-conflicts" : ""}`}
                 aria-current={project.id === selectedProjectId ? "true" : undefined}
-                disabled={busy}
                 data-tooltip={tr("{0} · 整个仓库{1}", project.root, error ? ` · ${error}` : "")}
                 onClick={() => onSelect(project)}
               >

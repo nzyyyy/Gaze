@@ -1,3 +1,4 @@
+import { OperationButton } from "./components/OperationButton";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
@@ -265,11 +266,11 @@ function FileDiff({
       <div className="canvas-empty">
         <h2>{diff.binary ? t("binaryDiff") : t("diffTooLarge")}</h2>
         {!readOnly && (
-          <button
+          <OperationButton
             onClick={() => onRun({ type: "runDifftool", path: diff.path, staged: diff.staged })}
           >
             {t("openDifftool")}
-          </button>
+          </OperationButton>
         )}
       </div>
     );
@@ -290,7 +291,7 @@ function FileDiff({
       if (readOnly || !owned || snapshotId == null) return null;
       if (diff.staged)
         return (
-          <button
+          <OperationButton
             type="button"
             className="diff-stage unstage"
             aria-label={t("unstageHunk")}
@@ -298,11 +299,11 @@ function FileDiff({
             onClick={() => onHunk("unstageHunk", owned.id)}
           >
             −
-          </button>
+          </OperationButton>
         );
       return (
         <span className="diff-hunk-actions">
-          <button
+          <OperationButton
             type="button"
             className="diff-stage"
             aria-label={t("stageHunk")}
@@ -310,8 +311,8 @@ function FileDiff({
             onClick={() => onHunk("stageHunk", owned.id)}
           >
             +
-          </button>
-          <button
+          </OperationButton>
+          <OperationButton
             type="button"
             className="diff-stage discard"
             aria-label={t("discardHunk")}
@@ -319,7 +320,7 @@ function FileDiff({
             onClick={() => onHunk("discardHunk", owned.id)}
           >
             ↶
-          </button>
+          </OperationButton>
         </span>
       );
     }
