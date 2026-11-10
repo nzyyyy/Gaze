@@ -103,6 +103,7 @@
   --radius-control: 8px;
   --radius-panel: 12px;
   --radius-large: 20px;
+  --overlay-glass-opacity: 80%;
   --chrome-material: var(--sidebar);
   --sidebar-rail-bg: light-dark(
     color-mix(in srgb, var(--sidebar) 80%, var(--border)),
@@ -162,9 +163,97 @@
   --shadow-panel: 0 16px 48px rgba(0, 0, 0, 0.4);
 }
 
+:root[data-overlay-glass] {
+  --popover-material: var(--surface-raised);
+  --overlay-glass-filter: none;
+}
+
+:root[data-overlay-glass="enabled"] {
+  --overlay-glass-filter: blur(12px);
+  --popover-material: color-mix(
+    in srgb,
+    var(--surface-raised) var(--overlay-glass-opacity),
+    transparent
+  );
+}
+
+:root[data-overlay-glass]
+  :is(
+    .quick-open,
+    .location-picker,
+    .settings-dialog,
+    .dialog,
+    .file-tree-menu,
+    .app-select-options,
+    .app-tooltip,
+    .cm-tooltip,
+    .code-minimap-preview,
+    .toast,
+    .git-change-popover,
+    .gaze-git-workspace .row-menu-popover,
+    .gaze-git-workspace .operation-toast,
+    .gaze-git-workspace .confirm-dialog,
+    .gaze-git-workspace .form-dialog,
+    .gaze-git-workspace .rebase-dialog
+  ) {
+  isolation: isolate;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+:root[data-overlay-glass]
+  :is(.quick-open, .location-picker, .dialog, .gaze-git-workspace .operation-toast) {
+  position: relative;
+}
+
+:root[data-overlay-glass]
+  :is(
+    .quick-open,
+    .location-picker,
+    .settings-dialog,
+    .dialog,
+    .file-tree-menu,
+    .app-select-options,
+    .app-tooltip,
+    .cm-tooltip,
+    .code-minimap-preview,
+    .toast,
+    .git-change-popover,
+    .gaze-git-workspace .row-menu-popover,
+    .gaze-git-workspace .operation-toast,
+    .gaze-git-workspace .confirm-dialog,
+    .gaze-git-workspace .form-dialog,
+    .gaze-git-workspace .rebase-dialog
+  )::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: var(--popover-material);
+  -webkit-backdrop-filter: var(--overlay-glass-filter);
+  backdrop-filter: var(--overlay-glass-filter);
+}
+
+:root[data-overlay-glass] :is(.palette-backdrop, .dialog-backdrop) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+:root[data-overlay-glass] .settings-dialog::backdrop,
+:root[data-overlay-glass] .gaze-git-workspace .form-dialog::backdrop,
+:root[data-overlay-glass] .gaze-git-workspace .confirm-dialog::backdrop {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
 @media (prefers-reduced-transparency: reduce) {
-  :root {
+  :root,
+  :root[data-overlay-glass] {
     --popover-material: var(--surface-raised);
+    --overlay-glass-filter: none;
   }
 }
 
@@ -2094,6 +2183,22 @@ button:focus-visible,
 }
 .setting-control > .app-select {
   width: 100%;
+}
+.setting-range {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.setting-range input {
+  width: 160px;
+  accent-color: var(--accent);
+}
+.setting-range output {
+  min-width: 40px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 .setting-control > input[type="number"] {
   width: 100%;

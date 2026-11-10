@@ -10,6 +10,11 @@ export interface Layout {
 
 const KEY = "gaze:layout";
 export const LAYOUT_CHANGE_EVENT = "gaze:layout-change";
+export const LAYOUT_SIZE_LIMITS = {
+  sidebarWidth: { min: 200, max: 600 },
+  terminalHeight: { min: 120, max: 1000 },
+  outputHeight: { min: 96, max: 1000 },
+} as const;
 
 export const DEFAULT_LAYOUT: Layout = {
   sidebarWidth: 292,
@@ -26,16 +31,20 @@ export function readLayout(fallback: Partial<Layout> = {}): Layout {
     const stored = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<Layout>;
     const pick = (value: unknown, base: number) =>
       typeof value === "number" && Number.isFinite(value) && value > 0 ? value : base;
+    const size = (key: keyof typeof LAYOUT_SIZE_LIMITS) => {
+      const { min, max } = LAYOUT_SIZE_LIMITS[key];
+      return Math.round(Math.min(max, Math.max(min, pick(stored[key], defaults[key]))));
+    };
     const splitRatio = pick(stored.editorSplitRatio, defaults.editorSplitRatio);
     const historyRatio = pick(stored.gitHistorySplitRatio, defaults.gitHistorySplitRatio);
     return {
-      sidebarWidth: pick(stored.sidebarWidth, defaults.sidebarWidth),
+      sidebarWidth: size("sidebarWidth"),
       sidebarCollapsed:
         typeof stored.sidebarCollapsed === "boolean"
           ? stored.sidebarCollapsed
           : defaults.sidebarCollapsed,
-      terminalHeight: pick(stored.terminalHeight, defaults.terminalHeight),
-      outputHeight: pick(stored.outputHeight, defaults.outputHeight),
+      terminalHeight: size("terminalHeight"),
+      outputHeight: size("outputHeight"),
       editorSplitRatio: splitRatio < 1 ? splitRatio : defaults.editorSplitRatio,
       gitHistorySplitRatio: historyRatio < 1 ? historyRatio : defaults.gitHistorySplitRatio,
     };

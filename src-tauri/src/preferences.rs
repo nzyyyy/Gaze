@@ -34,6 +34,8 @@ pub struct Preferences {
     pub show_encoding: bool,
     pub show_line_count: bool,
     pub show_terminal_button: bool,
+    pub window_glass_enabled: bool,
+    pub window_surface_opacity: f64,
     pub terminal_cursor_style: CursorStyle,
 }
 
@@ -74,6 +76,8 @@ impl Default for Preferences {
             show_encoding: true,
             show_line_count: true,
             show_terminal_button: true,
+            window_glass_enabled: true,
+            window_surface_opacity: 0.80,
             terminal_cursor_style: CursorStyle::Block,
         }
     }
@@ -86,6 +90,13 @@ impl Preferences {
             (self.editor_line_height, 1.2, 2.4, 0.05, "编辑器行高"),
             (self.tab_size, 1.0, 8.0, 1.0, "缩进宽度"),
             (self.auto_save_delay, 200.0, 10000.0, 100.0, "自动保存延迟"),
+            (
+                self.window_surface_opacity,
+                0.50,
+                1.00,
+                0.05,
+                "浮层背景不透明度",
+            ),
             (self.terminal_font_size, 10.0, 32.0, 1.0, "终端字号"),
             (self.terminal_line_height, 1.0, 2.0, 0.1, "终端行高"),
             (
@@ -174,7 +185,14 @@ mod tests {
         let defaults = Preferences::default();
         assert_eq!(serde_json::from_str::<Preferences>("{}").unwrap(), defaults);
         assert!(defaults.show_minimap);
+        assert!(defaults.window_glass_enabled);
+        assert_eq!(defaults.window_surface_opacity, 0.80);
         defaults.validate().unwrap();
+        for invalid in [f64::NAN, f64::INFINITY] {
+            let mut preferences = defaults.clone();
+            preferences.window_surface_opacity = invalid;
+            assert!(preferences.validate().is_err());
+        }
         let mut settings = AppSettings {
             language: Language::English,
             theme: ThemePreference::Dark,

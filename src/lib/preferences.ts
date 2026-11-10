@@ -29,6 +29,8 @@ export interface Preferences {
   showEncoding: boolean;
   showLineCount: boolean;
   showTerminalButton: boolean;
+  windowGlassEnabled: boolean;
+  windowSurfaceOpacity: number;
   terminalCursorStyle: "block" | "underline" | "bar";
 }
 
@@ -66,6 +68,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   showEncoding: true,
   showLineCount: true,
   showTerminalButton: true,
+  windowGlassEnabled: true,
+  windowSurfaceOpacity: 0.8,
   terminalCursorStyle: "block",
 };
 
@@ -89,11 +93,28 @@ interface FieldInfo {
 }
 export type PreferenceField = FieldInfo &
   (
-    | { key: KeysOfType<number>; type: "number"; min: number; max: number; step: number }
+    | { key: KeysOfType<number>; type: "number" | "range"; min: number; max: number; step: number }
     | { key: KeysOfType<boolean>; type: "boolean" }
   );
 
 export const PREFERENCE_FIELDS: PreferenceField[] = [
+  {
+    key: "windowGlassEnabled",
+    type: "boolean",
+    category: "appearance",
+    label: "浮层玻璃效果",
+    description: "为 Quick Open、设置、菜单、Hover 和通知添加局部模糊背景；仅 macOS 可用。",
+  },
+  {
+    key: "windowSurfaceOpacity",
+    type: "range",
+    category: "appearance",
+    label: "浮层背景不透明度",
+    description: "数值越低，浮层背后的模糊内容越明显；文字和控件保持清晰。范围 50%–100%。",
+    min: 0.5,
+    max: 1,
+    step: 0.05,
+  },
   {
     key: "editorFontSize",
     type: "number",
@@ -294,7 +315,7 @@ export const PREFERENCE_FIELDS: PreferenceField[] = [
 
 export function preferencesError(preferences: Preferences): string | null {
   for (const field of PREFERENCE_FIELDS) {
-    if (field.type !== "number") continue;
+    if (field.type === "boolean") continue;
     const value = preferences[field.key];
     const steps = (value - field.min) / field.step;
     if (

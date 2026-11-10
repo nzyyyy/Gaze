@@ -455,6 +455,61 @@ describe("App", () => {
     await waitFor(() => expect(apiMock.listDirectory).toHaveBeenCalledWith("p1", ""));
   });
 
+  it("restores overlay glass and commits opacity only after saving", async () => {
+    const userAgent = vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mac OS X");
+    const user = userEvent.setup();
+    apiMock.bootstrapWorkspace.mockResolvedValue({
+      projects: [],
+      activeProjectId: null,
+      theme: "system",
+      fonts: DEFAULT_FONT_SETTINGS,
+      preferences: {
+        ...DEFAULT_PREFERENCES,
+        windowGlassEnabled: true,
+        windowSurfaceOpacity: 0.7,
+      },
+    });
+    const app = render(<App />);
+    try {
+      await user.click(await screen.findByRole("button", { name: "设置" }));
+      const root = document.documentElement;
+      expect(root.dataset.overlayGlass).toBe("enabled");
+      expect(root.dataset.windowGlass).toBeUndefined();
+      expect(root.style.getPropertyValue("--overlay-glass-opacity")).toBe("70%");
+      const slider = screen.getByRole("slider", { name: "浮层背景不透明度" });
+      fireEvent.change(slider, { target: { value: "0.75" } });
+      expect(slider).toHaveValue("0.75");
+      expect(root.style.getPropertyValue("--overlay-glass-opacity")).toBe("70%");
+      await user.click(screen.getByRole("button", { name: "保存设置" }));
+      await waitFor(() =>
+        expect(root.style.getPropertyValue("--overlay-glass-opacity")).toBe("75%"),
+      );
+    } finally {
+      app.unmount();
+      userAgent.mockRestore();
+    }
+  });
+
+  it("keeps glass disabled outside macOS even when stored settings enable it", async () => {
+    const userAgent = vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Windows");
+    apiMock.bootstrapWorkspace.mockResolvedValue({
+      projects: [],
+      activeProjectId: null,
+      theme: "system",
+      fonts: DEFAULT_FONT_SETTINGS,
+      preferences: { ...DEFAULT_PREFERENCES, windowGlassEnabled: true },
+    });
+    const app = render(<App />);
+    try {
+      await screen.findByRole("button", { name: "设置" });
+      expect(document.documentElement.dataset.overlayGlass).toBe("disabled");
+      expect(document.documentElement.style.getPropertyValue("--overlay-glass-opacity")).toBe("");
+    } finally {
+      app.unmount();
+      userAgent.mockRestore();
+    }
+  });
+
   it("restores preferences and applies status bar changes only after saving", async () => {
     const user = userEvent.setup();
     apiMock.bootstrapWorkspace.mockResolvedValue({

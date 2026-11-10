@@ -235,6 +235,8 @@ export default function App() {
   const activeTab = tabs.find((tab) => tab.key === activeKey) ?? null;
 
   const resolvedTheme: ResolvedTheme = theme === "system" ? systemTheme : theme;
+  const overlayGlassActive =
+    isMac && loadState.status === "ready" && preferences.windowGlassEnabled;
 
   const notify = useCallback((message: string) => {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
@@ -420,6 +422,23 @@ export default function App() {
     document.documentElement.dataset.theme = resolvedTheme;
     document.documentElement.style.colorScheme = resolvedTheme;
   }, [resolvedTheme]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.overlayGlass = overlayGlassActive ? "enabled" : "disabled";
+    if (overlayGlassActive) {
+      root.style.setProperty(
+        "--overlay-glass-opacity",
+        `${preferences.windowSurfaceOpacity * 100}%`,
+      );
+    } else {
+      root.style.removeProperty("--overlay-glass-opacity");
+    }
+    return () => {
+      delete root.dataset.overlayGlass;
+      root.style.removeProperty("--overlay-glass-opacity");
+    };
+  }, [overlayGlassActive, preferences.windowSurfaceOpacity]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -2563,6 +2582,7 @@ export default function App() {
       {settingsOpen && (
         <SettingsDialog
           settings={{ language, fonts, colorSchemes, theme, preferences }}
+          isMac={isMac}
           onClose={() => setSettingsOpen(false)}
           onSave={async (next, layout) => {
             await persistSettings(next);

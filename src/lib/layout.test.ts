@@ -8,6 +8,25 @@ it("falls back to defaults without stored data", () => {
   expect(readLayout()).toEqual(DEFAULT_LAYOUT);
 });
 
+it.each([
+  [199.5, 240.5, 1001, 200, 241, 1000],
+  [601, 119, 95, 600, 120, 96],
+])(
+  "normalizes stored panel sizes to the settings limits",
+  (sidebarWidth, terminalHeight, outputHeight, width, terminal, output) => {
+    localStorage.setItem(
+      "gaze:layout",
+      JSON.stringify({ sidebarWidth, terminalHeight, outputHeight }),
+    );
+    expect(readLayout()).toEqual({
+      ...DEFAULT_LAYOUT,
+      sidebarWidth: width,
+      terminalHeight: terminal,
+      outputHeight: output,
+    });
+  },
+);
+
 it("round-trips panel sizes and ignores bad values", () => {
   saveLayout({ sidebarWidth: 340 });
   saveLayout({ terminalHeight: 300 });

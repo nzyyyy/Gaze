@@ -22,10 +22,11 @@ import {
   type Preferences,
   type SettingsCategory,
 } from "../lib/preferences";
-import { DEFAULT_LAYOUT, readLayout, type Layout } from "../lib/layout";
+import { DEFAULT_LAYOUT, LAYOUT_SIZE_LIMITS, readLayout, type Layout } from "../lib/layout";
 
 interface SettingsDialogProps {
   settings: AppSettings;
+  isMac?: boolean;
   onSave: (settings: AppSettings, layout: Layout) => Promise<void>;
   onClose: () => void;
 }
@@ -65,12 +66,12 @@ function SettingRow({
 }
 
 const LAYOUT_FIELDS = [
-  { key: "sidebarWidth", label: "项目栏宽度", min: 200, max: 600 },
-  { key: "terminalHeight", label: "终端面板高度", min: 120, max: 1000 },
-  { key: "outputHeight", label: "Git 输出面板高度", min: 96, max: 1000 },
+  { key: "sidebarWidth", label: "项目栏宽度", ...LAYOUT_SIZE_LIMITS.sidebarWidth },
+  { key: "terminalHeight", label: "终端面板高度", ...LAYOUT_SIZE_LIMITS.terminalHeight },
+  { key: "outputHeight", label: "Git 输出面板高度", ...LAYOUT_SIZE_LIMITS.outputHeight },
 ] as const;
 
-export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProps) {
+export function SettingsDialog({ settings, isMac = false, onSave, onClose }: SettingsDialogProps) {
   useLanguage();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -221,7 +222,7 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
               className="settings-preview"
               style={{ fontFamily: fontStack(draft.fonts[key], key) }}
             >
-              {sample}
+              {t(sample)}
             </pre>
           </SettingRow>
         ))}
@@ -239,9 +240,31 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
                 role="switch"
                 className="setting-switch"
                 checked={draft.preferences[field.key]}
+                disabled={field.key === "windowGlassEnabled" && !isMac}
                 aria-describedby={`${field.key}-description`}
                 onChange={(event) => updatePreference(field.key, event.target.checked)}
               />
+            ) : field.type === "range" ? (
+              <div className="setting-range">
+                <input
+                  id={field.key}
+                  type="range"
+                  min={field.min}
+                  max={field.max}
+                  step={field.step}
+                  disabled={!isMac || !draft.preferences.windowGlassEnabled}
+                  aria-describedby={`${field.key}-description`}
+                  value={
+                    Number.isFinite(draft.preferences[field.key])
+                      ? draft.preferences[field.key]
+                      : field.min
+                  }
+                  onChange={(event) => updatePreference(field.key, event.target.valueAsNumber)}
+                />
+                <output htmlFor={field.key}>
+                  {Math.round(draft.preferences[field.key] * 100)}%
+                </output>
+              </div>
             ) : (
               <input
                 id={field.key}
@@ -326,15 +349,21 @@ export function SettingsDialog({ settings, onSave, onClose }: SettingsDialogProp
         onSubmit={async (event) => {
           event.preventDefault();
           if (busy) return;
+          const invalidSize = LAYOUT_FIELDS.find(
+            (field) =>
+              !Number.isInteger(layout[field.key]) ||
+              layout[field.key] < field.min ||
+              layout[field.key] > field.max,
+          );
           const invalid =
             preferencesError(draft.preferences) ??
-            (LAYOUT_FIELDS.some(
-              (field) =>
-                !Number.isInteger(layout[field.key]) ||
-                layout[field.key] < field.min ||
-                layout[field.key] > field.max,
-            )
-              ? t("面板尺寸超出允许范围，请检查窗口与布局设置。")
+            (invalidSize
+              ? t(
+                  "{0}：请输入 {1}–{2} 之间的整数。",
+                  t(invalidSize.label),
+                  invalidSize.min,
+                  invalidSize.max,
+                )
               : null);
           if (invalid) {
             setError(invalid);

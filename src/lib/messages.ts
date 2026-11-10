@@ -176,11 +176,12 @@ export const english: Record<string, string> = {
   "尝试更短的文本，或打开“隐藏/忽略”。": "Try shorter text or enable Hidden / Ignored.",
   搜索结果: "Search results",
   界面: "Interface",
-  "项目文件 全局搜索 设置 Gaze": "Project files   Search workspace   Settings   Gaze",
-  "// 中文注释 · 0O 1lI const gaze ":
-    " (value) => value !== null;=// Comment · 0O 1lI\nconst gaze = (value) => value !== null;",
+  编辑器: "Editor",
+  "项目文件　全局搜索　设置　Gaze": "Project files   Search workspace   Settings   Gaze",
+  "// 中文注释 · 0O 1lI\nconst gaze = (value) => value !== null;":
+    "// Comment · 0O 1lI\nconst gaze = (value) => value !== null;",
   终端: "Terminal",
-  "❯ ~/项目/gaze  main  pnpm dev ✓ ready": "❯ ~/projects/gaze   main\n pnpm dev  ✓ ready",
+  "❯ ~/项目/gaze   main\n pnpm dev  ✓ ready": "❯ ~/projects/gaze   main\n pnpm dev  ✓ ready",
   项目栏宽度: "Sidebar width",
   终端面板高度: "Terminal panel height",
   "Git 输出面板高度": "Git output panel height",
@@ -190,6 +191,12 @@ export const english: Record<string, string> = {
   "主题 模式 跟随系统 日间 夜间": "Theme mode system light dark",
   "光标样式 方块 竖线 下划线": "Cursor style block bar underline",
   主题模式: "Theme mode",
+  浮层玻璃效果: "Frosted glass overlays",
+  "为 Quick Open、设置、菜单、Hover 和通知添加局部模糊背景；仅 macOS 可用。":
+    "Add locally blurred backgrounds to Quick Open, Settings, menus, hovers, and notifications. Available on macOS only.",
+  浮层背景不透明度: "Overlay background opacity",
+  "数值越低，浮层背后的模糊内容越明显；文字和控件保持清晰。范围 50%–100%。":
+    "Lower values reveal more blurred content behind overlays while text and controls stay crisp. Range: 50%–100%.",
   "选择日间、夜间，或随系统外观自动切换。": "Choose light, dark, or follow the system appearance.",
   跟随系统: "Follow system",
   日间模式: "Light mode",
@@ -213,8 +220,7 @@ export const english: Record<string, string> = {
   "单位 px；实际尺寸会根据窗口可用空间自动限制。范围 {0}–{1}。":
     "In px, limited by available window space. Range: {0}–{1}.",
   "Maple Mono 字体许可": "Maple Mono font license",
-  "面板尺寸超出允许范围，请检查窗口与布局设置。":
-    "Panel size is out of range. Check window and layout settings.",
+  "{0}：请输入 {1}–{2} 之间的整数。": "{0}: Enter a whole number between {1} and {2}.",
   "保存失败：{0}": "Save failed: {0}",
   设置: "Settings",
   自定义你的阅读与编辑环境: "Customize your reading and editing environment",

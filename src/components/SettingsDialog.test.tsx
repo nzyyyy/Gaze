@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import { DEFAULT_FONT_SETTINGS } from "../lib/fonts";
@@ -143,6 +143,80 @@ it("validates hidden category values and gives an empty search state", async () 
   expect(screen.getByText(/没有匹配的设置/)).toBeInTheDocument();
 });
 
+it("saves appearance settings despite fractional or out-of-range stored panel sizes", async () => {
+  const user = userEvent.setup();
+  const onSave = vi.fn().mockResolvedValue(undefined);
+  localStorage.setItem(
+    "gaze:layout",
+    JSON.stringify({ sidebarWidth: 199.5, terminalHeight: 240.5, outputHeight: 1001 }),
+  );
+  try {
+    render(<SettingsDialog settings={settings} onSave={onSave} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "保存设置" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(onSave).toHaveBeenCalledWith(settings, {
+      ...DEFAULT_LAYOUT,
+      sidebarWidth: 200,
+      terminalHeight: 241,
+      outputHeight: 1000,
+    });
+  } finally {
+    localStorage.removeItem("gaze:layout");
+  }
+});
+
+it("identifies an invalid panel size even after switching categories", async () => {
+  const user = userEvent.setup();
+  const onSave = vi.fn();
+  render(<SettingsDialog settings={settings} onSave={onSave} onClose={vi.fn()} />);
+  await user.click(category("窗口与布局"));
+  fireEvent.change(screen.getByRole("spinbutton", { name: "终端面板高度" }), {
+    target: { value: "240.5" },
+  });
+  await user.click(category("外观"));
+  await user.click(screen.getByRole("button", { name: "保存设置" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("终端面板高度：请输入 120–1000 之间的整数。");
+  expect(onSave).not.toHaveBeenCalled();
+});
+
+it("configures glass opacity on macOS and restores its defaults", async () => {
+  const user = userEvent.setup();
+  const onSave = vi.fn().mockResolvedValue(undefined);
+  render(<SettingsDialog settings={settings} isMac onSave={onSave} onClose={vi.fn()} />);
+  const toggle = screen.getByRole("switch", { name: "浮层玻璃效果" });
+  const slider = screen.getByRole("slider", { name: "浮层背景不透明度" });
+  expect(toggle).toBeChecked();
+  expect(slider).toBeEnabled();
+  expect(slider).toHaveValue("0.8");
+  await user.click(toggle);
+  expect(slider).toBeDisabled();
+  await user.click(toggle);
+  expect(slider).toBeEnabled();
+  fireEvent.change(slider, { target: { value: "0.65" } });
+  expect(slider).toHaveValue("0.65");
+  expect(screen.getByText("65%")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "保存设置" }));
+  expect(onSave).toHaveBeenCalledWith(
+    expect.objectContaining({
+      preferences: expect.objectContaining({
+        windowGlassEnabled: true,
+        windowSurfaceOpacity: 0.65,
+      }),
+    }),
+    expect.any(Object),
+  );
+  await user.click(screen.getByRole("button", { name: "恢复默认" }));
+  expect(toggle).toBeChecked();
+  expect(slider).toHaveValue("0.8");
+  expect(slider).toBeEnabled();
+});
+
+it("disables glass controls outside macOS", () => {
+  render(<SettingsDialog settings={settings} onSave={vi.fn()} onClose={vi.fn()} />);
+  expect(screen.getByRole("switch", { name: "浮层玻璃效果" })).toBeDisabled();
+  expect(screen.getByRole("slider", { name: "浮层背景不透明度" })).toBeDisabled();
+});
+
 it("saves the selected language and searches translated settings", async () => {
   const { setLanguage } = await import("../lib/i18n");
   const user = userEvent.setup();
@@ -159,6 +233,12 @@ it("saves the selected language and searches translated settings", async () => {
   act(() => setLanguage("en"));
   try {
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Editor" })).toBeInTheDocument();
+    expect(screen.getByText("Project files Search workspace Settings Gaze")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Editor" }));
+    expect(screen.getByText(/\/\/ Comment · 0O 1lI/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Terminal" }));
+    expect(screen.getByText(/~\/projects\/gaze/)).toBeInTheDocument();
     await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "font size");
     expect(screen.getByRole("spinbutton", { name: "Editor font size" })).toBeInTheDocument();
     expect(screen.getByRole("spinbutton", { name: "Terminal font size" })).toBeInTheDocument();
