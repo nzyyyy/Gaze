@@ -374,21 +374,48 @@
 }
 .gaze-git-workspace .batch-actions {
   flex: none;
+  align-items: stretch;
   margin-left: auto;
   max-width: 140px;
   gap: 0;
   white-space: nowrap;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+.gaze-git-workspace .batch-actions > button {
+  min-height: 21px;
+  border: 0;
+  background: transparent;
+}
+.gaze-git-workspace .batch-actions:has(> button:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.gaze-git-workspace .batch-actions > button:focus-visible {
+  outline: none;
+  background: var(--hover);
+}
+.gaze-git-workspace .batch-actions > button:active:not(:disabled) {
+  opacity: 1;
+  transform: none;
+}
+.gaze-git-workspace .batch-actions > button:disabled {
+  opacity: 1;
+  color: var(--muted);
 }
 .gaze-git-workspace .batch-actions > button:first-child {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  border-radius: inherit;
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
 .gaze-git-workspace .batch-actions > .row-menu-trigger {
   flex: none;
-  margin-left: -1px;
+  border-left: 1px solid var(--line);
+  border-radius: inherit;
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
 }

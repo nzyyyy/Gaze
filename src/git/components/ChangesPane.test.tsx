@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import type { FileChange, RepositorySummary, WorkingTreeSnapshot } from "../api";
 import { I18nProvider } from "../i18n";
@@ -99,6 +99,21 @@ test("updates select-all after snapshots change and disables it without selectab
   rerender(pane(snapshot, repository));
   fireEvent.click(selectAll());
   expect(selectAll()).toBeChecked();
+  const actions = within(screen.getByRole("group", { name: "Batch actions" }));
+  const stage = actions.getByRole("button", { name: "Stage selected (1)" });
+  expect(stage).toHaveTextContent("Stage (1)");
+  expect(stage).toHaveAttribute("data-tooltip", "Stage selected (1)");
+  const showPopover = vi.fn();
+  Object.assign(stage.parentElement!.querySelector(".row-menu-popover")!, {
+    showPopover,
+    hidePopover: vi.fn(),
+  });
+  fireEvent.click(actions.getByRole("button", { name: "Batch actions" }));
+  expect(showPopover).toHaveBeenCalledOnce();
+  expect(callbacks.onRun).not.toHaveBeenCalled();
+  fireEvent.click(stage);
+  expect(callbacks.onRun).toHaveBeenCalledWith({ type: "stageFiles", paths: ["one.ts"] });
+  fireEvent.click(selectAll());
   rerender(pane({ ...snapshot, id: 2, files: [file, { ...file, path: "two.ts" }] }, repository));
   expect(selectAll()).toBePartiallyChecked();
   expect(screen.getByRole("checkbox", { name: "Select all Unstaged" })).toBePartiallyChecked();
