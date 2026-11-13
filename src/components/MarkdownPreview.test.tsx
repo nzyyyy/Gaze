@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -30,6 +30,64 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("MarkdownPreview", () => {
+  it("builds a hierarchical outline from rendered headings and navigates duplicate anchors", async () => {
+    const user = userEvent.setup();
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
+    render(
+      <>
+        <h2 id="gaze-markdown-中文标题-1">Outside</h2>
+        <MarkdownPreview
+          {...props}
+          content={
+            "Guide\n=====\n\n## 中文**标题**\n\n### Nested `code`\n\n## 中文标题\n\n```md\n# Not a heading\n```"
+          }
+        />
+      </>,
+    );
+    const links = within(screen.getByRole("navigation", { name: "目录" })).getAllByRole("link");
+    expect(links.map((link) => link.textContent)).toEqual([
+      "Guide",
+      "中文标题",
+      "Nested code",
+      "中文标题",
+    ]);
+    expect(links[2]!.closest("li")).toHaveStyle({ paddingLeft: "24px" });
+    expect(links[3]).toHaveAttribute("href", "#gaze-markdown-中文标题-1");
+    await user.click(links[3]!);
+    expect(scroll.mock.contexts[0]).toBe(screen.getAllByRole("heading", { name: "中文标题" })[1]);
+    expect(apiMock.resolveMarkdownLink).not.toHaveBeenCalled();
+  });
+
+  it("collapses and reopens the outline using the keyboard", async () => {
+    const user = userEvent.setup();
+    render(<MarkdownPreview {...props} content="# Guide" />);
+    const toggle = screen.getByRole("button", { name: "收起目录" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveAttribute("aria-controls", screen.getByRole("navigation").id);
+    toggle.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开目录" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    await user.keyboard(" ");
+    expect(screen.getByRole("navigation")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Guide" })).toBeVisible();
+  });
+
+  it("updates the outline after edits and hides it for documents without headings", () => {
+    const { rerender } = render(<MarkdownPreview {...props} content="Plain text" />);
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "收起目录" })).not.toBeInTheDocument();
+    rerender(<MarkdownPreview {...props} content="## Updated" />);
+    expect(
+      within(screen.getByRole("navigation")).getByRole("link", { name: "Updated" }),
+    ).toHaveAttribute("href", "#gaze-markdown-updated");
+    rerender(<MarkdownPreview {...props} content="Plain text again" />);
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+  });
+
   it.each([
     ["**功能与场景：**在 Docker 中运行", "功能与场景："],
     ["这是**（重点）**内容", "（重点）"],

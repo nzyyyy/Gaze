@@ -1,5 +1,6 @@
 import { t, useLanguage } from "../lib/i18n";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type RefObject } from "react";
+import { ChevronsLeft, ChevronsRight } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -109,6 +110,70 @@ interface MarkdownPreviewProps {
   onNotice: (message: string) => void;
 }
 
+function MarkdownOutline({
+  content,
+  rootRef,
+  onNavigate,
+}: {
+  content: string;
+  rootRef: RefObject<HTMLDivElement | null>;
+  onNavigate: (fragment: string) => void;
+}) {
+  useLanguage();
+  const navigationId = useId();
+  const [expanded, setExpanded] = useState(true);
+  const [headings, setHeadings] = useState<{ id: string; text: string; level: number }[]>([]);
+
+  useEffect(() => {
+    const elements = rootRef.current?.querySelectorAll<HTMLElement>(
+      ".markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6",
+    );
+    setHeadings(
+      Array.from(elements ?? [], (element) => ({
+        id: element.id,
+        text: element.textContent ?? "",
+        level: Number(element.tagName.slice(1)),
+      })),
+    );
+  }, [content, rootRef]);
+
+  if (!headings.length) return null;
+  const baseLevel = headings.reduce((level, heading) => Math.min(level, heading.level), 6);
+  return (
+    <aside className={`markdown-outline${expanded ? "" : " is-collapsed"}`}>
+      <div className="markdown-outline-header">
+        {expanded && <span>{t("目录")}</span>}
+        <button
+          type="button"
+          aria-label={t(expanded ? "收起目录" : "展开目录")}
+          aria-expanded={expanded}
+          aria-controls={navigationId}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? <ChevronsLeft size={16} /> : <ChevronsRight size={16} />}
+        </button>
+      </div>
+      <nav id={navigationId} aria-label={t("目录")} hidden={!expanded}>
+        <ol>
+          {headings.map((heading) => (
+            <li key={heading.id} style={{ paddingLeft: (heading.level - baseLevel) * 12 }}>
+              <a
+                href={`#${heading.id}`}
+                onClick={(event) => {
+                  event.preventDefault();
+                  onNavigate(heading.id);
+                }}
+              >
+                {heading.text}
+              </a>
+            </li>
+          ))}
+        </ol>
+      </nav>
+    </aside>
+  );
+}
+
 export default function MarkdownPreview({
   content,
   projectId,
@@ -197,24 +262,27 @@ export default function MarkdownPreview({
   };
 
   return (
-    <div
-      className="markdown-preview"
-      ref={rootRef}
-      role="region"
-      aria-label={t("Markdown 预览")}
-      tabIndex={0}
-    >
-      <article className="markdown-body">
-        <Markdown
-          remarkPlugins={remarkPlugins}
-          rehypePlugins={rehypePlugins}
-          components={components}
-          urlTransform={safeUrl}
-          skipHtml
-        >
-          {content}
-        </Markdown>
-      </article>
+    <div className="markdown-preview-layout">
+      <MarkdownOutline content={content} rootRef={rootRef} onNavigate={scrollToFragment} />
+      <div
+        className="markdown-preview"
+        ref={rootRef}
+        role="region"
+        aria-label={t("Markdown 预览")}
+        tabIndex={0}
+      >
+        <article className="markdown-body">
+          <Markdown
+            remarkPlugins={remarkPlugins}
+            rehypePlugins={rehypePlugins}
+            components={components}
+            urlTransform={safeUrl}
+            skipHtml
+          >
+            {content}
+          </Markdown>
+        </article>
+      </div>
     </div>
   );
 }
