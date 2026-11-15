@@ -1317,9 +1317,8 @@ button:focus-visible,
 .markdown-outline {
   display: flex;
   flex-direction: column;
-  flex: 0 0 clamp(140px, 22%, 240px);
+  flex: 0 0 220px;
   min-width: 0;
-  border-right: 1px solid var(--border);
   color: var(--text-muted);
   font-family: var(--font-ui);
   font-size: 12px;
@@ -1327,6 +1326,33 @@ button:focus-visible,
 
 .markdown-outline.is-collapsed {
   flex-basis: 36px;
+}
+
+.markdown-outline-resizer {
+  flex: 0 0 5px;
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.markdown-outline-resizer::after {
+  content: "";
+  position: absolute;
+  inset: 0 2px;
+  background: var(--border);
+}
+
+.markdown-outline-resizer:hover::after,
+.markdown-outline-resizer:focus-visible::after,
+.is-resizing-outline .markdown-outline-resizer::after {
+  background: var(--accent);
+}
+
+.is-resizing-outline,
+.is-resizing-outline * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 .markdown-outline-header {
@@ -1344,6 +1370,15 @@ button:focus-visible,
 .markdown-outline-header button {
   display: flex;
   padding: 4px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.markdown-outline-header button:hover {
+  color: var(--text);
 }
 
 .markdown-outline nav {

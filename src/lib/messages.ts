@@ -122,6 +122,7 @@ export const english: Record<string, string> = {
   "Markdown 预览": "Markdown preview",
   目录: "Table of contents",
   收起目录: "Collapse table of contents",
+  调整目录宽度: "Resize table of contents",
   展开目录: "Expand table of contents",
   快速打开文件: "Quick open file",
   输入文件名或路径: "Enter file name or path",

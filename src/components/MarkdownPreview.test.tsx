@@ -76,6 +76,46 @@ describe("MarkdownPreview", () => {
     expect(screen.getByRole("heading", { name: "Guide" })).toBeVisible();
   });
 
+  it("resizes the outline by dragging its divider and collapses it past the threshold", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 1024,
+      height: 600,
+      x: 0,
+      y: 0,
+      top: 0,
+      bottom: 600,
+      left: 0,
+      right: 1024,
+      toJSON: () => ({}),
+    });
+    const { container } = render(<MarkdownPreview {...props} content="# Guide" />);
+    const separator = screen.getByRole("separator", { name: "调整目录宽度" });
+    const outline = container.querySelector<HTMLElement>(".markdown-outline")!;
+    let captured = false;
+    separator.setPointerCapture = vi.fn(() => {
+      captured = true;
+    });
+    separator.hasPointerCapture = vi.fn(() => captured);
+    separator.releasePointerCapture = vi.fn(() => {
+      captured = false;
+    });
+    const pointer = (type: string, clientX: number) => {
+      const event = new MouseEvent(type, { bubbles: true, clientX, button: 0 });
+      Object.defineProperty(event, "pointerId", { value: 1 });
+      fireEvent(separator, event);
+    };
+
+    pointer("pointerdown", 220);
+    pointer("pointermove", 300);
+    expect(outline).toHaveStyle({ flexBasis: "300px" });
+    expect(separator).toHaveAttribute("aria-valuenow", "300");
+    pointer("pointermove", 40);
+    expect(outline).toHaveClass("is-collapsed");
+    expect(separator).toHaveAttribute("aria-valuenow", "0");
+    pointer("pointerup", 40);
+    expect(screen.getByRole("button", { name: "展开目录" })).toBeInTheDocument();
+  });
+
   it("updates the outline after edits and hides it for documents without headings", () => {
     const { rerender } = render(<MarkdownPreview {...props} content="Plain text" />);
     expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
