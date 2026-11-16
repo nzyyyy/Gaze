@@ -190,8 +190,8 @@ export const english: Record<string, string> = {
   终端面板高度: "Terminal panel height",
   "Git 输出面板高度": "Git output panel height",
   "{0} 字体 Maple Consolas": "{0} font Maple Consolas",
-  "日间 夜间 配色 GitHub Catppuccin Nord Gaze":
-    "Light dark color scheme GitHub Catppuccin Nord Gaze",
+  "日间 夜间 配色 Codex GitHub Catppuccin Nord Gaze":
+    "Light dark color scheme Codex GitHub Catppuccin Nord Gaze",
   "主题 模式 跟随系统 日间 夜间": "Theme mode system light dark",
   "光标样式 方块 竖线 下划线": "Cursor style block bar underline",
   主题模式: "Theme mode",

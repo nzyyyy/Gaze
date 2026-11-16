@@ -113,7 +113,7 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
         matches(id, t("{0} 字体 Maple Consolas", t(area.label))),
     );
     const colors =
-      id === "appearance" && matches(id, t("日间 夜间 配色 GitHub Catppuccin Nord Gaze"));
+      id === "appearance" && matches(id, t("日间 夜间 配色 Codex GitHub Catppuccin Nord Gaze"));
     const locale = id === "appearance" && matches(id, t("语言") + " language 中文 English");
     const mode = id === "appearance" && matches(id, t("主题 模式 跟随系统 日间 夜间"));
     const cursor = id === "terminal" && matches(id, t("光标样式 方块 竖线 下划线"));

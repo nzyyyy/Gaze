@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { colorSchemeVariables, PALETTES, type ColorScheme } from "./colorSchemes";
+import {
+  colorSchemeVariables,
+  DEFAULT_COLOR_SCHEMES,
+  PALETTES,
+  type ColorScheme,
+} from "./colorSchemes";
 import { terminalTheme } from "./terminalTabs";
 
 function luminance(hex: string) {
@@ -39,7 +44,16 @@ function mixedColor(value: string) {
 }
 
 describe("color schemes", () => {
-  for (const scheme of ["github", "catppuccin", "nord"] as ColorScheme[]) {
+  it("defaults to Codex day and night palettes with neutral selected surfaces", () => {
+    expect(DEFAULT_COLOR_SCHEMES).toEqual({ light: "codex", dark: "codex" });
+    for (const mode of ["light", "dark"] as const) {
+      const variables = colorSchemeVariables("codex", mode);
+      expect(variables["--sidebar-active"]).toContain(PALETTES.codex[mode].text);
+      expect(variables["--tab-active"]).toContain(PALETTES.codex[mode].text);
+      expect(variables["--selected-inactive"]).toContain(PALETTES.codex[mode].text);
+    }
+  });
+  for (const scheme of ["codex", "github", "catppuccin", "nord"] as ColorScheme[]) {
     for (const mode of ["light", "dark"] as const) {
       it(`${scheme} ${mode} keeps text readable and terminal surfaces consistent`, () => {
         const p = PALETTES[scheme][mode];

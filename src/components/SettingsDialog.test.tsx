@@ -18,6 +18,23 @@ function category(name: string) {
   return within(screen.getByRole("navigation", { name: "设置分类" })).getByRole("button", { name });
 }
 
+it("selects Codex by default and finds and saves both palettes", async () => {
+  const user = userEvent.setup();
+  const onSave = vi.fn().mockResolvedValue(undefined);
+  render(<SettingsDialog settings={settings} onSave={onSave} onClose={vi.fn()} />);
+  await user.type(screen.getByRole("searchbox", { name: "搜索设置" }), "Codex");
+  for (const name of ["Codex Light", "Codex Dark"]) {
+    expect(screen.getByRole("button", { name })).toHaveAttribute("aria-pressed", "true");
+  }
+  await user.click(screen.getByRole("button", { name: "GitHub Light" }));
+  await user.click(screen.getByRole("button", { name: "Codex Light" }));
+  await user.click(screen.getByRole("button", { name: "保存设置" }));
+  expect(onSave).toHaveBeenCalledWith(
+    expect.objectContaining({ colorSchemes: { light: "codex", dark: "codex" } }),
+    expect.any(Object),
+  );
+});
+
 it("uses the themed dropdown for theme modes and saves its selected value", async () => {
   const user = userEvent.setup();
   const onSave = vi.fn().mockResolvedValue(undefined);

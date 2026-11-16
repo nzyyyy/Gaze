@@ -163,6 +163,12 @@
   --shadow-panel: 0 16px 48px rgba(0, 0, 0, 0.4);
 }
 
+:root[data-color-scheme="codex"] {
+  --sidebar-rail-bg: light-dark(#f4f4f4, #282828);
+  --sidebar-panel-bg: var(--sidebar);
+  --toolbar-bg: var(--sidebar);
+}
+
 :root[data-overlay-glass] {
   --popover-material: var(--surface-raised);
   --overlay-glass-filter: none;

@@ -1,10 +1,11 @@
 import type { ResolvedTheme } from "./types";
 
-export type ColorScheme = "github" | "catppuccin" | "nord" | "original";
+export type ColorScheme = "codex" | "github" | "catppuccin" | "nord" | "original";
 export type ColorSchemes = Record<ResolvedTheme, ColorScheme>;
 
-export const DEFAULT_COLOR_SCHEMES: ColorSchemes = { light: "github", dark: "github" };
+export const DEFAULT_COLOR_SCHEMES: ColorSchemes = { light: "codex", dark: "codex" };
 export const COLOR_SCHEME_NAMES: Record<ColorScheme, Record<ResolvedTheme, string>> = {
+  codex: { light: "Codex Light", dark: "Codex Dark" },
   github: { light: "GitHub Light", dark: "GitHub Dark" },
   catppuccin: { light: "Catppuccin Latte", dark: "Catppuccin Mocha" },
   nord: { light: "Nord Snow", dark: "Nord Polar Night" },
@@ -31,6 +32,40 @@ interface Palette {
 // Adapted to Gaze's surfaces from the official Primer, Catppuccin and Nord palettes.
 // https://github.com/primer/primitives · https://catppuccin.com/palette · https://www.nordtheme.com/docs/colors-and-palettes
 export const PALETTES: Record<ColorScheme, Record<ResolvedTheme, Palette>> = {
+  codex: {
+    light: {
+      background: "#ffffff",
+      sidebar: "#fafafa",
+      raised: "#f4f4f4",
+      text: "#1b1d1f",
+      muted: "#666666",
+      faint: "#707070",
+      border: "#e3e3e3",
+      accent: "#2d65c8",
+      contrast: "#ffffff",
+      red: "#c0393b",
+      green: "#287d4c",
+      yellow: "#8c6b20",
+      magenta: "#8558a5",
+      cyan: "#267582",
+    },
+    dark: {
+      background: "#181818",
+      sidebar: "#1f1f1f",
+      raised: "#303030",
+      text: "#ededed",
+      muted: "#b0b0b0",
+      faint: "#a1a1a1",
+      border: "#383838",
+      accent: "#79a8f5",
+      contrast: "#181818",
+      red: "#ef8b8d",
+      green: "#83c99a",
+      yellow: "#d6b76c",
+      magenta: "#c4a0df",
+      cyan: "#80c4cf",
+    },
+  },
   github: {
     light: {
       background: "#ffffff",
@@ -177,7 +212,9 @@ export function colorSchemeVariables(
   const tint = (color: string, percent: number) =>
     `color-mix(in srgb, ${color} ${percent}%, transparent)`;
   const selected = (surface: string) =>
-    `color-mix(in srgb, ${p.accent} ${mode === "dark" ? 24 : 12}%, ${surface})`;
+    scheme === "codex"
+      ? `color-mix(in srgb, ${p.text} ${mode === "dark" ? 9 : 6}%, ${surface})`
+      : `color-mix(in srgb, ${p.accent} ${mode === "dark" ? 24 : 12}%, ${surface})`;
   return {
     "--bg": p.background,
     "--surface": p.background,
@@ -185,7 +222,10 @@ export function colorSchemeVariables(
     "--sidebar": p.sidebar,
     "--sidebar-active": selected(p.sidebar),
     "--tab-active": selected(p.background),
-    "--selected-inactive": `color-mix(in srgb, ${p.accent} 8%, ${p.sidebar})`,
+    "--selected-inactive":
+      scheme === "codex"
+        ? `color-mix(in srgb, ${p.text} 3%, ${p.sidebar})`
+        : `color-mix(in srgb, ${p.accent} 8%, ${p.sidebar})`,
     "--editor-bg": p.background,
     "--terminal-bg": p.background,
     "--topbar": p.sidebar,

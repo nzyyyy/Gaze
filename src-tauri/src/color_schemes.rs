@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub enum ColorScheme {
     #[default]
+    Codex,
     Github,
     Catppuccin,
     Nord,
@@ -25,7 +26,7 @@ mod tests {
     #[tokio::test]
     async fn schemes_round_trip_and_validate() {
         let settings = ColorSchemes {
-            light: ColorScheme::Catppuccin,
+            light: ColorScheme::Codex,
             dark: ColorScheme::Nord,
         };
         let cache = Cache::open_in_memory().unwrap();
@@ -46,7 +47,19 @@ mod tests {
             serde_json::from_str::<ColorSchemes>(r#"{"dark":"nord"}"#)
                 .unwrap()
                 .light,
-            ColorScheme::Github
+            ColorScheme::Codex
+        );
+        assert_eq!(
+            serde_json::to_string(&ColorSchemes::default()).unwrap(),
+            r#"{"light":"codex","dark":"codex"}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<ColorSchemes>(r#"{"light":"github","dark":"catppuccin"}"#)
+                .unwrap(),
+            ColorSchemes {
+                light: ColorScheme::Github,
+                dark: ColorScheme::Catppuccin,
+            }
         );
         assert!(serde_json::from_str::<ColorSchemes>(r#"{"light":"unknown"}"#).is_err());
         assert!(serde_json::from_str::<ColorSchemes>(r#"{"other":"nord"}"#).is_err());
