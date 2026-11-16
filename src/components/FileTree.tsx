@@ -645,7 +645,11 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
   return (
     <div className="file-tree-pane">
       <div className="pane-heading">
-        <span>
+        <span
+          data-tooltip={
+            t("项目") + (selectedNodes.length > 1 ? t(" · 已选 {0} 项", selectedNodes.length) : "")
+          }
+        >
           {t("项目")}
           {selectedNodes.length > 1 ? t(" · 已选 {0} 项", selectedNodes.length) : ""}
         </span>

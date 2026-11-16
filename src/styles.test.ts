@@ -69,3 +69,43 @@ it("honors reduced transparency even when glass is enabled", () => {
   expect(root.getPropertyValue("--popover-material")).toBe("var(--surface-raised)");
   expect(root.getPropertyValue("--overlay-glass-filter")).toBe("none");
 });
+
+it("keeps Chinese and English controls on one line with the same size rules", () => {
+  applyStyles("disabled");
+  document.body.innerHTML = [
+    ["关闭右侧", "预览", "替换", "隐藏", "全局搜索"],
+    ["Close to the Right", "Preview", "Replace", "Hidden", "Search workspace"],
+  ]
+    .map(
+      ([close, preview, replace, hidden, heading]) => `
+      <section style="width: 200px">
+        <div class="file-tree-menu"><button>${close}</button></div>
+        <div class="replace-actions">
+          <button class="button button-small">${preview}</button>
+          <button class="button button-small">${replace}</button>
+        </div>
+        <button class="option-toggle option-text">${hidden}</button>
+        <div class="pane-heading"><span>${heading}</span><button>+</button></div>
+        <div class="pane-message"><span>${"long/path/".repeat(30)}</span></div>
+      </section>`,
+    )
+    .join("");
+  for (const section of document.body.children) {
+    const menu = getComputedStyle(section.querySelector(".file-tree-menu button")!);
+    expect(menu.whiteSpace).toBe("nowrap");
+    expect(menu.height).toBe("32px");
+    const actions = getComputedStyle(section.querySelector(".replace-actions")!);
+    expect(actions.display).toBe("grid");
+    expect(actions.gridTemplateColumns).toBe("repeat(2, minmax(0, 1fr))");
+    for (const button of section.querySelectorAll(".replace-actions button")) {
+      expect(getComputedStyle(button).whiteSpace).toBe("nowrap");
+      expect(getComputedStyle(button).height).toBe("26px");
+    }
+    expect(getComputedStyle(section.querySelector(".option-text")!).width).toBe("56px");
+    const heading = getComputedStyle(section.querySelector(".pane-heading span")!);
+    expect(heading.minWidth).toBe("0px");
+    expect(heading.textOverflow).toBe("ellipsis");
+    expect(heading.whiteSpace).toBe("nowrap");
+    expect(getComputedStyle(section.querySelector(".pane-message")!).overflowWrap).toBe("anywhere");
+  }
+});

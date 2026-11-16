@@ -694,6 +694,7 @@ button:focus-visible,
   background: var(--surface-raised);
   color: var(--text-muted);
   font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
   transition:
     background-color 120ms ease,
@@ -1032,12 +1033,28 @@ button:focus-visible,
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 6px;
   flex: 0 0 42px;
   height: 42px;
   padding: 0 8px 0 13px;
   color: var(--text-faint);
   font-size: 11px;
   font-weight: 500;
+}
+
+.pane-heading > span:first-child,
+.symbol-section-heading > span:first-child,
+.search-footer > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-heading > button,
+.pane-count,
+.source-badge {
+  flex-shrink: 0;
 }
 
 .pane-empty {
@@ -1184,6 +1201,7 @@ button:focus-visible,
 }
 
 .tree-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 12px;
@@ -2079,6 +2097,7 @@ button:focus-visible,
 .dialog-actions {
   grid-column: 1 / -1;
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
@@ -2281,6 +2300,7 @@ button:focus-visible,
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.65;
+  overflow-wrap: anywhere;
 }
 .setting-control {
   min-width: 0;
@@ -2458,6 +2478,7 @@ button:focus-visible,
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.65;
+  overflow-wrap: anywhere;
 }
 
 .app-select {
@@ -2800,6 +2821,7 @@ button:focus-visible,
 
 .search-input {
   width: 100%;
+  min-width: 0;
   height: 30px;
   padding: 0 28px 0 29px;
   border: 1px solid var(--border-strong);
@@ -2842,11 +2864,13 @@ button:focus-visible,
 
 .search-scope {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   padding: 0 10px 8px;
 }
 
 .search-scope select {
+  min-width: 0;
   height: 28px;
   padding: 0 7px;
   border: 1px solid var(--border-strong);
@@ -2864,6 +2888,7 @@ button:focus-visible,
 
 .replace-box {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   padding: 0 10px 8px;
 }
@@ -2874,7 +2899,8 @@ button:focus-visible,
 }
 
 .replace-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -2933,6 +2959,7 @@ button:focus-visible,
 .replace-warning {
   margin: 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   font-size: 11px;
 }
 
@@ -2950,6 +2977,8 @@ button:focus-visible,
   justify-content: center;
   min-width: 22px;
   height: 20px;
+  flex-shrink: 0;
+  white-space: nowrap;
   padding: 0 5px;
   border: 1px solid transparent;
   border-radius: var(--radius-small);
@@ -2977,6 +3006,7 @@ button:focus-visible,
 }
 
 .option-text {
+  width: 56px;
   font-family: var(--font-ui);
   font-size: 10px;
 }
@@ -2995,9 +3025,11 @@ button:focus-visible,
   align-items: center;
   gap: 7px;
   min-height: 0;
+  min-width: 0;
   padding: 36px 20px;
   color: var(--text-faint);
   text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .pane-message p {
@@ -3008,7 +3040,7 @@ button:focus-visible,
 }
 
 .pane-message span {
-  max-width: 220px;
+  max-width: min(220px, 100%);
   font-size: 11px;
   line-height: 1.5;
 }
@@ -3132,6 +3164,7 @@ button:focus-visible,
 }
 
 .search-footer .button {
+  flex-shrink: 0;
   height: 23px;
   padding: 0 8px;
   font-size: 10px;
@@ -3355,6 +3388,7 @@ button:focus-visible,
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 6px;
   flex: 0 0 25px;
   height: 25px;
   padding: 0 11px 0 12px;
@@ -3396,6 +3430,7 @@ button:focus-visible,
   background: var(--accent-soft);
   font-size: 10px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .symbol-results {
@@ -3468,6 +3503,7 @@ button:focus-visible,
 }
 
 .symbol-name {
+  min-width: 0;
   flex: 0 1 auto;
   overflow: hidden;
   color: var(--text);
@@ -3893,7 +3929,8 @@ button:focus-visible,
 .file-tree-menu {
   position: fixed;
   z-index: 100;
-  width: 192px;
+  width: max-content;
+  min-width: min(256px, calc(100vw - 16px));
   padding: 5px;
   max-width: calc(100vw - 16px);
   max-height: calc(100vh - 16px);
@@ -3908,6 +3945,7 @@ button:focus-visible,
 .file-tree-menu button {
   display: block;
   width: 100%;
+  height: 32px;
   padding: 7px 10px;
   border: 0;
   border-radius: calc(var(--radius-panel) - 6px);
@@ -3915,6 +3953,10 @@ button:focus-visible,
   color: inherit;
   text-align: left;
   font: inherit;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
 }
 .file-tree-menu button:disabled {

@@ -1,9 +1,11 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SearchPanel } from "./SearchPanel";
 import { api } from "../lib/api";
 import { DEFAULT_PREFERENCES } from "../lib/preferences";
+import { setLanguage, t } from "../lib/i18n";
+import type { ReplacePreview } from "../lib/types";
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -18,6 +20,39 @@ vi.mock("../lib/api", () => ({
 
 describe("SearchPanel", () => {
   beforeEach(() => vi.clearAllMocks());
+  afterEach(() => setLanguage("zh-CN"));
+
+  it.each(["zh-CN", "en"] as const)(
+    "keeps compact replacement labels and full accessible names in %s, including while busy",
+    async (language) => {
+      setLanguage(language);
+      let finish!: (value: ReplacePreview) => void;
+      render(
+        <SearchPanel
+          active
+          focusSignal={0}
+          capabilities={null}
+          onOpenLocation={vi.fn()}
+          onPreviewReplace={() => new Promise((resolve) => (finish = resolve))}
+          onApplyReplace={vi.fn()}
+        />,
+      );
+      const preview = screen.getByRole("button", { name: t("预览替换") });
+      const apply = screen.getByRole("button", { name: t("应用替换") });
+      expect(preview).toHaveTextContent(t("预览"));
+      expect(apply).toHaveTextContent(t("替换"));
+      expect(preview).toHaveAttribute("data-tooltip", t("预览替换"));
+      expect(apply).toHaveAttribute("data-tooltip", t("应用替换"));
+      fireEvent.change(screen.getByLabelText(t("在工作区中搜索")), {
+        target: { value: "needle" },
+      });
+      fireEvent.click(preview);
+      expect(screen.getByRole("button", { name: t("预览替换") })).toBeDisabled();
+      expect(screen.getByRole("button", { name: t("取消替换") })).toHaveTextContent(t("取消"));
+      await act(async () => finish({ files: [], skipped: [], truncated: false }));
+      expect(preview).toHaveTextContent(t("预览"));
+    },
+  );
 
   it("applies saved search defaults and updates them without remounting", () => {
     const props = { active: true, focusSignal: 0, capabilities: null, onOpenLocation: vi.fn() };

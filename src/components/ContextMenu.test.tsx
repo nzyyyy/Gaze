@@ -10,7 +10,7 @@ it("fits its measured size inside the viewport and skips disabled items", async 
   const trigger = document.createElement("button");
   document.body.append(trigger);
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-    width: 192,
+    width: 256,
     height: 360,
   } as DOMRect);
   const onClose = vi.fn();
@@ -31,7 +31,7 @@ it("fits its measured size inside the viewport and skips disabled items", async 
     </ContextMenu>,
   );
   const menu = screen.getByRole("menu");
-  expect(menu.style.left).toBe(`${window.innerWidth - 200}px`);
+  expect(menu.style.left).toBe(`${window.innerWidth - 264}px`);
   expect(menu.style.top).toBe(`${window.innerHeight - 368}px`);
   expect(screen.getByRole("menuitem", { name: "第一项" })).toHaveFocus();
   await user.keyboard("{ArrowDown}");
@@ -43,6 +43,26 @@ it("fits its measured size inside the viewport and skips disabled items", async 
   unmount();
   expect(trigger).toHaveFocus();
   trigger.remove();
+});
+
+it("keeps full menu labels available after the language changes", () => {
+  const target = { x: 0, y: 0, trigger: document.body };
+  const onClose = vi.fn();
+  const { rerender } = render(
+    <ContextMenu target={target} label="标签页操作" onClose={onClose}>
+      <button role="menuitem">关闭右侧</button>
+    </ContextMenu>,
+  );
+  expect(screen.getByRole("menuitem")).toHaveAttribute("data-tooltip", "关闭右侧");
+  rerender(
+    <ContextMenu target={target} label="Tab actions" onClose={onClose}>
+      <button role="menuitem">Close to the Right</button>
+    </ContextMenu>,
+  );
+  expect(screen.getByRole("menuitem", { name: "Close to the Right" })).toHaveAttribute(
+    "data-tooltip",
+    "Close to the Right",
+  );
 });
 
 it("dismisses on an outside pointer or window resize", () => {

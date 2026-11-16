@@ -30,6 +30,9 @@ export function ContextMenu({
   useLayoutEffect(() => {
     const menu = menuRef.current;
     if (!menu) return;
+    for (const button of menu.querySelectorAll("button")) {
+      button.dataset.tooltip = button.textContent?.trim() ?? "";
+    }
     const { width, height } = menu.getBoundingClientRect();
     menu.style.left = `${Math.max(8, Math.min(target.x, window.innerWidth - width - 8))}px`;
     menu.style.top = `${Math.max(8, Math.min(target.y, window.innerHeight - height - 8))}px`;

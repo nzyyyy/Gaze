@@ -237,11 +237,19 @@ export function SearchPanel({
     });
   };
   const activeProject = projects.find((project) => project.id === activeProjectId);
+  const statusLabel =
+    state.status === "paused"
+      ? t("已加载 {0} 条", state.received.toLocaleString())
+      : state.status === "done"
+        ? t("{0} 条结果", state.received.toLocaleString())
+        : state.status === "running"
+          ? t("搜索中…")
+          : t("等待输入");
 
   return (
     <div className="search-panel">
       <div className="pane-heading">
-        <span>{t("全局搜索")}</span>
+        <span data-tooltip={t("全局搜索")}>{t("全局搜索")}</span>
         {state.received > 0 && <span className="pane-count">{state.results.length}</span>}
       </div>
       <div className="search-input-wrap">
@@ -355,17 +363,17 @@ export function SearchPanel({
           <div className="replace-actions">
             <button
               className="button button-small"
+              aria-label={t("预览替换")}
+              data-tooltip={t("预览替换")}
               onClick={() => void previewReplacement()}
               disabled={!enabled || !query.trim() || replaceBusy !== null}
             >
-              {replaceBusy === "preview" ? (
-                <LoaderCircle size={13} className="spin" />
-              ) : (
-                t("预览替换")
-              )}
+              {replaceBusy === "preview" ? <LoaderCircle size={13} className="spin" /> : t("预览")}
             </button>
             <button
               className="button button-small button-primary"
+              aria-label={t("应用替换")}
+              data-tooltip={t("应用替换")}
               onClick={() => void applyReplacement()}
               disabled={
                 !enabled ||
@@ -375,32 +383,28 @@ export function SearchPanel({
                 selectedFiles.size === 0
               }
             >
-              {replaceBusy === "apply" ? (
-                <LoaderCircle size={13} className="spin" />
-              ) : (
-                t("应用替换")
-              )}
+              {replaceBusy === "apply" ? <LoaderCircle size={13} className="spin" /> : t("替换")}
             </button>
             {undoAvailable && onUndoReplace && (
               <button
                 className="button button-small"
+                aria-label={t("撤销上次替换")}
+                data-tooltip={t("撤销上次替换")}
                 onClick={() => void undoReplacement()}
                 disabled={replaceBusy !== null}
               >
-                {replaceBusy === "undo" ? (
-                  <LoaderCircle size={13} className="spin" />
-                ) : (
-                  t("撤销上次替换")
-                )}
+                {replaceBusy === "undo" ? <LoaderCircle size={13} className="spin" /> : t("撤销")}
               </button>
             )}
             {(replacePreview || replaceBusy === "preview") && (
               <button
                 className="button button-small"
+                aria-label={t("取消替换")}
+                data-tooltip={t("取消替换")}
                 onClick={cancelPreview}
                 disabled={replaceBusy === "apply"}
               >
-                {t("取消替换")}
+                {t("取消")}
               </button>
             )}
           </div>
@@ -498,16 +502,12 @@ export function SearchPanel({
             onOpen={openHit}
           />
           <div className="search-footer">
-            <span>
-              {state.status === "paused"
-                ? t("已加载 {0} 条", state.received.toLocaleString())
-                : state.status === "done"
-                  ? t("{0} 条结果", state.received.toLocaleString())
-                  : state.status === "running"
-                    ? t("搜索中…")
-                    : t("等待输入")}
-            </span>
-            {state.truncated && <span className="search-truncated">{t("已达到结果上限")}</span>}
+            <span data-tooltip={statusLabel}>{statusLabel}</span>
+            {state.truncated && (
+              <span className="search-truncated" data-tooltip={t("已达到结果上限")}>
+                {t("已达到结果上限")}
+              </span>
+            )}
             {state.status === "paused" && (
               <button className="button button-small" onClick={loadMore}>
                 {t("加载更多")}
@@ -568,7 +568,7 @@ function SearchResultList({ hits, waiting, onOpen }: SearchResultListProps) {
               style={{ transform: `translateY(${row.start}px)` }}
               onClick={() => onOpen(hit)}
               role="listitem"
-              data-tooltip={`${hit.projectName}/${hit.path}:${hit.line + 1}`}
+              data-tooltip={`${hit.projectName}/${hit.path}:${hit.line + 1}\n${hit.preview}`}
             >
               <span className="search-result-location">
                 <span className="search-project">{hit.projectName}</span>

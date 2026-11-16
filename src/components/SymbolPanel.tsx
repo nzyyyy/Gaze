@@ -130,7 +130,7 @@ export function SymbolPanel({
   return (
     <div className="symbol-panel">
       <div className="pane-heading">
-        <span>{t("符号")}</span>
+        <span data-tooltip={t("符号")}>{t("符号")}</span>
         <button
           className="icon-button"
           onClick={onFindImplementations}
@@ -172,7 +172,7 @@ export function SymbolPanel({
       ) : (
         <>
           <div className="symbol-section-heading">
-            <span>{t("当前文件大纲")}</span>
+            <span data-tooltip={t("当前文件大纲")}>{t("当前文件大纲")}</span>
             {outline && (
               <span className={`source-badge ${outline.source}`}>
                 {outline.source === "lsp" ? t("LSP 精确") : t("ctags 文本")}
@@ -247,7 +247,7 @@ function OutlineList({
                 paddingLeft: 10 + entry.depth * 13,
               }}
               onClick={() => onOpen(entry.symbol)}
-              data-tooltip={entry.symbol.detail ?? entry.symbol.name}
+              data-tooltip={`${entry.symbol.name}\n${entry.symbol.detail ?? entry.symbol.kind}`}
             >
               <span className={`kind-glyph kind-${entry.symbol.kind.toLowerCase()}`}>
                 {entry.symbol.kind.slice(0, 1).toUpperCase()}
@@ -329,7 +329,7 @@ function ProjectSymbolResults({
                 key={`${symbol.projectId}:${symbol.path}:${symbol.line}:${symbol.name}`}
                 style={{ transform: `translateY(${row.start}px)` }}
                 onClick={() => onOpen(symbol)}
-                data-tooltip={`${symbol.path}:${symbol.line + 1}`}
+                data-tooltip={`${symbol.name}\n${symbol.path}:${symbol.line + 1}`}
                 role="listitem"
               >
                 <span className="project-symbol-name">{symbol.name}</span>
