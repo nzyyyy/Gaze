@@ -1299,6 +1299,11 @@
 .gaze-git-workspace .history-pane .object-action-row.selected > button:first-child {
   background: transparent;
 }
+.gaze-git-workspace .history-pane .object-action-row > button:first-child {
+  padding: 5px 11px;
+  gap: 2px;
+  line-height: 1.4;
+}
 .gaze-git-workspace .history-pane .object-action-row > button > strong {
   min-width: 0;
   overflow: hidden;
