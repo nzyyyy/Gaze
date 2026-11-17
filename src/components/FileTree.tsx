@@ -86,6 +86,8 @@ const directoryKey = (projectId: string, path: string) => `${projectId}\u0000${p
 export interface FileTreeHandle {
   /** Paste clipboard files into `parent` with the same refresh the row menu uses. */
   paste: (project: Project, parent: string) => void;
+  /** Paste into the selected tree folder, else `fallback`, like the row menu does. */
+  pasteSelected: (fallback: { project: Project; parent: string } | null) => void;
   drop: (project: Project, parent: string, paths: string[]) => Promise<void>;
   /** Ask for confirmation to move `path` to the trash, like the row menu does. */
   trash: (project: Project, path: string) => void;
@@ -188,15 +190,15 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
 
   useEffect(() => {
     if (!activeProjectId) return;
-    const project = projects.find((item) => item.id === activeProjectId);
-    if (!project) return;
     setOpenProjects((current) => {
-      if (current.has(project.id)) return current;
+      if (current.has(activeProjectId)) return current;
       const next = new Set(current);
-      next.add(project.id);
+      next.add(activeProjectId);
       return next;
     });
-  }, [activeProjectId, projects]);
+    // Only a newly active project expands; project list edits must not reopen a collapsed one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProjectId]);
 
   useEffect(() => {
     for (const project of projects) {
@@ -626,6 +628,18 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
   });
   useImperativeHandle(ref, () => ({
     paste: (project, parent) => void paste(project, parent),
+    pasteSelected: (fallback) => {
+      const node = nodes.find((item) => item.key === selectedKey);
+      const project = node?.project ?? fallback?.project;
+      if (!project) return;
+      const parent =
+        node === undefined
+          ? (fallback?.parent ?? "")
+          : node.entry && (!node.entry.isDir || node.entry.isSymlink)
+            ? parentPath(node.entry.path)
+            : (node.entry?.path ?? "");
+      void paste(project, parent);
+    },
     drop: (project, parent, paths) => paste(project, parent, paths),
     trash: (project, path) =>
       setOperation((current) => current ?? { kind: "trash", project, entry: entryAt(path) }),

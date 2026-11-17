@@ -151,6 +151,9 @@ vi.mock("./components/FileTree", async () => {
   const FileTree = (props: {
     ref?: React.Ref<{
       paste: (project: { id: string; name: string; root: string }, parent: string) => void;
+      pasteSelected: (
+        fallback: { project: { id: string; name: string; root: string }; parent: string } | null,
+      ) => void;
       trash: (project: { id: string; name: string; root: string }, path: string) => void;
       rename: (project: { id: string; name: string; root: string }, path: string) => void;
       create: (
@@ -170,6 +173,9 @@ vi.mock("./components/FileTree", async () => {
   }) => {
     React.useImperativeHandle(props.ref, () => ({
       paste: (project, parent) => void props.onPaste(project, parent),
+      pasteSelected: (fallback) => {
+        if (fallback) void props.onPaste(fallback.project, fallback.parent);
+      },
       drop: async (project: Project, parent: string, paths: string[]) => {
         await props.onPaste(project, parent, paths);
       },

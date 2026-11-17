@@ -56,10 +56,10 @@ function setup(
   const onPaste = vi.fn().mockResolvedValue({ entries: [], failures: [] });
   const onOpenFile = vi.fn();
   const onNotice = vi.fn();
-  render(
+  const element = (next: Project[]) => (
     <FileTree
       ref={ref}
-      projects={projects}
+      projects={next}
       activeProjectId="p1"
       activeFilePath={null}
       active
@@ -74,9 +74,17 @@ function setup(
       onNotice={onNotice}
       onFileOperation={onFileOperation}
       onPaste={onPaste}
-    />,
+    />
   );
-  return { user: userEvent.setup(), onFileOperation, onOpenFile, onPaste, onNotice };
+  const view = render(element(projects));
+  return {
+    user: userEvent.setup(),
+    onFileOperation,
+    onOpenFile,
+    onPaste,
+    onNotice,
+    rerender: (next: Project[]) => view.rerender(element(next)),
+  };
 }
 
 describe("FileTree operations", () => {
@@ -323,6 +331,39 @@ describe("FileTree operations", () => {
     expect(onPaste).toHaveBeenCalledWith(project, "src", ["/outside/copied.txt"]);
     expect(await screen.findByText("copied.txt")).toBeInTheDocument();
     expect(onNotice).toHaveBeenCalledWith("已复制 1 项");
+  });
+
+  it("pastes shortcuts into the selected folder rather than the open file's folder", async () => {
+    const ref = createRef<FileTreeHandle>();
+    const { user, onPaste } = setup(ref);
+    await screen.findByText("readme.md");
+    await user.click(screen.getByRole("button", { name: "target" }));
+    act(() => ref.current?.pasteSelected({ project, parent: "src" }));
+    await waitFor(() => expect(onPaste).toHaveBeenCalledWith(project, "target"));
+  });
+
+  it("falls back to the open file's folder when the tree has no selection", async () => {
+    const ref = createRef<FileTreeHandle>();
+    const { onPaste } = setup(ref);
+    await screen.findByText("readme.md");
+    act(() => ref.current?.pasteSelected({ project, parent: "src" }));
+    await waitFor(() => expect(onPaste).toHaveBeenCalledWith(project, "src"));
+  });
+
+  it("keeps a collapsed active project closed when the project list changes", async () => {
+    const { user, rerender } = setup();
+    await screen.findByText("readme.md");
+    await user.click(screen.getByRole("button", { name: "折叠 Demo" }));
+    expect(screen.getByRole("treeitem", { name: /Demo/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    rerender([project, { id: "p2", name: "Other", root: "/other" }]);
+    expect(screen.getByRole("treeitem", { name: /Demo/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.queryByText("readme.md")).not.toBeInTheDocument();
   });
 
   it("exposes file operations through its handle so shortcuts match the row menu", async () => {
