@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   options: {} as { fontFamily?: string; theme?: unknown },
   oscHandlers: new Map<number, (payload: string) => boolean>(),
   onData: null as ((data: string) => void) | null,
+  unicode: null as { activeVersion: string } | null,
 }));
 
 vi.mock("../lib/api", () => ({
@@ -36,6 +37,7 @@ vi.mock("@xterm/xterm", () => ({
     options: typeof mocks.options;
     cols = 80;
     rows = 24;
+    unicode = (mocks.unicode = { activeVersion: "6" });
     parser = {
       registerOscHandler: (identifier: number, handler: (payload: string) => boolean) => {
         mocks.oscHandlers.set(identifier, handler);
@@ -60,6 +62,9 @@ vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class {
     fit = mocks.fit;
   },
+}));
+vi.mock("@xterm/addon-unicode11", () => ({
+  Unicode11Addon: class {},
 }));
 
 import { TerminalPanel } from "./TerminalPanel";
@@ -310,6 +315,21 @@ it("keeps an existing shell active when starting another shell fails", async () 
   await waitFor(() => expect(props.onNotice).toHaveBeenCalledWith("无法启动 shell"));
   expect(screen.getAllByRole("tab")).toEqual([tab]);
   expect(tab).toHaveAttribute("aria-selected", "true");
+});
+
+it("uses Unicode 11 widths so emoji in the prompt stay aligned with the shell", async () => {
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
+  render(
+    <TerminalPanel
+      open
+      project={{ id: "p1", name: "Demo", root: "/demo" }}
+      theme="dark"
+      fontFamily="monospace"
+      onHide={vi.fn()}
+      onNotice={vi.fn()}
+    />,
+  );
+  await waitFor(() => expect(mocks.unicode?.activeVersion).toBe("11"));
 });
 
 it("serializes terminal input so writes reach the shell in typing order", async () => {

@@ -333,15 +333,19 @@ function TerminalView({
     };
 
     void (async () => {
-      const [{ Terminal: Xterm }, { FitAddon: FitAddonCtor }] = await Promise.all([
-        import("@xterm/xterm"),
-        import("@xterm/addon-fit"),
-        document.fonts?.load('13px "Gaze Maple Mono"').catch(() => []),
-      ]);
+      const [{ Terminal: Xterm }, { FitAddon: FitAddonCtor }, { Unicode11Addon }] =
+        await Promise.all([
+          import("@xterm/xterm"),
+          import("@xterm/addon-fit"),
+          import("@xterm/addon-unicode11"),
+          document.fonts?.load('13px "Gaze Maple Mono"').catch(() => []),
+        ]);
       if (disposed || !containerRef.current) return;
 
       const terminal = new Xterm({
         fontFamily: appearanceRef.current.fontFamily,
+        // activeVersion 属于 proposed API；Unicode 6 把 emoji 算 1 列，shell 的 wcwidth 算 2 列，重绘会错位。
+        allowProposedApi: true,
         ...terminalOptions(appearanceRef.current.preferences),
         theme: terminalTheme(
           appearanceRef.current.theme === "dark",
@@ -350,6 +354,8 @@ function TerminalView({
       });
       const fitAddon = new FitAddonCtor();
       terminal.loadAddon(fitAddon);
+      terminal.loadAddon(new Unicode11Addon());
+      terminal.unicode.activeVersion = "11";
       terminal.open(containerRef.current);
       term = terminal;
       termRef.current = terminal;
