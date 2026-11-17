@@ -29,11 +29,12 @@ vi.mock("@tanstack/react-virtual", () => ({
 import { FileTree, type FileTreeHandle } from "./FileTree";
 
 const project = { id: "p1", name: "Demo", root: "/demo" };
-const entry = (path: string, isDir = false, isSymlink = false): DirEntry => ({
+const entry = (path: string, isDir = false, isSymlink = false, ignored = false): DirEntry => ({
   path,
   name: path.split("/").pop()!,
   isDir,
   isSymlink,
+  ignored,
   size: 0,
   modifiedMs: null,
 });
@@ -259,6 +260,14 @@ describe("FileTree operations", () => {
     await waitFor(() =>
       expect(onExpansionChange).toHaveBeenLastCalledWith(new Set(["p1"]), new Set()),
     );
+  });
+
+  it("marks entries ignored by .gitignore while keeping them selectable", async () => {
+    listings[""]!.push(entry("dist", true, false, true), entry("build.log", false, false, true));
+    setup();
+    expect(await screen.findByText("build.log")).toBeInTheDocument();
+    expect(screen.getByText("build.log").closest(".tree-row")).toHaveClass("is-ignored");
+    expect(screen.getByText("dist").closest(".tree-row")).toHaveClass("is-ignored");
   });
 
   it("offers root creation without root rename/delete, supports keyboard cancellation and focus restoration", async () => {

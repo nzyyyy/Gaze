@@ -87,6 +87,7 @@ describe("App", () => {
           path: "README.md",
           isDir: false,
           isSymlink: false,
+          ignored: false,
           size: 10,
           modifiedMs: null,
         },

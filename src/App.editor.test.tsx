@@ -193,6 +193,7 @@ vi.mock("./components/FileTree", async () => {
         path: name,
         isDir: false,
         isSymlink: false,
+        ignored: false,
         size: 10,
         modifiedMs: null,
       });
@@ -366,6 +367,7 @@ describe("App editor panes", () => {
           path: "README.md",
           isDir: false,
           isSymlink: false,
+          ignored: false,
           size: 10,
           modifiedMs: null,
         },
@@ -374,6 +376,7 @@ describe("App editor panes", () => {
           path: "package.json",
           isDir: false,
           isSymlink: false,
+          ignored: false,
           size: 10,
           modifiedMs: null,
         },
@@ -1286,6 +1289,7 @@ describe("App editor panes", () => {
         name: "new.txt",
         isDir: false,
         isSymlink: false,
+        ignored: false,
         size: 0,
         modifiedMs: null,
       });
@@ -1685,6 +1689,7 @@ describe("App editor panes", () => {
     name: path.split("/").pop()!,
     isDir,
     isSymlink: false,
+    ignored: false,
     size: 0,
     modifiedMs: null,
   });

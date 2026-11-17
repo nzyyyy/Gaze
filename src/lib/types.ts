@@ -23,6 +23,8 @@ export interface DirEntry {
   path: string;
   isDir: boolean;
   isSymlink: boolean;
+  /** Matched by a .gitignore rule in the project. */
+  ignored: boolean;
   size: number;
   modifiedMs: number | null;
 }

@@ -623,6 +623,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
     name: basename(path),
     isDir: false,
     isSymlink: false,
+    ignored: false,
     size: 0,
     modifiedMs: null,
   });
@@ -833,7 +834,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
                 const open = expandedDirectories.has(node.key);
                 return (
                   <div
-                    className={`tree-row ${(node.entry ? selectedKeys.has(node.key) : selectedKey === node.key && selectedNodes.length === 0) ? "is-selected" : ""} ${selectedKey === node.key ? "is-focused" : ""} ${gitClass}`}
+                    className={`tree-row ${entry.ignored ? "is-ignored" : ""} ${(node.entry ? selectedKeys.has(node.key) : selectedKey === node.key && selectedNodes.length === 0) ? "is-selected" : ""} ${selectedKey === node.key ? "is-focused" : ""} ${gitClass}`}
                     key={node.key}
                     style={style}
                     role="treeitem"
@@ -885,7 +886,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
               }
               return (
                 <div
-                  className={`tree-row file-row ${isActiveFile ? "is-active" : ""} ${(node.entry ? selectedKeys.has(node.key) : selectedKey === node.key && selectedNodes.length === 0) ? "is-selected" : ""} ${selectedKey === node.key ? "is-focused" : ""} ${gitClass}`}
+                  className={`tree-row file-row ${entry.ignored ? "is-ignored" : ""} ${isActiveFile ? "is-active" : ""} ${(node.entry ? selectedKeys.has(node.key) : selectedKey === node.key && selectedNodes.length === 0) ? "is-selected" : ""} ${selectedKey === node.key ? "is-focused" : ""} ${gitClass}`}
                   key={node.key}
                   style={style}
                   role="treeitem"

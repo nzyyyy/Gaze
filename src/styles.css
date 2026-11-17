@@ -1229,6 +1229,11 @@ button:focus-visible,
   color: color-mix(in srgb, var(--tree-git-color) 50%, var(--text));
 }
 
+.tree-row.is-ignored .tree-text {
+  color: color-mix(in srgb, var(--text-muted) 65%, var(--sidebar));
+  font-style: italic;
+}
+
 .project-glyph {
   display: inline-flex;
   align-items: center;
