@@ -27,6 +27,7 @@ pub struct DirEntry {
     pub path: String,
     pub is_dir: bool,
     pub is_symlink: bool,
+    pub ignored: bool,
     pub size: u64,
     pub modified_ms: Option<u64>,
 }

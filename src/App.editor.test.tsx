@@ -151,6 +151,9 @@ vi.mock("./components/FileTree", async () => {
   const FileTree = (props: {
     ref?: React.Ref<{
       paste: (project: { id: string; name: string; root: string }, parent: string) => void;
+      pasteSelected: (
+        fallback: { project: { id: string; name: string; root: string }; parent: string } | null,
+      ) => void;
       trash: (project: { id: string; name: string; root: string }, path: string) => void;
       rename: (project: { id: string; name: string; root: string }, path: string) => void;
       create: (
@@ -170,6 +173,9 @@ vi.mock("./components/FileTree", async () => {
   }) => {
     React.useImperativeHandle(props.ref, () => ({
       paste: (project, parent) => void props.onPaste(project, parent),
+      pasteSelected: (fallback) => {
+        if (fallback) void props.onPaste(fallback.project, fallback.parent);
+      },
       drop: async (project: Project, parent: string, paths: string[]) => {
         await props.onPaste(project, parent, paths);
       },
@@ -187,6 +193,7 @@ vi.mock("./components/FileTree", async () => {
         path: name,
         isDir: false,
         isSymlink: false,
+        ignored: false,
         size: 10,
         modifiedMs: null,
       });
@@ -360,6 +367,7 @@ describe("App editor panes", () => {
           path: "README.md",
           isDir: false,
           isSymlink: false,
+          ignored: false,
           size: 10,
           modifiedMs: null,
         },
@@ -368,6 +376,7 @@ describe("App editor panes", () => {
           path: "package.json",
           isDir: false,
           isSymlink: false,
+          ignored: false,
           size: 10,
           modifiedMs: null,
         },
@@ -1280,6 +1289,7 @@ describe("App editor panes", () => {
         name: "new.txt",
         isDir: false,
         isSymlink: false,
+        ignored: false,
         size: 0,
         modifiedMs: null,
       });
@@ -1679,6 +1689,7 @@ describe("App editor panes", () => {
     name: path.split("/").pop()!,
     isDir,
     isSymlink: false,
+    ignored: false,
     size: 0,
     modifiedMs: null,
   });

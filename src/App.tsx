@@ -1476,10 +1476,12 @@ export default function App() {
             .catch((error) => notify(errorMessage(error)));
           return;
         }
-        if (project && activeTab && !event.shiftKey && event.code === "KeyV") {
+        if (!event.shiftKey && event.code === "KeyV") {
           event.preventDefault();
           // The tree owns paste so it can refresh and report exactly like the row menu.
-          fileTreeRef.current?.paste(project, parentPath(activeTab.path));
+          fileTreeRef.current?.pasteSelected(
+            project && activeTab ? { project, parent: parentPath(activeTab.path) } : null,
+          );
           return;
         }
         if (project && activeTab && !event.shiftKey && event.code === "Backspace") {

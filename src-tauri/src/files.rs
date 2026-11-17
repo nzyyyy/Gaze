@@ -10,6 +10,7 @@ use crate::models::{
     DirEntry, DirectoryListing, FileContent, FileFingerprint, FileMode, LineEnding, Project,
     TextEncodingKind, WriteResult,
 };
+use crate::path_index::{is_ignored, IgnoreCache};
 
 pub const MAX_FILE_BYTES: u64 = 20 * 1024 * 1024;
 pub const HIGHLIGHT_FILE_BYTES: u64 = 2 * 1024 * 1024;
@@ -380,6 +381,7 @@ fn mutation_entry(path: &str, metadata: &fs::Metadata, target: &Path) -> DirEntr
             metadata.is_dir()
         },
         is_symlink,
+        ignored: false,
         size: metadata.len(),
         modified_ms: metadata
             .modified()
@@ -527,6 +529,7 @@ pub fn list_directory(project: &Project, relative: &str) -> GazeResult<Directory
     }
 
     let mut entries = Vec::new();
+    let mut ignores = IgnoreCache::new(root);
     for item in fs::read_dir(&target)? {
         let item = item?;
         let name = match item.file_name().into_string() {
@@ -561,11 +564,13 @@ pub fn list_directory(project: &Project, relative: &str) -> GazeResult<Directory
         } else {
             format!("{relative}/{name}")
         };
+        let ignored = is_ignored(&item.path(), is_dir, &mut ignores).unwrap_or(false);
         entries.push(DirEntry {
             name,
             path,
             is_dir,
             is_symlink,
+            ignored,
             size: metadata
                 .as_ref()
                 .map(|metadata| metadata.len())
@@ -1659,6 +1664,34 @@ mod tests {
             ),
             Err(GazeError::InvalidPath(_))
         ));
+    }
+
+    #[test]
+    fn listing_marks_gitignored_entries() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().canonicalize().unwrap();
+        fs::write(root.join(".gitignore"), "dist/\n*.log\n").unwrap();
+        fs::create_dir(root.join("dist")).unwrap();
+        fs::write(root.join("build.log"), "x").unwrap();
+        fs::write(root.join("keep.txt"), "x").unwrap();
+        let project = Project {
+            id: "p".to_string(),
+            name: "test".to_string(),
+            root: root.display().to_string(),
+        };
+        let listing = list_directory(&project, "").unwrap();
+        let ignored = |name: &str| {
+            listing
+                .entries
+                .iter()
+                .find(|entry| entry.name == name)
+                .unwrap()
+                .ignored
+        };
+        assert!(ignored("dist"));
+        assert!(ignored("build.log"));
+        assert!(!ignored("keep.txt"));
+        assert!(!ignored(".gitignore"));
     }
 
     #[cfg(unix)]
