@@ -1571,12 +1571,42 @@ button:focus-visible,
 }
 .markdown-body .markdown-mermaid {
   margin: 0 0 1em;
-  overflow-x: auto;
-  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
 }
-.markdown-body .markdown-mermaid svg {
-  max-width: 100%;
+.markdown-mermaid-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+  background: var(--toolbar-bg);
+}
+.markdown-mermaid-toolbar .markdown-mermaid-reset {
+  width: 50px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.markdown-mermaid-viewport {
+  overflow-x: auto;
+  padding: 16px;
+}
+.markdown-mermaid-viewport:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+}
+.markdown-mermaid-canvas {
+  margin-inline: auto;
+}
+.markdown-mermaid-canvas > svg {
+  display: block;
+  width: 100%;
   height: auto;
+  /* Mermaid adds an inline max-width at the original scale. */
+  max-width: none !important;
 }
 .markdown-body .markdown-mermaid-fallback {
   border-style: dashed;

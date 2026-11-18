@@ -3,6 +3,7 @@ import { t, useLanguage } from "../lib/i18n";
 import {
   Children,
   isValidElement,
+  memo,
   useCallback,
   useEffect,
   useId,
@@ -453,6 +454,45 @@ export default function MarkdownPreview({
     setTrustRevision((revision) => revision + 1);
   }, [projectId]);
 
+  return (
+    <div className="markdown-preview-layout">
+      <MarkdownOutline content={content} rootRef={rootRef} onNavigate={scrollToFragment} />
+      <div
+        className="markdown-preview"
+        ref={rootRef}
+        role="region"
+        aria-label={t("Markdown 预览")}
+        tabIndex={0}
+      >
+        <MarkdownBody
+          content={content}
+          projectId={projectId}
+          documentPath={documentPath}
+          onOpenFile={onOpenFile}
+          onNotice={onNotice}
+          scrollToFragment={scrollToFragment}
+          remoteTrusted={remoteTrusted}
+          onTrustRemote={trustRemoteImages}
+        />
+      </div>
+    </div>
+  );
+}
+
+const MarkdownBody = memo(function MarkdownBody({
+  content,
+  projectId,
+  documentPath,
+  onOpenFile,
+  onNotice,
+  scrollToFragment,
+  remoteTrusted,
+  onTrustRemote,
+}: Omit<MarkdownPreviewProps, "active" | "request"> & {
+  scrollToFragment: (fragment: string) => void;
+  remoteTrusted: boolean;
+  onTrustRemote: () => void;
+}) {
   let imageIndex = 0;
   const components: Components = {
     img: ({ src, alt, title }) => {
@@ -467,11 +507,11 @@ export default function MarkdownPreview({
           title={title}
           overLimit={index >= MAX_MARKDOWN_IMAGES}
           remoteTrusted={remoteTrusted}
-          onTrustRemote={trustRemoteImages}
+          onTrustRemote={onTrustRemote}
         />
       );
     },
-    pre: ({ children }) => <MarkdownCodeBlock>{children}</MarkdownCodeBlock>,
+    pre: MarkdownCodeBlock,
     a: ({ href, children, title }) => {
       if (!href) return <span>{children}</span>;
       const open = async () => {
@@ -503,26 +543,15 @@ export default function MarkdownPreview({
   };
 
   return (
-    <div className="markdown-preview-layout">
-      <MarkdownOutline content={content} rootRef={rootRef} onNavigate={scrollToFragment} />
-      <div
-        className="markdown-preview"
-        ref={rootRef}
-        role="region"
-        aria-label={t("Markdown 预览")}
-        tabIndex={0}
+    <article className="markdown-body">
+      <Markdown
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
+        components={components}
+        urlTransform={safeUrl}
       >
-        <article className="markdown-body">
-          <Markdown
-            remarkPlugins={remarkPlugins}
-            rehypePlugins={rehypePlugins}
-            components={components}
-            urlTransform={safeUrl}
-          >
-            {content}
-          </Markdown>
-        </article>
-      </div>
-    </div>
+        {content}
+      </Markdown>
+    </article>
   );
-}
+});

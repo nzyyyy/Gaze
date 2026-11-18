@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -10,7 +10,8 @@ const apiMock = vi.hoisted(() => ({
 vi.mock("../lib/api", () => ({ api: apiMock }));
 vi.mock("../lib/mermaid", () => ({
   renderMermaid: vi.fn(
-    async (code: string) => `<svg data-code="${encodeURIComponent(code)}"></svg>`,
+    async (code: string) =>
+      `<svg viewBox="0 0 800 400" data-code="${encodeURIComponent(code)}"></svg>`,
   ),
 }));
 vi.mock("@tauri-apps/api/core", async (importOriginal) => ({
@@ -19,6 +20,7 @@ vi.mock("@tauri-apps/api/core", async (importOriginal) => ({
     `${protocol}://localhost/${encodeURIComponent(filePath)}`,
 }));
 
+import { renderMermaid } from "../lib/mermaid";
 import MarkdownPreview from "./MarkdownPreview";
 
 const props = {
@@ -32,7 +34,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   apiMock.openExternalUrl.mockResolvedValue(undefined);
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("MarkdownPreview", () => {
   it("builds a hierarchical outline from rendered headings and navigates duplicate anchors", async () => {
@@ -189,16 +194,70 @@ describe("MarkdownPreview", () => {
     expect(container.querySelector("pre code .token.keyword")?.textContent).toBe("const");
   });
 
-  it("renders Mermaid fences through the lazy renderer", async () => {
-    const { container } = render(
-      <MarkdownPreview {...props} content={"```mermaid\nflowchart TB\n  A --> B\n```"} />,
-    );
+  it("zooms Mermaid without rebuilding the SVG or rerendering the diagram", async () => {
+    const user = userEvent.setup();
+    const content = "```mermaid\nflowchart TB\n  A --> B\n```\n\n![local](chart.png)";
+    const { container, rerender } = render(<MarkdownPreview {...props} content={content} />);
+    const image = screen.getByRole("img", { name: "local" });
+    rerender(<MarkdownPreview {...props} content={content} active={false} />);
+    expect(screen.getByRole("img", { name: "local" })).toBe(image);
     const svg = await waitFor(() => {
-      const node = container.querySelector(".markdown-mermaid svg");
+      const node = container.querySelector(".markdown-mermaid-canvas > svg");
       expect(node).not.toBeNull();
       return node!;
     });
     expect(svg.getAttribute("data-code")).toBe(encodeURIComponent("flowchart TB\n  A --> B"));
+    const canvas = svg.parentElement;
+    expect(canvas).toHaveStyle({ width: "100%", maxWidth: "800px", aspectRatio: "800 / 400" });
+    const reset = screen.getByRole("button", { name: "恢复适应宽度" });
+    await user.click(screen.getByRole("button", { name: "放大图表" }));
+    expect(canvas).toHaveStyle({ width: "125%", maxWidth: "1000px" });
+    expect(reset).toHaveTextContent("125%");
+    rerender(<MarkdownPreview {...props} content={content + "\n\nMore text"} />);
+    expect(reset).toHaveTextContent("125%");
+    await user.click(screen.getByRole("button", { name: "缩小图表" }));
+    await user.click(screen.getByRole("button", { name: "缩小图表" }));
+    expect(canvas).toHaveStyle({ width: "75%" });
+    await user.click(reset);
+    expect(canvas).toHaveStyle({ width: "100%" });
+    expect(canvas?.firstElementChild).toBe(svg);
+    expect(renderMermaid).toHaveBeenCalledTimes(1);
+  });
+
+  it("defers an offscreen Mermaid diagram and discards a result after leaving the viewport", async () => {
+    let intersect!: (visible: boolean) => void;
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    vi.stubGlobal("IntersectionObserver", function (callback: IntersectionObserverCallback) {
+      const observer = { observe, disconnect } as unknown as IntersectionObserver;
+      intersect = (isIntersecting) => {
+        act(() => {
+          callback(
+            [{ isIntersecting, boundingClientRect: { width: 800 } } as IntersectionObserverEntry],
+            observer,
+          );
+        });
+      };
+      return observer;
+    });
+    let finish!: (svg: string) => void;
+    const renderDiagram = vi.mocked(renderMermaid);
+    renderDiagram.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    render(<MarkdownPreview {...props} content={"```mermaid\nflowchart TB\n  A --> B\n```"} />);
+    expect(observe).toHaveBeenCalledTimes(1);
+    intersect(false);
+    expect(renderDiagram).not.toHaveBeenCalled();
+
+    intersect(true);
+    const signal = renderDiagram.mock.calls[0]![1];
+    intersect(false);
+    expect(signal.aborted).toBe(true);
+    await act(async () => finish('<svg viewBox="0 0 800 400"></svg>'));
+    expect(screen.queryByRole("figure", { name: "Mermaid 图表" })).not.toBeInTheDocument();
+
+    intersect(true);
+    expect(await screen.findByRole("figure", { name: "Mermaid 图表" })).toBeInTheDocument();
+    expect(disconnect).toHaveBeenCalled();
   });
 
   it("uses scoped protocol URLs for local images and blocks remote images by default", async () => {
