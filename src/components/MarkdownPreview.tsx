@@ -1,11 +1,16 @@
+import "katex/dist/katex.min.css";
 import { t, useLanguage } from "../lib/i18n";
 import {
+  Children,
+  isValidElement,
   useCallback,
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
+  type ReactNode,
   type RefObject,
 } from "react";
 import { ChevronsLeft, ChevronsRight } from "lucide-react";
@@ -13,14 +18,38 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkCjkFriendly from "remark-cjk-friendly/parseOnly";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
+import refractor from "refractor/core";
+import bash from "refractor/lang/bash";
+import css from "refractor/lang/css";
+import diff from "refractor/lang/diff";
+import go from "refractor/lang/go";
+import java from "refractor/lang/java";
+import javascript from "refractor/lang/javascript";
+import json from "refractor/lang/json";
+import jsx from "refractor/lang/jsx";
+import markdown from "refractor/lang/markdown";
+import markup from "refractor/lang/markup";
+import python from "refractor/lang/python";
+import rust from "refractor/lang/rust";
+import sql from "refractor/lang/sql";
+import tsx from "refractor/lang/tsx";
+import typescript from "refractor/lang/typescript";
+import yaml from "refractor/lang/yaml";
 
 import { api } from "../lib/api";
 import { errorMessage } from "../lib/utils";
 import type { MarkdownPreviewRequest } from "./CodeReader";
+import { MermaidDiagram } from "./MermaidDiagram";
 
 const HEADING_PREFIX = "gaze-markdown-";
 const MAX_MARKDOWN_IMAGES = 50;
+// shortcut: climbing past this many characters turns a code block into thousands of spans.
+const MAX_HIGHLIGHT_CHARS = 20_000;
 const OUTLINE_MIN_WIDTH = 140;
 const OUTLINE_MAX_WIDTH = 360;
 const OUTLINE_COLLAPSE_WIDTH = 96;
@@ -28,10 +57,83 @@ const MIN_READER_WIDTH = 320;
 // Remembered across preview remounts (switching back from source view) without touching layout storage.
 let rememberedOutlineWidth = 220;
 const remoteImageTrust = new Set<string>();
-const remarkPlugins = [remarkGfm, remarkCjkFriendly];
+const remarkPlugins = [remarkGfm, remarkCjkFriendly, remarkMath];
 const rehypePlugins: NonNullable<React.ComponentProps<typeof Markdown>["rehypePlugins"]> = [
+  rehypeRaw,
+  rehypeSanitize,
   [rehypeSlug, { prefix: HEADING_PREFIX }],
+  rehypeKatex,
 ];
+
+for (const language of [
+  bash,
+  css,
+  diff,
+  go,
+  java,
+  javascript,
+  json,
+  jsx,
+  markdown,
+  markup,
+  python,
+  rust,
+  sql,
+  tsx,
+  typescript,
+  yaml,
+]) {
+  refractor.register(language);
+}
+
+type HighlightNode = {
+  type: string;
+  value?: string;
+  properties?: { className?: string[] };
+  children?: HighlightNode[];
+};
+
+function highlightNodes(nodes: HighlightNode[]): ReactNode {
+  return nodes.map((node, index) =>
+    node.type === "text" ? (
+      node.value
+    ) : (
+      <span key={index} className={node.properties?.className?.join(" ")}>
+        {highlightNodes(node.children ?? [])}
+      </span>
+    ),
+  );
+}
+
+function childText(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(childText).join("");
+  return "";
+}
+
+function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
+  const child = Children.toArray(children)[0];
+  const code = isValidElement<{ className?: string; children?: ReactNode }>(child) ? child : null;
+  const className = code?.props.className ?? "";
+  const text = code ? childText(code.props.children) : childText(children);
+  const language = /(?:^|\s)language-([^\s]+)/.exec(className)?.[1];
+  const highlighted = useMemo(
+    () =>
+      language &&
+      language !== "mermaid" &&
+      text.length <= MAX_HIGHLIGHT_CHARS &&
+      refractor.registered(language)
+        ? (refractor.highlight(text, language) as unknown as HighlightNode[])
+        : null,
+    [language, text],
+  );
+  if (language === "mermaid") return <MermaidDiagram code={text.replace(/\n$/, "")} />;
+  return (
+    <pre>
+      <code className={className}>{highlighted ? highlightNodes(highlighted) : text}</code>
+    </pre>
+  );
+}
 
 function safeUrl(value: string): string {
   if (/[\u0000-\u0020\u007f\\]/.test(value) || value.startsWith("//")) return "";
@@ -108,6 +210,7 @@ function MarkdownImage({
       data-tooltip={title}
       aria-description={title}
       loading="lazy"
+      decoding="async"
       referrerPolicy="no-referrer"
       onError={() => setFailed(true)}
     />
@@ -368,6 +471,7 @@ export default function MarkdownPreview({
         />
       );
     },
+    pre: ({ children }) => <MarkdownCodeBlock>{children}</MarkdownCodeBlock>,
     a: ({ href, children, title }) => {
       if (!href) return <span>{children}</span>;
       const open = async () => {
@@ -414,7 +518,6 @@ export default function MarkdownPreview({
             rehypePlugins={rehypePlugins}
             components={components}
             urlTransform={safeUrl}
-            skipHtml
           >
             {content}
           </Markdown>

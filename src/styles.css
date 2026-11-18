@@ -1569,6 +1569,50 @@ button:focus-visible,
   color: var(--text-muted);
   font-size: 0.9em;
 }
+.markdown-body .markdown-mermaid {
+  margin: 0 0 1em;
+  overflow-x: auto;
+  text-align: center;
+}
+.markdown-body .markdown-mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+.markdown-body .markdown-mermaid-fallback {
+  border-style: dashed;
+}
+.markdown-body .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}
+.markdown-body .token.keyword,
+.markdown-body .token.selector,
+.markdown-body .token.boolean {
+  color: var(--icon-data);
+}
+.markdown-body .token.string,
+.markdown-body .token.attr-name {
+  color: var(--icon-code);
+}
+.markdown-body .token.function,
+.markdown-body .token.class-name,
+.markdown-body .token.title {
+  color: var(--icon-image);
+}
+.markdown-body .token.comment {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.markdown-body .token.number,
+.markdown-body .token.builtin {
+  color: var(--icon-config);
+}
+.markdown-body .token.variable,
+.markdown-body .token.parameter,
+.markdown-body .token.property {
+  color: var(--text);
+}
 
 .reader-notice {
   flex: 0 0 auto;

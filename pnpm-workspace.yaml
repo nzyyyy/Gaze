@@ -1,0 +1,3 @@
+# hast-util-raw 9.2.0 calls parse5's removed private flushCharacters API.
+overrides:
+  hast-util-raw: 9.1.1

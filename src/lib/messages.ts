@@ -122,6 +122,7 @@ export const english: Record<string, string> = {
   允许本项目加载远程图片: "Allow remote images for this project",
   "没有找到链接指向的标题。": "The linked heading was not found.",
   "Markdown 预览": "Markdown preview",
+  "Mermaid 图表": "Mermaid diagram",
   目录: "Table of contents",
   收起目录: "Collapse table of contents",
   调整目录宽度: "Resize table of contents",

@@ -6,7 +6,9 @@ export function useAutoHideScrollbars() {
     let dragged: HTMLElement | null = null;
     const show = (element: HTMLElement) => {
       window.clearTimeout(timers.get(element));
-      element.style.setProperty("--gaze-scrollbar-thumb", "var(--text-faint)");
+      // Writing an inherited custom property invalidates the whole subtree; skip repeats per scroll event.
+      if (!element.style.getPropertyValue("--gaze-scrollbar-thumb"))
+        element.style.setProperty("--gaze-scrollbar-thumb", "var(--text-faint)");
       timers.set(
         element,
         window.setTimeout(() => {

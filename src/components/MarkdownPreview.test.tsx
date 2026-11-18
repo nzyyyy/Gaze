@@ -8,6 +8,11 @@ const apiMock = vi.hoisted(() => ({
   openExternalUrl: vi.fn(),
 }));
 vi.mock("../lib/api", () => ({ api: apiMock }));
+vi.mock("../lib/mermaid", () => ({
+  renderMermaid: vi.fn(
+    async (code: string) => `<svg data-code="${encodeURIComponent(code)}"></svg>`,
+  ),
+}));
 vi.mock("@tauri-apps/api/core", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tauri-apps/api/core")>()),
   convertFileSrc: (filePath: string, protocol = "asset") =>
@@ -152,12 +157,12 @@ describe("MarkdownPreview", () => {
     expect(screen.getByRole("region")).toHaveTextContent("**功能与场景：**在");
   });
 
-  it("renders common Markdown and GFM without enabling HTML or task editing", () => {
-    render(
+  it("renders common Markdown and GFM while dropping unsafe HTML", () => {
+    const { container } = render(
       <MarkdownPreview
         {...props}
         content={
-          '# Guide\n\n**bold** and ~~old~~\n\n> quote\n\n- [x] complete\n- item\n\n| Name | Value |\n| --- | --- |\n| one | two |\n\n```ts\nconst x = 1;\n```\n\n<script>alert(1)</script>\n<iframe src="https://example.com"></iframe>'
+          '# Guide\n\n**bold** and ~~old~~\n\n> quote\n\n- [x] complete\n- item\n\n| Name | Value |\n| --- | --- |\n| one | two |\n\n```ts\nconst x = 1;\n```\n\n<kbd>Ctrl</kbd>\n<script>alert(1)</script>\n<iframe src="https://example.com"></iframe>'
         }
       />,
     );
@@ -171,8 +176,29 @@ describe("MarkdownPreview", () => {
     expect(screen.getByRole("checkbox")).toBeChecked();
     expect(screen.getByRole("checkbox")).toBeDisabled();
     expect(screen.getByRole("table")).toHaveTextContent("one");
-    expect(screen.getByText("const x = 1;").closest("pre")).not.toBeNull();
-    expect(document.querySelector("script, iframe")).toBeNull();
+    expect(container.querySelector("pre")?.textContent).toContain("const x = 1;");
+    expect(container.querySelector("kbd")).toHaveTextContent("Ctrl");
+    expect(container.querySelector("script, iframe")).toBeNull();
+  });
+
+  it("renders math and highlights fenced code", () => {
+    const { container } = render(
+      <MarkdownPreview {...props} content={"$x^2$\n\n```ts\nconst x = 1;\n```"} />,
+    );
+    expect(container.querySelector(".katex")).not.toBeNull();
+    expect(container.querySelector("pre code .token.keyword")?.textContent).toBe("const");
+  });
+
+  it("renders Mermaid fences through the lazy renderer", async () => {
+    const { container } = render(
+      <MarkdownPreview {...props} content={"```mermaid\nflowchart TB\n  A --> B\n```"} />,
+    );
+    const svg = await waitFor(() => {
+      const node = container.querySelector(".markdown-mermaid svg");
+      expect(node).not.toBeNull();
+      return node!;
+    });
+    expect(svg.getAttribute("data-code")).toBe(encodeURIComponent("flowchart TB\n  A --> B"));
   });
 
   it("uses scoped protocol URLs for local images and blocks remote images by default", async () => {
