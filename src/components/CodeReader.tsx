@@ -942,7 +942,7 @@ export function CodeReader({
     setLineCount(normalizedContent === "" ? 1 : normalizedContent.split("\n").length);
     resumeAutoSave();
     clearAutoSaveTimer();
-    const match = matchLanguage(tab.name);
+    const match = matchLanguage(markdown ? tab.name.toLowerCase() : tab.name);
     setLanguageLabel(match.label);
     let cancelled = false;
     const state = EditorState.create({
@@ -1000,7 +1000,7 @@ export function CodeReader({
           : [],
         content.mode === "normal" ? codeHover(tab.projectId, tab.path) : [],
         content.editable && content.mode === "normal"
-          ? codeCompletion(tab.projectId, tab.path)
+          ? codeCompletion(tab.projectId, tab.path, markdown)
           : [],
         preferencesCompartment.current.of(
           preferenceExtensions(
@@ -1061,7 +1061,7 @@ export function CodeReader({
     };
     // The editor is rebuilt only when a document revision is loaded.
     // Theme changes are applied through the theme compartment below.
-  }, [loaded, tab.name, clearAutoSaveTimer, resumeAutoSave]);
+  }, [loaded, tab.name, markdown, clearAutoSaveTimer, resumeAutoSave]);
 
   useEffect(() => {
     viewRef.current?.dispatch({
@@ -1084,6 +1084,7 @@ export function CodeReader({
                 "replaced $ matches": "已替换 $ 处匹配",
                 "replaced match on line $": "已替换第 $ 行的匹配",
                 "on line": "所在行",
+                Completions: "补全候选",
               }
             : {},
         ),

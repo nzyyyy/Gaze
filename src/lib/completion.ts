@@ -10,6 +10,7 @@ import {
 import { EditorState, Prec, Transaction } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
 import { api, type CodeCompletion, type CompletionEdit } from "./api";
+import { markdownInsert, markdownSlashQuery, markdownSlashSource } from "./markdownInsert";
 import { errorCode } from "./utils";
 
 const kinds: Record<number, string> = {
@@ -113,14 +114,18 @@ function checkedEdits(main: CompletionEdit, item: CodeCompletion, length: number
   return edits;
 }
 
-export function codeCompletion(projectId: string, path: string) {
+export function codeCompletion(projectId: string, path: string, markdown = false) {
   const source = lspCompletionSource(projectId, path);
   return [
     autocompletion({ interactionDelay: 0 }),
-    EditorState.languageData.of(() => [
-      { autocomplete: source },
-      { autocomplete: completeAnyWord },
-    ]),
+    EditorState.languageData.of((state, pos) => {
+      if (markdown) {
+        if (state.readOnly) return [];
+        if (markdownSlashQuery(state, pos)) return [{ autocomplete: markdownSlashSource }];
+      }
+      return [{ autocomplete: source }, { autocomplete: completeAnyWord }];
+    }),
     Prec.high(keymap.of([...completionKeymap, { key: "Tab", run: acceptCompletion }])),
+    markdown ? markdownInsert : [],
   ];
 }

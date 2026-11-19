@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { createRef } from "react";
 import { EditorView, showTooltip } from "@codemirror/view";
 import { undo } from "@codemirror/commands";
-import { startCompletion } from "@codemirror/autocomplete";
+import { completionStatus, currentCompletions, startCompletion } from "@codemirror/autocomplete";
 import { syntaxTree } from "@codemirror/language";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -48,6 +48,7 @@ import { CodeReader, type CodeReaderHandle, type EditorTab, type SaveResult } fr
 import type { TextFile } from "../lib/types";
 import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
 import type { RecoveryRecord } from "../lib/api";
+import { setLanguage } from "../lib/i18n";
 import { EditorState, StateEffect } from "@codemirror/state";
 
 const tab: EditorTab = {
@@ -133,6 +134,28 @@ function renderReader(
 async function editorContent(): Promise<HTMLElement> {
   await waitFor(() => expect(document.querySelector(".cm-content")).not.toBeNull());
   return document.querySelector(".cm-content") as HTMLElement;
+}
+
+async function markdownEditor(anchor: number) {
+  const view = EditorView.findFromDOM(await editorContent())!;
+  await waitFor(() => expect(syntaxTree(view.state).topNode.name).toBe("Document"));
+  act(() => {
+    view.dispatch({ selection: { anchor } });
+    view.focus();
+  });
+  return view;
+}
+
+function typeInEditor(view: EditorView, text: string) {
+  act(() => view.dispatch({ ...view.state.replaceSelection(text), userEvent: "input.type" }));
+}
+
+function pressMarkdownShortcut(view: EditorView, key: string) {
+  fireEvent.keyDown(view.contentDOM, {
+    key,
+    metaKey: /Mac/.test(navigator.platform),
+    ctrlKey: !/Mac/.test(navigator.platform),
+  });
 }
 
 describe("CodeReader editing", () => {
@@ -470,6 +493,181 @@ describe("CodeReader editing", () => {
     act(() => ref.current!.openFileSearch());
     expect(content.closest(".editor-surface-wrap")).not.toHaveAttribute("hidden");
     expect(document.querySelector(".cm-search")).not.toBeNull();
+  });
+
+  it("opens Markdown insert commands on slash and undoes a keyboard insertion independently", async () => {
+    const { ref } = renderReader({ filename: "README.MD", content: "" });
+    const view = await markdownEditor(0);
+    await userEvent.setup().keyboard("/");
+    const heading = await screen.findByRole("option", { name: /标题 2.*\/h2/ });
+    expect(apiMock.completeCode).not.toHaveBeenCalled();
+    fireEvent.keyDown(view.contentDOM, { key: "ArrowDown" });
+    expect(heading).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(view.contentDOM, { key: "Enter" });
+    expect(ref.current!.getText()).toBe("## ");
+    expect(view.state.selection.main.head).toBe(3);
+    expect(ref.current!.isDirty()).toBe(true);
+    act(() => expect(undo(view)).toBe(true));
+    expect(ref.current!.getText()).toBe("/");
+  });
+
+  it("filters in either language and limits commands after prose to inline templates", async () => {
+    setLanguage("en");
+    try {
+      const { ref } = renderReader({ filename: "guide.md", content: "See  below" });
+      const view = await markdownEditor(4);
+      typeInEditor(view, "/");
+      await screen.findByRole("option", { name: /Insert link.*\/link/ });
+      expect(screen.getAllByRole("option")).toHaveLength(2);
+      typeInEditor(view, "图片");
+      await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(1));
+      fireEvent.mouseDown(screen.getByRole("option", { name: /Insert image.*\/image/ }));
+      expect(ref.current!.getText()).toBe("See ![]() below");
+      expect(view.state.selection.main.head).toBe("See ![](".length);
+
+      act(() => view.dispatch({ selection: { anchor: view.state.doc.length } }));
+      typeInEditor(view, "\n");
+      typeInEditor(view, "/table");
+      await screen.findByRole("option", { name: /Table.*\/table/ });
+      fireEvent.keyDown(view.contentDOM, { key: "Escape" });
+      expect(screen.queryByRole("option")).not.toBeInTheDocument();
+      expect(ref.current!.getText()).toBe("See ![]() below\n/table");
+    } finally {
+      setLanguage("zh-CN");
+    }
+  });
+
+  it("uses Markdown and preserves neighboring paragraphs when inserting previewable blocks", async () => {
+    const user = userEvent.setup();
+    const { ref, container } = renderReader({
+      filename: "guide.md",
+      content: "Before\n\nAfter",
+      preferences: { ...DEFAULT_PREFERENCES, autoSave: false },
+    });
+    const view = await markdownEditor("Before\n".length);
+    typeInEditor(view, "/表格");
+    fireEvent.mouseDown(await screen.findByRole("option", { name: /表格.*\/table/ }));
+    let { from, to } = view.state.selection.main;
+    expect(view.state.sliceDoc(from, to)).toBe("A");
+    expect(ref.current!.getText()).toBe("Before\n\n| A | B |\n| --- | --- |\n|  |  |\n\nAfter");
+
+    for (const [command, label, field] of [
+      ["/math", /块级公式/, "x^2"],
+      ["/mermaid", /Mermaid 图表/, "A --> B"],
+    ] as const) {
+      act(() => view.dispatch({ selection: { anchor: view.state.doc.length } }));
+      typeInEditor(view, "\n");
+      typeInEditor(view, command);
+      await screen.findByRole("option", { name: label });
+      fireEvent.keyDown(view.contentDOM, { key: "Enter" });
+      ({ from, to } = view.state.selection.main);
+      expect(view.state.sliceDoc(from, to)).toBe(field);
+    }
+
+    // jsdom does not measure SVG geometry.
+    Object.assign(SVGElement.prototype, {
+      getBBox: () => new DOMRect(0, 0, 100, 16),
+      getComputedTextLength: () => 100,
+    });
+    try {
+      await user.click(screen.getByRole("button", { name: "预览" }));
+      expect(await screen.findByRole("table")).toBeInTheDocument();
+      expect(container.querySelector(".katex")).not.toBeNull();
+      const preview = screen.getByRole("region", { name: "Markdown 预览" });
+      expect(within(preview).getByText("After")).toBeInTheDocument();
+      const diagram = await within(preview).findByRole(
+        "figure",
+        { name: "Mermaid 图表" },
+        { timeout: 3000 },
+      );
+      expect(diagram.querySelector("svg")).not.toBeNull();
+    } finally {
+      Reflect.deleteProperty(SVGElement.prototype, "getBBox");
+      Reflect.deleteProperty(SVGElement.prototype, "getComputedTextLength");
+    }
+  });
+
+  it.each([
+    ["https://example.test", "", "/image"],
+    ["", "/bin", "/image"],
+    ["`one ", " `", "/image"],
+    ["```ts\n", "\n```", "/table"],
+    ["    ", "", "/image"],
+  ])("keeps a slash literal between %j and %j", async (before, after, command) => {
+    const { ref } = renderReader({ filename: "guide.md", content: before + after });
+    const view = await markdownEditor(before.length);
+    typeInEditor(view, command);
+    act(() => startCompletion(view));
+    await waitFor(() => expect(completionStatus(view.state)).not.toBe("pending"));
+    expect(currentCompletions(view.state).some((item) => item.detail === command)).toBe(false);
+    expect(ref.current!.getText()).toBe(before + command + after);
+  });
+
+  it("lets the input method finish composing a slash query before showing candidates", async () => {
+    const { ref } = renderReader({ filename: "guide.md", content: "" });
+    const view = await markdownEditor(0);
+    typeInEditor(view, "/");
+    await screen.findByRole("option", { name: /表格/ });
+    fireEvent.compositionStart(view.contentDOM);
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    typeInEditor(view, "表格");
+    expect(
+      fireEvent.keyDown(view.contentDOM, { key: "Enter", keyCode: 229, isComposing: true }),
+    ).toBe(true);
+    pressMarkdownShortcut(view, "b");
+    expect(ref.current!.getText()).toBe("/表格");
+    fireEvent.compositionEnd(view.contentDOM, { data: "表格" });
+    fireEvent.mouseDown(await screen.findByRole("option", { name: /表格/ }));
+    expect(ref.current!.getText()).toMatch(/^\| A \| B \|/);
+  });
+
+  it.each([
+    ["b", true, "**word**", 2, 6],
+    ["i", true, "*word*", 1, 5],
+    ["k", true, "[word]()", 7, 7],
+    ["b", false, "****word", 2, 2],
+    ["i", false, "**word", 1, 1],
+    ["k", false, "[]()word", 1, 1],
+  ] as const)("accepts Mod-%s with selection=%s", async (key, selected, text, from, to) => {
+    const { ref } = renderReader({ filename: "guide.md", content: "word" });
+    const view = await markdownEditor(0);
+    if (selected) act(() => view.dispatch({ selection: { anchor: 0, head: 4 } }));
+    pressMarkdownShortcut(view, key);
+    expect(ref.current!.getText()).toBe(text);
+    expect(view.state.selection.main).toMatchObject({ from, to });
+    act(() => expect(undo(view)).toBe(true));
+    expect(ref.current!.getText()).toBe("word");
+  });
+
+  it.each([
+    ["guide.md", false],
+    ["script.ts", true],
+  ] as const)(
+    "does not offer Markdown insertion for %s with editable=%s",
+    async (filename, editable) => {
+      const { ref } = renderReader({ filename, editable, content: "/h2" });
+      const view = EditorView.findFromDOM(await editorContent())!;
+      act(() => {
+        view.dispatch({ selection: { anchor: 3 } });
+        view.focus();
+        startCompletion(view);
+      });
+      await waitFor(() => expect(completionStatus(view.state)).not.toBe("pending"));
+      expect(currentCompletions(view.state).some((item) => item.detail === "/h2")).toBe(false);
+      pressMarkdownShortcut(view, "b");
+      expect(ref.current!.getText()).toBe("/h2");
+    },
+  );
+
+  it("closes Markdown insertion and blocks shortcuts when a file operation locks the editor", async () => {
+    const { ref } = renderReader({ filename: "guide.md", content: "/h2" });
+    const view = await markdownEditor(3);
+    act(() => startCompletion(view));
+    await screen.findByRole("option", { name: /标题 2/ });
+    await act(() => ref.current!.prepareFileOperation({ save: false }));
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    pressMarkdownShortcut(view, "k");
+    expect(ref.current!.getText()).toBe("/h2");
   });
 
   it("updates editor preferences without losing edits and cancels pending auto-save", async () => {
