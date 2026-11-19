@@ -798,6 +798,32 @@ describe("FileTree refresh", () => {
     expect(screen.queryByText("old.ts")).not.toBeInTheDocument();
   });
 
+  it("keeps cached subfolders current when a project is collapsed during external changes", async () => {
+    const folders: Record<string, DirEntry[]> = {
+      "": [entry("src", true)],
+      src: [entry("src/old.ts")],
+    };
+    apiMock.listDirectory.mockImplementation(async (_id: string, path: string) => ({
+      projectId: "p1",
+      path,
+      entries: [...(folders[path] ?? [])],
+    }));
+    const base = props();
+    const { rerender } = render(<FileTree {...base} active refresh={idle} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "src" }));
+    await screen.findByText("old.ts");
+    await user.click(screen.getByRole("button", { name: "折叠 Demo" }));
+
+    folders.src = [entry("src/new.ts")];
+    rerender(
+      <FileTree {...base} active refresh={{ token: 1, directories: new Map([["p1", ["src"]]]) }} />,
+    );
+    await user.click(screen.getByRole("button", { name: "展开 Demo" }));
+    expect(await screen.findByText("new.ts")).toBeInTheDocument();
+    expect(screen.queryByText("old.ts")).not.toBeInTheDocument();
+  });
+
   it("reloads only the directories the watcher reported", async () => {
     const base = props();
     const { rerender } = render(<FileTree {...base} active refresh={idle} />);

@@ -74,24 +74,27 @@ export function useFileChanges({
   const processFsChange = useCallback(
     (event: FsChangeEvent) => {
       if (!isWorkspaceReady()) return;
+      if ("changedDirectories" in event) {
+        let directories = treeDirsRef.current.get(event.projectId);
+        if (event.changedDirectories === null) directories = null;
+        else if (directories !== null) {
+          directories ??= new Set<string>();
+          for (const directory of event.changedDirectories) directories.add(directory);
+        }
+        treeDirsRef.current.set(event.projectId, directories);
+        const snapshot = new Map<string, string[] | null>(
+          [...treeDirsRef.current].map(([id, paths]) => [id, paths === null ? null : [...paths]]),
+        );
+        setTreeRefresh((previous) => ({ token: previous.token + 1, directories: snapshot }));
+        if (treeFlushRef.current === null) {
+          treeFlushRef.current = window.setTimeout(() => {
+            treeFlushRef.current = null;
+            treeDirsRef.current.clear();
+          }, 0);
+        }
+        return;
+      }
       refreshFiles();
-      let directories = treeDirsRef.current.get(event.projectId);
-      if (event.rescan) directories = null;
-      else if (directories !== null) {
-        directories ??= new Set<string>();
-        for (const directory of event.changedDirectories) directories.add(directory);
-      }
-      treeDirsRef.current.set(event.projectId, directories);
-      const snapshot = new Map<string, string[] | null>(
-        [...treeDirsRef.current].map(([id, paths]) => [id, paths === null ? null : [...paths]]),
-      );
-      setTreeRefresh((previous) => ({ token: previous.token + 1, directories: snapshot }));
-      if (treeFlushRef.current === null) {
-        treeFlushRef.current = window.setTimeout(() => {
-          treeFlushRef.current = null;
-          treeDirsRef.current.clear();
-        }, 0);
-      }
       const affectedTabs = tabsRef.current.filter((tab) => {
         if (tab.projectId !== event.projectId) return false;
         if (event.rescan) return true;

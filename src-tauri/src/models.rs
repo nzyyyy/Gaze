@@ -264,7 +264,6 @@ pub struct FsChangeEvent {
     pub project_id: String,
     pub rescan: bool,
     pub changed_files: Vec<String>,
-    pub changed_directories: Vec<String>,
     pub removed_paths: Vec<String>,
 }
 

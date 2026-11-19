@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use crate::cache::Cache;
@@ -38,6 +39,10 @@ impl EventBatch {
                 return;
             }
         };
+        if event.need_rescan() {
+            self.overflow = true;
+            return;
+        }
         if !is_relevant_kind(&event.kind) {
             return;
         }
@@ -152,7 +157,7 @@ impl WatcherService {
         tokio::spawn(async move {
             while let Some(events) = receive_batch(&mut receiver, &overflow).await {
                 if events.overflow {
-                    tracing::warn!(project = %project.name, "file watcher overflowed; refreshing the whole project");
+                    tracing::warn!(project = %project.name, "file watcher needs a rescan; refreshing the whole project");
                 }
                 if let Err(error) = flush_events(
                     &app,
@@ -220,6 +225,23 @@ impl WatcherService {
     }
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectoryChangeEvent<'a> {
+    project_id: &'a str,
+    changed_directories: Option<Vec<String>>,
+}
+
+fn emit_directory_change(app: &AppHandle, project_id: &str, directories: Option<Vec<String>>) {
+    let _ = app.emit(
+        "gaze://fs-change",
+        DirectoryChangeEvent {
+            project_id,
+            changed_directories: directories,
+        },
+    );
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn flush_events(
     app: &AppHandle,
@@ -235,12 +257,16 @@ async fn flush_events(
     }
     let root = Path::new(&project.root);
     let mut paths = HashSet::new();
+    let mut changed_directories = HashSet::new();
     for path in events.paths {
         let Ok(relative) = path_to_relative(root, &path) else {
             continue;
         };
-        if relative.is_empty()
-            || relative == ".DS_Store"
+        if relative.is_empty() {
+            changed_directories.insert(relative);
+            continue;
+        }
+        if relative == ".DS_Store"
             || relative.split('/').any(|part| part == ".git")
             || relative
                 .rsplit('/')
@@ -252,10 +278,11 @@ async fn flush_events(
         paths.insert(relative);
     }
     if paths.is_empty() {
+        if !changed_directories.is_empty() {
+            emit_directory_change(app, &project.id, Some(vec![String::new()]));
+        }
         return Ok(());
     }
-
-    path_index.wait_for_index(&project.id).await;
 
     let mut rescan_ignore_rules = false;
     for relative in &paths {
@@ -285,13 +312,11 @@ async fn flush_events(
     .map_err(GazeError::Join)?;
 
     let mut changed_files = Vec::new();
-    let mut changed_directories = HashSet::new();
     let mut removed_paths = Vec::new();
     let mut changes = Vec::new();
     for (relative, kind, ignored) in classifications {
-        if let Some(parent) = relative.rsplit_once('/').map(|(parent, _)| parent) {
-            changed_directories.insert(parent.to_string());
-        }
+        let parent = relative.rsplit_once('/').map_or("", |(parent, _)| parent);
+        changed_directories.insert(parent.to_string());
         match kind {
             Some(true) => {
                 changed_directories.insert(relative.clone());
@@ -308,6 +333,12 @@ async fn flush_events(
         }
     }
 
+    let mut changed_directories: Vec<_> = changed_directories.into_iter().collect();
+    changed_directories.sort();
+    emit_directory_change(app, &project.id, Some(changed_directories));
+
+    // Directory listings read the filesystem directly and can refresh while the indexes catch up.
+    path_index.wait_for_index(&project.id).await;
     let path_result = if rescan_ignore_rules {
         Arc::clone(path_index)
             .index_project(app.clone(), cache.clone(), project.clone())
@@ -346,14 +377,11 @@ async fn flush_events(
     changed_files.dedup();
     removed_paths.sort();
     removed_paths.dedup();
-    let mut changed_directories: Vec<String> = changed_directories.into_iter().collect();
-    changed_directories.sort();
 
     let event = FsChangeEvent {
         project_id: project.id.clone(),
         rescan: false,
         changed_files,
-        changed_directories,
         removed_paths,
     };
     let _ = app.emit("gaze://fs-change", event);
@@ -368,6 +396,7 @@ async fn flush_overflow(
     symbols: &Arc<SymbolService>,
     ctags: Option<&Path>,
 ) -> GazeResult<()> {
+    emit_directory_change(app, &project.id, None);
     path_index.wait_for_index(&project.id).await;
     let previous_paths: HashSet<String> = cache
         .cached_files(&project.id)
@@ -428,7 +457,6 @@ fn overflow_change_event(
         project_id: project_id.to_string(),
         rescan: true,
         changed_files,
-        changed_directories: vec![String::new()],
         removed_paths,
     }
 }
@@ -494,7 +522,6 @@ fn file_event(project: &Project, relative: &str, events: EventBatch) -> Option<F
         } else {
             vec![]
         },
-        changed_directories: vec![],
         removed_paths: if exists {
             vec![]
         } else {
@@ -626,6 +653,15 @@ mod tests {
     }
 
     #[test]
+    fn native_rescan_notice_requests_a_full_refresh_even_without_paths() {
+        let mut batch = EventBatch::default();
+        batch.push(Ok(
+            notify::Event::new(EventKind::Other).set_flag(notify::event::Flag::Rescan)
+        ));
+        assert!(batch.overflow);
+    }
+
+    #[test]
     fn overflow_notification_conservatively_covers_current_and_removed_files() {
         let previous: HashSet<String> = ["a.ts".to_string(), "gone.ts".to_string()].into();
         let current: HashSet<String> = ["a.ts".to_string(), "new.ts".to_string()].into();
@@ -633,7 +669,6 @@ mod tests {
         assert_eq!(event.project_id, "p");
         assert!(event.rescan);
         assert_eq!(event.changed_files, ["a.ts", "new.ts"]);
-        assert_eq!(event.changed_directories, [""]);
         assert_eq!(event.removed_paths, ["gone.ts"]);
     }
 

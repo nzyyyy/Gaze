@@ -217,7 +217,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
     if (refresh.token === 0) return;
     for (const [projectId, changedDirs] of refresh.directories) {
       const project = projects.find((item) => item.id === projectId);
-      if (!project || (changedDirs !== null && !openProjects.has(project.id))) continue;
+      if (!project) continue;
       const prefix = `${projectId}\u0000`;
       const reload =
         changedDirs ??

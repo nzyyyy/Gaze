@@ -35,15 +35,16 @@ function setup(isProjectLocked?: (projectId: string) => boolean) {
     return unlisten;
   });
   const hook = renderHook(() => useFileChanges(options));
-  const emit = (event: Partial<FsChangeEvent> = {}) =>
+  const emit = (event: Partial<Extract<FsChangeEvent, { changedFiles: string[] }>> = {}) =>
     listener({
       projectId: "p1",
       changedFiles: [],
-      changedDirectories: [],
       removedPaths: [],
       ...event,
     });
-  return { ...hook, options, emit, unlisten, clean, dirty, other };
+  const emitTree = (changedDirectories: string[] | null, projectId = "p1") =>
+    listener({ projectId, changedDirectories });
+  return { ...hook, options, emit, emitTree, unlisten, clean, dirty, other };
 }
 
 beforeEach(() => {
@@ -126,15 +127,15 @@ it("replays queued events against the latest tabs and dirty state after unlockin
 });
 
 it("ignores events before the workspace is ready and merges directory refreshes per batch", () => {
-  const { result, options, emit } = setup();
+  const { result, options, emitTree } = setup();
   options.isWorkspaceReady.mockReturnValue(false);
-  act(() => emit({ changedDirectories: ["ignored"] }));
-  expect(result.current.refreshToken).toBe(0);
+  act(() => emitTree(["ignored"]));
+  expect(result.current.treeRefresh.token).toBe(0);
   options.isWorkspaceReady.mockReturnValue(true);
   act(() => {
-    emit({ changedDirectories: ["src"] });
-    emit({ changedDirectories: ["src", "docs"] });
-    emit({ projectId: "p2", changedDirectories: [""] });
+    emitTree(["src"]);
+    emitTree(["src", "docs"]);
+    emitTree([""], "p2");
   });
   expect(result.current.treeRefresh.directories).toEqual(
     new Map([
@@ -143,19 +144,34 @@ it("ignores events before the workspace is ready and merges directory refreshes 
     ]),
   );
   act(() => {
-    emit({ rescan: true });
-    emit({ changedDirectories: ["later"] });
+    emitTree(null);
+    emitTree(["later"]);
   });
   expect(result.current.treeRefresh.directories.get("p1")).toBeNull();
   act(() => vi.runOnlyPendingTimers());
-  act(() => emit({ changedDirectories: ["next"] }));
+  act(() => emitTree(["next"]));
   expect(result.current.treeRefresh.directories).toEqual(new Map([["p1", ["next"]]]));
 });
 
+it("refreshes the tree before indexing completes and handles open files only once", () => {
+  const { result, emitTree, emit, clean, dirty } = setup();
+  act(() => emitTree(null));
+  expect(result.current.treeRefresh.directories.get("p1")).toBeNull();
+  expect(result.current.fileRevisions).toEqual({});
+  expect(result.current.externalChanges).toEqual({});
+  expect(result.current.refreshToken).toBe(0);
+
+  const treeToken = result.current.treeRefresh.token;
+  act(() => emit({ rescan: true }));
+  expect(result.current.treeRefresh.token).toBe(treeToken);
+  expect(result.current.fileRevisions).toEqual({ [clean.key]: 1 });
+  expect(result.current.externalChanges).toEqual({ [dirty.key]: 1 });
+});
+
 it("removes its subscription and directory timer on unmount", async () => {
-  const { emit, unmount, unlisten } = setup();
+  const { emitTree, unmount, unlisten } = setup();
   await act(async () => {});
-  act(() => emit({ changedDirectories: ["src"] }));
+  act(() => emitTree(["src"]));
   expect(vi.getTimerCount()).toBe(1);
   unmount();
   expect(unlisten).toHaveBeenCalledOnce();

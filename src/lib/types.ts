@@ -284,13 +284,10 @@ export interface LspStatus {
   message: string | null;
 }
 
-export interface FsChangeEvent {
-  projectId: string;
-  rescan?: boolean;
-  changedFiles: string[];
-  changedDirectories: string[];
-  removedPaths: string[];
-}
+export type FsChangeEvent = { projectId: string } & (
+  | { changedDirectories: string[] | null }
+  | { rescan?: boolean; changedFiles: string[]; removedPaths: string[] }
+);
 
 export interface EditorStatus {
   path: string;

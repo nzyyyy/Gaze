@@ -1859,7 +1859,6 @@ describe("App editor panes", () => {
         projectId: "p1",
         rescan: true,
         changedFiles: [],
-        changedDirectories: [""],
         removedPaths: [],
       }),
     );
@@ -1878,7 +1877,6 @@ describe("App editor panes", () => {
       fsChange({
         projectId: "p1",
         changedFiles: ["package.json", "new.md"],
-        changedDirectories: [""],
         removedPaths: ["README.md"],
       });
       expect(screen.getByTestId("editor-p1\u0000package.json")).toHaveAttribute("data-reload", "0");
