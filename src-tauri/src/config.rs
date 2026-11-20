@@ -89,7 +89,9 @@ fn builtin_typescript() -> LspServerConfig {
             .into_iter()
             .map(str::to_string)
             .collect(),
-        initialization_options: None,
+        initialization_options: Some(serde_json::json!({
+            "tsserver": { "useSyntaxServer": "never" }
+        })),
     }
 }
 

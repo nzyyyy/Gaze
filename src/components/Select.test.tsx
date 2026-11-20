@@ -48,7 +48,7 @@ it("keeps the themed menu inside the dialog but outside scrolling containers", a
   const menu = screen.getByRole("listbox");
   expect(menu.parentElement).toBe(screen.getByRole("dialog"));
   expect(menu).toHaveStyle({ position: "fixed", bottom: "51px", minWidth: "200px" });
-  fireEvent.scroll(menu);
+  fireEvent.scroll(menu.querySelector(".app-select-items")!);
   expect(screen.getByRole("listbox")).toBeInTheDocument();
   await user.click(screen.getByRole("option", { name: "Dark" }));
   expect(trigger).toHaveTextContent("Dark");

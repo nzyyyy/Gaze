@@ -1,7 +1,7 @@
 import { syntaxTree } from "@codemirror/language";
 import { api } from "./api";
 import { Decoration, EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
-import type { TextPosition } from "./types";
+import type { NavigationResult, TextPosition } from "./types";
 
 function modifier(event: MouseEvent | KeyboardEvent) {
   return (
@@ -20,7 +20,7 @@ interface Candidate {
   href?: string;
   module?: boolean;
 }
-type Target = { path: string; fragment: string | null } | "definition";
+type Target = { path: string; fragment: string | null } | { result: NavigationResult };
 
 function candidateAt(view: EditorView, pos: number): Candidate | null {
   const doc = view.state.doc;
@@ -91,7 +91,7 @@ async function resolveCandidate(
     line: line.number - 1,
     character: candidate.pos - line.from,
   });
-  if (result.locations.length) return "definition";
+  if (result.locations.length) return { result };
   if (candidate.href) return api.resolveMarkdownLink(projectId, path, candidate.href);
   return null;
 }
@@ -100,7 +100,7 @@ export function definitionLink(
   projectId: string,
   path: string,
   enabled: () => boolean,
-  navigate: (position: TextPosition) => void,
+  navigate: (position: TextPosition, result: NavigationResult) => void,
   openFile: (path: string, fragment: string | null) => void,
 ) {
   return [
@@ -259,8 +259,8 @@ export function definitionLink(
             this.view.focus();
             void result.then((target) => {
               if (!target || this.destroyed || this.view.state.doc !== doc || !enabled()) return;
-              if (target === "definition")
-                navigate({ line: line.number - 1, character: word.pos - line.from });
+              if ("result" in target)
+                navigate({ line: line.number - 1, character: word.pos - line.from }, target.result);
               else openFile(target.path, target.fragment);
             });
             return true;

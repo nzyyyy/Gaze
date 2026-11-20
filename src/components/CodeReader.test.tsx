@@ -240,7 +240,10 @@ describe("CodeReader editing", () => {
           ctrlKey: platform !== "Mac",
         });
         await waitFor(() =>
-          expect(onGoToDefinition).toHaveBeenCalledWith({ line: 0, character: 11 }),
+          expect(onGoToDefinition).toHaveBeenCalledWith(
+            { line: 0, character: 11 },
+            expect.objectContaining({ source: "lsp" }),
+          ),
         );
         expect(ref.current!.getCursor()).toEqual({ line: 0, character: 11 });
         expect(onDirtyChange).not.toHaveBeenCalledWith(true);
@@ -286,6 +289,23 @@ describe("CodeReader editing", () => {
     } finally {
       agent.mockRestore();
     }
+  });
+
+  it("reveals an external UTF-8 range after multibyte characters", async () => {
+    const { ref } = renderReader({ content: "😀 定义" });
+    const view = EditorView.findFromDOM(await editorContent())!;
+    act(() =>
+      ref.current!.reveal({
+        line: 0,
+        character: 5,
+        endLine: 0,
+        endCharacter: 11,
+        encoding: "utf-8",
+        nonce: 1,
+      }),
+    );
+    const { from, to } = view.state.selection.main;
+    expect(view.state.doc.sliceString(from, to)).toBe("定义");
   });
 
   it("ignores non-code targets and locked editors, and uses the latest navigation callback", async () => {

@@ -236,6 +236,8 @@ export type SearchEvent =
       message: string;
     };
 
+export type PositionEncoding = "utf-8" | "utf-16" | "utf-32";
+
 export interface SymbolLocation {
   projectId: string;
   path: string;
@@ -246,6 +248,7 @@ export interface SymbolLocation {
   endLine: number;
   endCharacter: number;
   source: "ctags" | "lsp";
+  externalEncoding?: PositionEncoding;
 }
 
 export interface DocumentSymbol {
@@ -314,4 +317,16 @@ export interface TerminalEvent {
   kind: "data" | "exit";
   data?: string;
   exitCode?: number;
+}
+
+export interface PythonEnvironment {
+  path: string;
+  name: string;
+  kind: string;
+}
+
+export interface PythonEnvironmentStatus {
+  selected: string | null;
+  environment: PythonEnvironment | null;
+  automatic: PythonEnvironment | null;
 }

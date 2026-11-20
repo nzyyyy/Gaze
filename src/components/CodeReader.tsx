@@ -10,6 +10,8 @@ import {
   type Ref,
 } from "react";
 import { flushSync } from "react-dom";
+import { closeCompletion } from "@codemirror/autocomplete";
+import { setDiagnostics } from "@codemirror/lint";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import {
   bracketMatching,
@@ -28,6 +30,7 @@ import {
 import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
 import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
 import {
+  closeHoverTooltips,
   drawSelection,
   EditorView,
   highlightActiveLine,
@@ -45,6 +48,7 @@ import { useFileBase } from "../git/hooks/useFileBase";
 import { computeChangeBlocksAsync } from "../git/lineDiffClient";
 import type { ChangeBlock } from "../git/lineDiff";
 import { api, type RecoveryRecord } from "../lib/api";
+import { codeDiagnostics } from "../lib/diagnostics";
 import { codeCompletion } from "../lib/completion";
 import { codeHover } from "../lib/hover";
 import { definitionLink } from "../lib/definitionLink";
@@ -59,6 +63,8 @@ import type {
   EditorStatus,
   FileContent,
   ResolvedTheme,
+  PositionEncoding,
+  NavigationResult,
   TextFile,
   TextPosition,
 } from "../lib/types";
@@ -101,6 +107,7 @@ export interface RevealRequest {
   character: number;
   endLine: number;
   endCharacter: number;
+  encoding?: PositionEncoding;
   nonce: number;
 }
 
@@ -111,6 +118,7 @@ export interface SaveResult {
 
 export interface CodeReaderHandle {
   getCursor(): TextPosition | null;
+  getNavigationAnchor(position: TextPosition): { x: number; top: number; bottom: number } | null;
   getViewState(): EditorViewState | null;
   reveal(request: RevealRequest): void;
   openFileSearch(): void;
@@ -135,8 +143,9 @@ interface EditorSurfaceProps {
   reveal: RevealRequest | null;
   reloadToken: number;
   externalChangeToken: number;
+  pythonRevision?: number;
   previewRequest?: MarkdownPreviewRequest | null;
-  onGoToDefinition?: (position: TextPosition) => void;
+  onGoToDefinition?: (position: TextPosition, result: NavigationResult) => void;
   onOpenMarkdownFile?: (projectId: string, path: string, fragment: string | null) => void;
   onNotice?: (message: string) => void;
   onStatus: (status: EditorStatus | null) => void;
@@ -251,10 +260,72 @@ function editorTheme(
         borderRadius: "var(--radius-control)",
         boxShadow: "var(--shadow-panel)",
       },
+      ".cm-tooltip-autocomplete > ul": {
+        padding: "4px",
+        maxWidth: "min(580px, 72vw)",
+        maxHeight: "min(280px, 45vh)",
+        minWidth: "min(280px, 60vw)",
+        fontFamily: "var(--font-mono)",
+        fontSize: "12px",
+      },
+      ".cm-tooltip-autocomplete > ul > li": {
+        display: "flex",
+        alignItems: "center",
+        gap: "7px",
+        minHeight: "25px",
+        padding: "0 7px",
+        borderRadius: "4px",
+      },
       ".cm-tooltip-autocomplete > ul > li[aria-selected]": {
         backgroundColor: "var(--accent-soft)",
         color: "var(--text)",
       },
+      ".cm-completionIcon": {
+        flex: "0 0 16px",
+        width: "16px",
+        height: "16px",
+        padding: "0",
+        textAlign: "center",
+        fontSize: "13px",
+        lineHeight: "16px",
+        opacity: "1",
+        borderRadius: "3px",
+        color: "var(--icon-data)",
+        background: "color-mix(in srgb, currentColor 8%, transparent)",
+      },
+      ".cm-completionIcon-function, .cm-completionIcon-method, .cm-completionIcon-constructor": {
+        color: "var(--accent)",
+      },
+      ".cm-completionIcon-variable, .cm-completionIcon-property, .cm-completionIcon-constant": {
+        color: "var(--icon-code)",
+      },
+      ".cm-completionLabel, .cm-completionDetail, .completion-origin": {
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        minWidth: "0",
+      },
+      ".cm-completionLabel": { flex: "0 0 auto", maxWidth: "58%" },
+      ".cm-completionMatchedText": {
+        color: "var(--accent)",
+        fontWeight: "bold",
+        textDecoration: "none",
+      },
+      ".cm-completionDetail, .completion-origin": {
+        color: "var(--text-muted)",
+        fontSize: "11px",
+        fontStyle: "normal",
+      },
+      ".completion-origin": { marginLeft: "auto", maxWidth: "40%" },
+      ".cm-completionInfo": {
+        maxWidth: "min(375px, 72vw)",
+        maxHeight: "min(220px, 38vh)",
+        overflow: "auto",
+        padding: "8px 10px",
+        fontSize: "12px",
+        lineHeight: "1.5",
+      },
+      ".completion-documentation": { whiteSpace: "pre-wrap", overflowWrap: "anywhere" },
     },
     { dark },
   );
@@ -264,9 +335,25 @@ function normalizeDocumentText(text: string): string {
   return text.replace(/\r\n?/g, "\n");
 }
 
-function offsetAt(doc: EditorState["doc"], line: number, character: number): number {
+function offsetAt(
+  doc: EditorState["doc"],
+  line: number,
+  character: number,
+  encoding: PositionEncoding = "utf-16",
+): number {
   const lineInfo = doc.line(Math.min(Math.max(0, line) + 1, doc.lines));
-  return lineInfo.from + Math.min(Math.max(0, character), lineInfo.length);
+  const limit = Math.max(0, character);
+  if (encoding === "utf-16") return lineInfo.from + Math.min(limit, lineInfo.length);
+  let units = 0;
+  let offset = lineInfo.from;
+  const encoder = new TextEncoder();
+  for (const char of lineInfo.text) {
+    if (units >= limit) break;
+    units += encoding === "utf-8" ? encoder.encode(char).length : 1;
+    if (units > limit) break;
+    offset += char.length;
+  }
+  return offset;
 }
 
 function openEditorSearch(view: EditorView) {
@@ -376,6 +463,7 @@ export function CodeReader({
   reveal,
   reloadToken,
   externalChangeToken,
+  pythonRevision,
   previewRequest,
   onOpenMarkdownFile,
   onGoToDefinition,
@@ -388,6 +476,8 @@ export function CodeReader({
   const language = useLanguage();
   const surfaceRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const diagnosticsCompartment = useRef(new Compartment());
+  const previousPythonRevision = useRef(pythonRevision);
   const localeCompartment = useRef(new Compartment());
   const themeCompartment = useRef(new Compartment());
   const preferencesCompartment = useRef(new Compartment());
@@ -789,6 +879,15 @@ export function CodeReader({
         const line = view.state.doc.lineAt(head);
         return { line: line.number - 1, character: head - line.from };
       },
+      getNavigationAnchor(position) {
+        const view = viewRef.current;
+        if (!view) return null;
+        const rect = view.coordsAtPos(offsetAt(view.state.doc, position.line, position.character));
+        if (!rect) return null;
+        const bounds = view.scrollDOM.getBoundingClientRect();
+        if (rect.top < bounds.top || rect.bottom > bounds.bottom) return null;
+        return { x: rect.left, top: rect.top, bottom: rect.bottom };
+      },
       getViewState() {
         const view = viewRef.current;
         if (!view) return null;
@@ -950,6 +1049,7 @@ export function CodeReader({
       selection: { anchor: Math.min(operationCursorRef.current ?? 0, normalizedContent.length) },
       extensions: [
         localeCompartment.current.of([]),
+        diagnosticsCompartment.current.of([]),
         initialExtensions(
           theme,
           content.editable,
@@ -994,7 +1094,7 @@ export function CodeReader({
               () =>
                 (!operationLockedRef.current || gitLockedRef.current) &&
                 !!onGoToDefinitionRef.current,
-              (position) => onGoToDefinitionRef.current?.(position),
+              (position, result) => onGoToDefinitionRef.current?.(position, result),
               (path, fragment) => onOpenFileLinkRef.current?.(tab.projectId, path, fragment),
             )
           : [],
@@ -1156,6 +1256,26 @@ export function CodeReader({
         ),
       });
   }, [preferences, loaded]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    if (previousPythonRevision.current !== pythonRevision) {
+      previousPythonRevision.current = pythonRevision;
+      closeCompletion(view);
+      view.dispatch(setDiagnostics(view.state, []), { effects: closeHoverTooltips });
+    }
+    const enabled =
+      active &&
+      loaded?.content.kind === "text" &&
+      loaded.content.mode === "normal" &&
+      !tab.projectId.startsWith("external:");
+    view.dispatch({
+      effects: diagnosticsCompartment.current.reconfigure(
+        enabled ? codeDiagnostics(tab.projectId, tab.path) : [],
+      ),
+    });
+  }, [active, loaded, tab.projectId, tab.path, pythonRevision]);
 
   useEffect(() => {
     clearAutoSaveTimer();
@@ -1500,8 +1620,8 @@ function changeLabel(block: ChangeBlock): string {
 }
 
 function applyReveal(view: EditorView, request: RevealRequest) {
-  const start = offsetAt(view.state.doc, request.line, request.character);
-  const end = offsetAt(view.state.doc, request.endLine, request.endCharacter);
+  const start = offsetAt(view.state.doc, request.line, request.character, request.encoding);
+  const end = offsetAt(view.state.doc, request.endLine, request.endCharacter, request.encoding);
   view.dispatch({
     selection: { anchor: start, head: Math.max(start, end) },
     effects: EditorView.scrollIntoView(start, { y: "center" }),

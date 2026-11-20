@@ -64,6 +64,22 @@ it("gives code hovers and other overlays the same glass background layer", () =>
   }
 });
 
+it("clips the select frame and scrolls its items inside the glass background", () => {
+  applyStyles("enabled");
+  document.body.innerHTML =
+    '<div class="app-select-options"><ul class="app-select-items"><li>Python</li></ul></div>';
+  const frame = document.body.firstElementChild!;
+  const list = frame.firstElementChild!;
+  expect(getComputedStyle(frame).overflow).toBe("hidden");
+  expect(getComputedStyle(list).overflow).toBe("hidden auto");
+  const backgrounds = Array.from(style.sheet!.cssRules)
+    .filter((rule): rule is CSSStyleRule => rule instanceof CSSStyleRule)
+    .filter((rule) => rule.selectorText.endsWith("::before"))
+    .map((rule) => rule.selectorText.slice(0, -8));
+  expect(backgrounds.some((selector) => frame.matches(selector))).toBe(true);
+  expect(backgrounds.some((selector) => list.matches(selector))).toBe(false);
+});
+
 it("honors reduced transparency even when glass is enabled", () => {
   const root = applyStyles("enabled", true);
   expect(root.getPropertyValue("--popover-material")).toBe("var(--surface-raised)");

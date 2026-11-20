@@ -15,6 +15,8 @@ import type {
   OutlineResult,
   PathIndexStatus,
   PathSearchResponse,
+  PythonEnvironment,
+  PythonEnvironmentStatus,
   PasteResult,
   OpenFilesResult,
   ReplaceApplyResult,
@@ -53,9 +55,32 @@ export interface CodeCompletion {
   documentation: string | null;
   kind: number | null;
   filterText: string | null;
+  sortText?: string | null;
+  description?: string | null;
+  snippet?: boolean;
+  resolve?: { session: string; generation: number; item: unknown } | null;
   insertText: string;
   edit: CompletionEdit | null;
   additionalEdits: CompletionEdit[];
+}
+
+export interface DiagnosticSnapshot {
+  session: string;
+  version: number;
+  items:
+    | {
+        start: TextPosition;
+        end: TextPosition;
+        severity: number;
+        message: string;
+        source: string | null;
+      }[]
+    | null;
+}
+
+interface DiagnosticsUpdate extends DiagnosticSnapshot {
+  projectId: string;
+  path: string;
 }
 
 export interface HoverContent {
@@ -142,7 +167,15 @@ export const api = {
       force,
     }),
   syncDocument: (projectId: string, path: string, content: string) =>
-    invoke<void>("sync_document", { projectId, path, content }),
+    invoke<DiagnosticSnapshot>("sync_document", { projectId, path, content }),
+  getPythonEnvironment: (projectId: string) =>
+    invoke<PythonEnvironmentStatus>("get_python_environment", { projectId }),
+  listPythonEnvironments: (projectId: string) =>
+    invoke<PythonEnvironment[]>("list_python_environments", { projectId }),
+  setPythonEnvironment: (projectId: string, interpreter: string | null) =>
+    invoke<PythonEnvironmentStatus>("set_python_environment", { projectId, interpreter }),
+  onDiagnostics: (handler: (event: DiagnosticsUpdate) => void): Promise<UnlistenFn> =>
+    listen<DiagnosticsUpdate>("gaze://diagnostics", (event) => handler(event.payload)),
   hoverCode: (projectId: string, path: string, content: string, position: TextPosition) =>
     invoke<HoverContent[]>("hover_code", { projectId, path, content, position }),
   completeCode: (
@@ -159,6 +192,12 @@ export const api = {
       position,
       trigger,
     }),
+  resolveCompletion: (
+    projectId: string,
+    path: string,
+    content: string,
+    resolve: NonNullable<CodeCompletion["resolve"]>,
+  ) => invoke<CodeCompletion | null>("resolve_completion", { projectId, path, content, resolve }),
   getCapabilities: () => invoke<ToolCapabilities>("get_capabilities"),
   searchPaths: (query: string) => invoke<PathSearchResponse>("search_paths", { query }),
   pathIndexStatus: () => invoke<PathIndexStatus[]>("path_index_status"),

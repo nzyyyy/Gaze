@@ -494,6 +494,7 @@ fn to_location(project: &Project, symbol: CachedSymbol) -> SymbolLocation {
         end_line: symbol.line,
         end_character: character + name_width,
         source: "ctags".to_string(),
+        external_encoding: None,
     }
 }
 

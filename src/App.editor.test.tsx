@@ -570,6 +570,55 @@ describe("App editor panes", () => {
     expect(await screen.findByRole("dialog", { name: "定义" })).toBeInTheDocument();
   });
 
+  it("opens an external definition only after choosing it", async () => {
+    const user = userEvent.setup();
+    apiMock.findDefinitions.mockResolvedValueOnce({
+      source: "lsp",
+      message: null,
+      locations: [
+        {
+          projectId: "",
+          path: "/outside/lib.d.ts",
+          name: "load",
+          kind: "reference",
+          source: "lsp",
+          externalEncoding: "utf-8",
+          line: 12,
+          character: 4,
+          endLine: 12,
+          endCharacter: 8,
+        },
+      ],
+    });
+    apiMock.openExternalFiles.mockResolvedValueOnce({
+      files: [
+        {
+          project: { id: "external:dependency", root: "/outside", name: "/outside" },
+          path: "lib.d.ts",
+          temporary: true,
+        },
+      ],
+      failures: [],
+    });
+    render(<App />);
+    await user.click(await screen.findByText("README.md"));
+    act(() => editorStatusHandler.current!(editableStatus));
+    await menuAction("definition");
+    const picker = await screen.findByRole("listbox", { name: "定义" });
+    expect(picker).toHaveFocus();
+    expect(apiMock.openExternalFiles).not.toHaveBeenCalled();
+    await user.keyboard("{Enter}");
+    expect(apiMock.openExternalFiles).toHaveBeenCalledWith(["/outside/lib.d.ts"]);
+    expect(await screen.findByRole("tab", { name: "lib.d.ts" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByTestId("editor-external:dependency\u0000lib.d.ts")).toHaveAttribute(
+      "data-cursor-line",
+      "12",
+    );
+  });
+
   it("navigates back and forward through definition jumps and clears forward on a new jump", async () => {
     const user = userEvent.setup();
     apiMock.findDefinitions.mockResolvedValueOnce({

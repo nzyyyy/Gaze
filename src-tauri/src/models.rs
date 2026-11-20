@@ -219,6 +219,8 @@ pub struct SymbolLocation {
     pub end_line: u32,
     pub end_character: u32,
     pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_encoding: Option<crate::lsp::PositionEncoding>,
 }
 
 #[derive(Debug, Clone, Serialize)]

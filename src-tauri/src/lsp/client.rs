@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::future::Future;
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
@@ -9,6 +10,7 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot};
+use url::Url;
 
 use crate::error::{GazeError, GazeResult};
 
@@ -27,12 +29,14 @@ pub struct LspClient {
 }
 
 impl LspClient {
-    pub async fn spawn(
+    pub async fn spawn<Fut: Future<Output = ()> + Send>(
         executable: &Path,
         args: &[String],
         working_directory: &Path,
         root_uri: &str,
         project_name: &str,
+        python_path: Option<String>,
+        publish_diagnostics: impl Fn(Value) -> Fut + Send + 'static,
     ) -> GazeResult<Self> {
         let mut command = Command::new(executable);
         command
@@ -112,13 +116,20 @@ impl LspClient {
             let mut reader = BufReader::new(stdout);
             loop {
                 match read_message(&mut reader).await {
-                    Ok(Some(message)) => {
+                    Ok(Some(mut message)) => {
+                        if message.get("id").is_none()
+                            && message["method"] == "textDocument/publishDiagnostics"
+                        {
+                            publish_diagnostics(message["params"].take()).await;
+                            continue;
+                        }
                         route_message(
                             message,
                             &response_sender,
                             &reader_pending,
                             &root_uri,
                             &project_name,
+                            python_path.as_deref(),
                         );
                     }
                     Ok(None) => break,
@@ -238,6 +249,7 @@ fn route_message(
     pending: &Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>,
     root_uri: &str,
     project_name: &str,
+    python_path: Option<&str>,
 ) {
     if let Some(id) = message.get("id").and_then(Value::as_i64) {
         if message.get("method").is_none() {
@@ -261,7 +273,8 @@ fn route_message(
 
         if let Some(method) = message.get("method").and_then(Value::as_str) {
             let params = message.get("params").cloned().unwrap_or(Value::Null);
-            let response = server_request_response(method, &params, root_uri, project_name);
+            let response =
+                server_request_response(method, &params, root_uri, project_name, python_path);
             let _ = sender.send(json!({
                 "jsonrpc": "2.0",
                 "id": id,
@@ -290,16 +303,25 @@ fn server_request_response(
     params: &Value,
     root_uri: &str,
     project_name: &str,
+    python_path: Option<&str>,
 ) -> Value {
     match method {
-        "workspace/configuration" => {
-            let count = params
-                .get("items")
-                .and_then(Value::as_array)
-                .map(Vec::len)
-                .unwrap_or(0);
-            Value::Array(vec![Value::Null; count])
-        }
+        "workspace/configuration" => Value::Array(
+            params["items"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|item| {
+                    if let Some(path) = python_path {
+                        if item["section"] == "python" && in_workspace(&item["scopeUri"], root_uri)
+                        {
+                            return json!({ "pythonPath": path });
+                        }
+                    }
+                    Value::Null
+                })
+                .collect(),
+        ),
         "workspace/workspaceFolders" => json!([
             { "uri": root_uri, "name": project_name }
         ]),
@@ -313,6 +335,18 @@ fn server_request_response(
         | "window/showMessageRequest" => Value::Null,
         _ => Value::Null,
     }
+}
+
+fn in_workspace(scope: &Value, root: &str) -> bool {
+    if scope.is_null() {
+        return true;
+    }
+    let file_path = |value: &str| Url::parse(value).ok()?.to_file_path().ok();
+    scope
+        .as_str()
+        .and_then(file_path)
+        .zip(file_path(root))
+        .is_some_and(|(scope, root)| scope.starts_with(root))
 }
 
 async fn read_message<R: tokio::io::AsyncBufRead + Unpin>(
@@ -398,9 +432,32 @@ mod tests {
     }
 
     #[test]
+    fn exposes_python_only_to_configuration_requests_for_that_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = Url::from_directory_path(dir.path()).unwrap();
+        let source = Url::from_file_path(dir.path().join("main.py")).unwrap();
+        let elsewhere = Url::from_file_path(dir.path().with_extension("unrelated")).unwrap();
+        let response = server_request_response(
+            "workspace/configuration",
+            &json!({"items": [
+                { "section": "python", "scopeUri": source.as_str() },
+                { "section": "python", "scopeUri": elsewhere.as_str() },
+                { "section": "pyright" }
+            ]}),
+            root.as_str(),
+            "project",
+            Some("/venv/bin/python"),
+        );
+        assert_eq!(
+            response,
+            json!([{ "pythonPath": "/venv/bin/python" }, null, null])
+        );
+    }
+
+    #[test]
     fn answers_server_configuration_without_enabling_edits() {
         assert_eq!(
-            server_request_response("workspace/applyEdit", &Value::Null, "file:///x", "X"),
+            server_request_response("workspace/applyEdit", &Value::Null, "file:///x", "X", None),
             json!({"applied": false, "failureReason": "Gaze 暂不应用语言服务器发起的批量编辑。"})
         );
     }

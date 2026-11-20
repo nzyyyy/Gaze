@@ -13,6 +13,7 @@ mod native_files;
 mod native_menu;
 mod path_index;
 mod preferences;
+mod python;
 mod recovery;
 mod replace;
 mod search;
@@ -93,7 +94,7 @@ impl AppState {
                 "配置文件读取失败，自定义工具和 LSP 设置未生效：{error}"
             ));
         }
-        let lsp = Arc::new(LspManager::new(&tools));
+        let lsp = Arc::new(LspManager::new(&tools, cache.clone()));
         app.manage(git_workspace::AppState::new(
             cache.clone(),
             config.tools.git.as_deref().and_then(Path::to_str),
@@ -985,13 +986,33 @@ async fn complete_code(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+async fn resolve_completion(
+    project_id: String,
+    path: String,
+    content: String,
+    resolve: lsp::CompletionResolve,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<lsp::CompletionItem>, CommandError> {
+    let project = state
+        .file_project(&project_id, &path)
+        .await
+        .map_err(CommandError::from)?;
+    state
+        .lsp
+        .resolve_completion(&app, &project, &path, &content, resolve)
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 async fn sync_document(
     project_id: String,
     path: String,
     content: String,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<(), CommandError> {
+) -> Result<lsp::DiagnosticSync, CommandError> {
     let project = state
         .project(&project_id)
         .await
@@ -999,6 +1020,51 @@ async fn sync_document(
     state
         .lsp
         .sync_document(&app, &project, &path, &content)
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn get_python_environment(
+    project_id: String,
+    state: State<'_, AppState>,
+) -> Result<python::PythonEnvironmentStatus, CommandError> {
+    let project = state
+        .project(&project_id)
+        .await
+        .map_err(CommandError::from)?;
+    state
+        .lsp
+        .python_environment(&project)
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn list_python_environments(
+    project_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<python::PythonEnvironment>, CommandError> {
+    let project = state
+        .project(&project_id)
+        .await
+        .map_err(CommandError::from)?;
+    Ok(python::discover(Path::new(&project.root)).await)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn set_python_environment(
+    project_id: String,
+    interpreter: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<python::PythonEnvironmentStatus, CommandError> {
+    let project = state
+        .project(&project_id)
+        .await
+        .map_err(CommandError::from)?;
+    state
+        .lsp
+        .set_python_environment(&project, interpreter)
         .await
         .map_err(CommandError::from)
 }
@@ -1361,7 +1427,11 @@ pub fn run() {
             open_external_url,
             write_file,
             sync_document,
+            get_python_environment,
+            list_python_environments,
+            set_python_environment,
             complete_code,
+            resolve_completion,
             hover_code,
             search_paths,
             path_index_status,

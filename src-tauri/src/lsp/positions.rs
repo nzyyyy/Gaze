@@ -3,10 +3,13 @@ use serde::{Deserialize, Serialize};
 use crate::error::{GazeError, GazeResult};
 use crate::models::TextPosition;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum PositionEncoding {
+    #[serde(rename = "utf-8")]
     Utf8,
+    #[serde(rename = "utf-16")]
     Utf16,
+    #[serde(rename = "utf-32")]
     Utf32,
 }
 

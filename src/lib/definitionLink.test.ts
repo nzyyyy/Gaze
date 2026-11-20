@@ -38,7 +38,7 @@ const found: NavigationResult = {
 beforeEach(() => {
   vi.resetAllMocks();
   agent = vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mac");
-  vi.mocked(api.syncDocument).mockResolvedValue(undefined);
+  vi.mocked(api.syncDocument).mockResolvedValue({ session: "session", version: 1, items: null });
   vi.mocked(api.findDefinitions).mockResolvedValue(found);
   vi.mocked(api.resolveMarkdownLink).mockResolvedValue({ path: "src/main.tsx", fragment: null });
 });

@@ -39,6 +39,7 @@ import {
   type BatchFileOperationResult,
 } from "./components/FileOperationDialog";
 import { LocationPicker } from "./components/LocationPicker";
+import { PythonEnvironmentSelect } from "./components/PythonEnvironmentSelect";
 import { QuickOpen } from "./components/QuickOpen";
 import { SearchPanel } from "./components/SearchPanel";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -56,7 +57,7 @@ import { saveLayout } from "./lib/layout";
 import { readSession, saveSession, type WorkspaceSession } from "./lib/session";
 import { colorSchemeVariables, DEFAULT_COLOR_SCHEMES, type ColorSchemes } from "./lib/colorSchemes";
 import { DEFAULT_FONT_SETTINGS, fontStack, type FontSettings } from "./lib/fonts";
-import { isMarkdownFile } from "./lib/language";
+import { isMarkdownFile, isPythonFile } from "./lib/language";
 import type {
   DirEntry,
   EditorPane,
@@ -102,6 +103,7 @@ interface ToastState {
 interface NavigationDialog {
   title: string;
   result: NavigationResult;
+  anchor: { x: number; top: number; bottom: number } | null;
 }
 
 type PendingAction =
@@ -170,6 +172,10 @@ export default function App() {
     request: MarkdownPreviewRequest;
   } | null>(null);
   const [editorStatus, setEditorStatus] = useState<EditorStatus | null>(null);
+  const [pythonRevisions, setPythonRevisions] = useState<Record<string, number>>({});
+  const refreshPython = useCallback((projectId: string) => {
+    setPythonRevisions((current) => ({ ...current, [projectId]: (current[projectId] ?? 0) + 1 }));
+  }, []);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [preferences, setPreferences] = useState<Preferences>(DEFAULT_PREFERENCES);
   const [theme, setTheme] = useState<ThemePreference>("system");
@@ -908,14 +914,14 @@ export default function App() {
   );
 
   const handleExternalFiles = useCallback(
-    async (paths: string[]) => {
+    async (paths: string[], request?: Omit<RevealRequest, "nonce">) => {
       if (!paths.length) return null;
       await externalReleasesRef.current;
       const result = await api.openExternalFiles(paths);
       let openedKey: string | null = null;
       for (const file of result.files) {
         if (file.temporary) temporaryProjectsRef.current.set(file.project.id, file.project);
-        openedKey = openLocation(file.project.id, file.path) ?? openedKey;
+        openedKey = openLocation(file.project.id, file.path, request) ?? openedKey;
       }
       if (result.failures.length) {
         notify(
@@ -1340,10 +1346,30 @@ export default function App() {
     else if (result.status === "error") notify(result.message ?? t("保存失败。"));
   }, [notify]);
 
+  const openNavigationLocation = useCallback(
+    (location: SymbolLocation) => {
+      const request = {
+        line: location.line,
+        character: location.character,
+        endLine: location.endLine,
+        endCharacter: location.endCharacter,
+        encoding: location.externalEncoding,
+      };
+      if (location.externalEncoding) {
+        void handleExternalFiles([location.path], request).catch((error) =>
+          notify(errorMessage(error)),
+        );
+      } else {
+        openLocation(location.projectId, location.path, request);
+      }
+    },
+    [handleExternalFiles, notify, openLocation],
+  );
+
   const runNavigation = useCallback(
     async (
       kind: "definition" | "references" | "implementation",
-      target?: { key: string; position: TextPosition },
+      target?: { key: string; position: TextPosition; result?: NavigationResult },
     ) => {
       if (
         navigationBusy ||
@@ -1362,40 +1388,37 @@ export default function App() {
         notify(t("代码视图尚未准备好。"));
         return;
       }
+      const anchor = editorsRef.current.get(tab.key)?.getNavigationAnchor?.(position) ?? null;
       setNavigationBusy(true);
       try {
-        await syncActiveDocument(tab.key);
+        if (!target?.result) await syncActiveDocument(tab.key);
         const result =
-          kind === "definition"
+          target?.result ??
+          (kind === "definition"
             ? await api.findDefinitions(tab.projectId, tab.path, position)
             : kind === "references"
               ? await api.findReferences(tab.projectId, tab.path, position)
-              : await api.findImplementations(tab.projectId, tab.path, position);
+              : await api.findImplementations(tab.projectId, tab.path, position));
         const title =
           kind === "definition" ? t("定义") : kind === "references" ? t("引用") : t("实现");
         if (
           kind !== "references" &&
           result.source === "lsp" &&
           result.locations.length === 1 &&
+          !result.locations[0]?.externalEncoding &&
           !result.message
         ) {
-          const location = result.locations[0]!;
-          openLocation(location.projectId, location.path, {
-            line: location.line,
-            character: location.character,
-            endLine: location.endLine,
-            endCharacter: location.endCharacter,
-          });
+          openNavigationLocation(result.locations[0]!);
           return;
         }
-        setNavigationDialog({ title, result });
+        setNavigationDialog({ title, result, anchor });
       } catch (error) {
         notify(errorMessage(error));
       } finally {
         setNavigationBusy(false);
       }
     },
-    [activeTab, navigationBusy, notify, openLocation, syncActiveDocument],
+    [activeTab, navigationBusy, notify, openNavigationLocation, syncActiveDocument],
   );
 
   useEffect(() => {
@@ -2481,11 +2504,14 @@ export default function App() {
                     reveal={isActive ? reveal : null}
                     reloadToken={fileRevisions[tab.key] ?? 0}
                     externalChangeToken={externalChanges[tab.key] ?? 0}
+                    pythonRevision={
+                      isPythonFile(tab.name) ? pythonRevisions[tab.projectId] : undefined
+                    }
                     previewRequest={
                       markdownNavigation?.key === tab.key ? markdownNavigation.request : null
                     }
-                    onGoToDefinition={(position) =>
-                      void runNavigation("definition", { key: tab.key, position })
+                    onGoToDefinition={(position, result) =>
+                      void runNavigation("definition", { key: tab.key, position, result })
                     }
                     onOpenMarkdownFile={handleOpenMarkdownFile}
                     onNotice={notify}
@@ -2548,7 +2574,19 @@ export default function App() {
                 <span className="status-warning">{t("正在请求符号服务…")}</span>
               ) : editorStatus ? (
                 <>
-                  {preferences.showLanguage && <span>{editorStatus.language}</span>}
+                  {preferences.showLanguage &&
+                    (activeTab &&
+                    isPythonFile(activeTab.name) &&
+                    !activeTab.projectId.startsWith("external:") ? (
+                      <PythonEnvironmentSelect
+                        key={activeTab.projectId}
+                        projectId={activeTab.projectId}
+                        onChange={refreshPython}
+                        onNotice={notify}
+                      />
+                    ) : (
+                      <span>{editorStatus.language}</span>
+                    ))}
                   {preferences.showEncoding && <span>{editorStatus.encoding}</span>}
                   {editorStatus.mode !== "normal" && (
                     <span className="status-warning">{t("大文件纯文本模式")}</span>
@@ -2607,16 +2645,10 @@ export default function App() {
         <LocationPicker
           title={navigationDialog.title}
           result={navigationDialog.result}
+          anchor={navigationDialog.anchor}
           projects={snapshot?.projects ?? []}
           onClose={() => setNavigationDialog(null)}
-          onSelect={(location: SymbolLocation) => {
-            openLocation(location.projectId, location.path, {
-              line: location.line,
-              character: location.character,
-              endLine: location.endLine,
-              endCharacter: location.endCharacter,
-            });
-          }}
+          onSelect={openNavigationLocation}
         />
       )}
 

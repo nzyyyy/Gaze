@@ -1,15 +1,18 @@
 import { t, useLanguage } from "../lib/i18n";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { CornerDownLeft, MapPin, X } from "lucide-react";
+import { CornerDownLeft, GitFork, X } from "lucide-react";
 
 import type { NavigationResult, Project, SymbolLocation } from "../lib/types";
 import { useModalFocus } from "../lib/useModalFocus";
+import { basename, parentPath } from "../lib/utils";
+import { FileIcon } from "./FileIcon";
 
 interface LocationPickerProps {
   title: string;
   result: NavigationResult;
   projects: Project[];
+  anchor?: { x: number; top: number; bottom: number } | null;
   onClose: () => void;
   onSelect: (location: SymbolLocation) => void;
 }
@@ -18,33 +21,29 @@ export function LocationPicker({
   title,
   result,
   projects,
+  anchor,
   onClose,
   onSelect,
 }: LocationPickerProps) {
   useLanguage();
+  const id = useId();
   const scrollRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState(0);
   const locations = result.locations;
+  const first = locations[0];
   const projectNames = new Map(projects.map((project) => [project.id, project.name]));
   const virtualizer = useVirtualizer({
     count: locations.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 47,
-    overscan: 12,
+    estimateSize: () => 39,
+    overscan: 8,
   });
 
-  useModalFocus(dialogRef);
+  useModalFocus(dialogRef, scrollRef);
 
   useEffect(() => {
-    dialogRef.current?.focus();
-    setSelected(0);
-  }, [result]);
-
-  useEffect(() => {
-    if (locations.length > 0) {
-      virtualizer.scrollToIndex(selected, { align: "auto" });
-    }
+    if (locations.length > 0) virtualizer.scrollToIndex(selected, { align: "auto" });
   }, [locations.length, selected, virtualizer]);
 
   const choose = (index = selected) => {
@@ -53,6 +52,14 @@ export function LocationPicker({
     onClose();
     onSelect(location);
   };
+  const above = anchor && window.innerHeight - anchor.bottom < Math.min(330, anchor.top);
+  const position = anchor
+    ? ({
+        "--location-x": `${anchor.x}px`,
+        "--location-y": `${(above ? window.innerHeight - anchor.top : anchor.bottom) + 5}px`,
+      } as CSSProperties)
+    : undefined;
+  const rows = virtualizer.getVirtualItems();
 
   return (
     <div
@@ -63,9 +70,11 @@ export function LocationPicker({
     >
       <div
         className="location-picker"
+        data-anchor={anchor ? (above ? "above" : "below") : undefined}
+        style={position}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={`${id}-title`}
         tabIndex={-1}
         ref={dialogRef}
         onKeyDown={(event) => {
@@ -74,22 +83,34 @@ export function LocationPicker({
             onClose();
           } else if (event.key === "ArrowDown") {
             event.preventDefault();
+            scrollRef.current?.focus();
             setSelected((value) => Math.min(value + 1, Math.max(0, locations.length - 1)));
           } else if (event.key === "ArrowUp") {
             event.preventDefault();
+            scrollRef.current?.focus();
             setSelected((value) => Math.max(0, value - 1));
-          } else if (event.key === "Enter") {
+          } else if (
+            event.key === "Enter" &&
+            (event.target === scrollRef.current || event.target === dialogRef.current)
+          ) {
             event.preventDefault();
             choose();
           }
         }}
       >
         <div className="location-header">
-          <MapPin size={16} className="quick-open-icon" />
-          <span className="location-title">{title}</span>
-          <span className={`source-badge ${result.source}`}>
-            {result.source === "lsp" ? t("LSP 精确") : t("ctags 文本候选")}
+          <GitFork size={15} className="location-heading-icon" aria-hidden="true" />
+          <span className="location-title" id={`${id}-title`}>
+            {title}
           </span>
+          {first?.name && (
+            <code className="location-symbol" title={first.name}>
+              {first.name}
+            </code>
+          )}
+          {result.source === "ctags" && first && (
+            <span className="source-badge ctags">{t("ctags 文本候选")}</span>
+          )}
           <span className="location-count">
             {locations.length} {t("个位置")}
           </span>
@@ -98,61 +119,76 @@ export function LocationPicker({
           </button>
         </div>
 
-        {result.message && <div className="location-message">{result.message}</div>}
-
         {locations.length === 0 ? (
-          <div className="palette-empty">
-            <MapPin size={23} strokeWidth={1.4} />
+          <div className="location-empty">
             <p>{t("没有可跳转的位置")}</p>
             <span>{result.message ?? t("当前符号没有返回结果。")}</span>
           </div>
         ) : (
-          <div className="location-results" ref={scrollRef} role="listbox" aria-label={title}>
+          <>
+            {result.message && <div className="location-message">{result.message}</div>}
             <div
-              className="location-results-virtual"
-              style={{ height: virtualizer.getTotalSize() }}
+              className="location-results"
+              ref={scrollRef}
+              role="listbox"
+              tabIndex={0}
+              aria-label={title}
+              aria-activedescendant={
+                rows.some((row) => row.index === selected) ? `${id}-${selected}` : undefined
+              }
             >
-              {virtualizer.getVirtualItems().map((row) => {
-                const location = locations[row.index];
-                if (!location) return null;
-                const active = row.index === selected;
-                return (
-                  <button
-                    className={`location-row ${active ? "is-selected" : ""}`}
-                    key={`${location.projectId}:${location.path}:${location.line}:${location.character}:${row.index}`}
-                    style={{ transform: `translateY(${row.start}px)` }}
-                    onMouseEnter={() => setSelected(row.index)}
-                    onClick={() => choose(row.index)}
-                    role="option"
-                    aria-selected={active}
-                  >
-                    <span className="location-kind">{location.kind}</span>
-                    <span className="location-main">
-                      <span className="location-symbol">
-                        {location.name || location.path.split("/").pop()}
+              <div
+                className="location-results-virtual"
+                style={{ height: virtualizer.getTotalSize() }}
+              >
+                {rows.map((row) => {
+                  const location = locations[row.index]!;
+                  const active = row.index === selected;
+                  const path = location.path.replaceAll("\\", "/");
+                  const name = basename(path);
+                  const directory = parentPath(path);
+                  const project = projectNames.get(location.projectId);
+                  const context = project
+                    ? [project, directory].filter(Boolean).join(" / ")
+                    : directory;
+                  return (
+                    <button
+                      className="location-row"
+                      id={`${id}-${row.index}`}
+                      key={row.key}
+                      style={{ transform: `translateY(${row.start}px)` }}
+                      role="option"
+                      aria-selected={active}
+                      tabIndex={-1}
+                      title={location.path}
+                      onMouseEnter={() => setSelected(row.index)}
+                      onClick={() => choose(row.index)}
+                    >
+                      <FileIcon name={name} size={15} />
+                      <span className="location-main">
+                        <span className="location-file">{name}</span>
+                        <span className="location-path">{context}</span>
                       </span>
-                      <span className="location-file">
-                        {projectNames.get(location.projectId) ?? t("未知项目")} / {location.path}
-                        <span className="symbol-line">:{location.line + 1}</span>
+                      {location.externalEncoding && (
+                        <span className="location-external">{t("外部文件")}</span>
+                      )}
+                      <span className="location-line">
+                        {location.line + 1}:{location.character + 1}
                       </span>
-                    </span>
-                    {active && <CornerDownLeft size={13} className="location-enter" />}
-                  </button>
-                );
-              })}
+                      <CornerDownLeft size={13} className="location-enter" aria-hidden="true" />
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+            <div className="location-footer palette-hints">
+              <kbd>↑</kbd>
+              <kbd>↓</kbd> {t("导航")}
+              <kbd>↵</kbd> {t("打开")}
+              <kbd>Esc</kbd> {t("关闭")}
+            </div>
+          </>
         )}
-
-        <div className="quick-open-footer">
-          <span>{result.message ?? t("选择位置后跳到对应代码")}</span>
-          <span className="palette-hints">
-            <kbd>↑</kbd>
-            <kbd>↓</kbd> {t("导航")}
-            <kbd>↵</kbd> {t("打开")}
-            <kbd>Esc</kbd> {t("关闭")}
-          </span>
-        </div>
       </div>
     </div>
   );

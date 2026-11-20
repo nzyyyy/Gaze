@@ -1,11 +1,16 @@
-import { CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
-import { EditorState, type TransactionSpec } from "@codemirror/state";
+import {
+  nextSnippetField,
+  CompletionContext,
+  type CompletionResult,
+} from "@codemirror/autocomplete";
+import { history, undo } from "@codemirror/commands";
+import { EditorState, Transaction, type TransactionSpec } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type CodeCompletion } from "./api";
-import { codeCompletion, lspCompletionSource } from "./completion";
+import { codeCompletion, lspCompletionSource, snippetTemplate } from "./completion";
 
-vi.mock("./api", () => ({ api: { completeCode: vi.fn() } }));
+vi.mock("./api", () => ({ api: { completeCode: vi.fn(), resolveCompletion: vi.fn() } }));
 
 const item: CodeCompletion = {
   label: "foo",
@@ -22,14 +27,16 @@ function editor(doc = "obj.fo", readonly = false) {
   let state = EditorState.create({
     doc,
     selection: { anchor: doc.length },
-    extensions: [EditorState.readOnly.of(readonly)],
+    extensions: [EditorState.readOnly.of(readonly), history()],
   });
   return {
     get state() {
       return state;
     },
-    dispatch(spec: TransactionSpec) {
-      state = state.update(spec).state;
+    dom: { isConnected: true },
+    hasFocus: true,
+    dispatch(spec: TransactionSpec | Transaction) {
+      state = spec instanceof Transaction ? spec.state : state.update(spec).state;
     },
   } as EditorView;
 }
@@ -41,6 +48,7 @@ function apply(result: CompletionResult | null, view: EditorView) {
 }
 
 beforeEach(() => {
+  vi.mocked(api.resolveCompletion).mockReset();
   vi.mocked(api.completeCode)
     .mockReset()
     .mockResolvedValue({ items: [item] });
@@ -80,6 +88,54 @@ describe("code completion", () => {
     apply(result, view);
     expect(view.state.doc.toString()).toBe("import foo\nobj.foo()");
     expect(view.state.selection.main.head).toBe(view.state.doc.length);
+  });
+
+  it("resolves an import and snippet together and undoes them in one step", async () => {
+    const view = editor("obj.fo");
+    vi.mocked(api.completeCode).mockResolvedValue({
+      items: [{ ...item, resolve: { session: "s", generation: 1, item: { label: "foo" } } }],
+    });
+    vi.mocked(api.resolveCompletion).mockResolvedValue({
+      ...item,
+      insertText: "foo(${1:arg}, $2)$0",
+      snippet: true,
+      additionalEdits: [{ from: 0, to: 0, insert: "import foo\n" }],
+    });
+    const result = await lspCompletionSource(
+      "p",
+      "a.ts",
+    )(new CompletionContext(view.state, 6, true));
+    apply(result, view);
+    await vi.waitFor(() => expect(view.state.doc.toString()).toBe("import foo\nobj.foo(arg, )"));
+    const { from, to } = view.state.selection.main;
+    expect(view.state.doc.sliceString(from, to)).toBe("arg");
+    expect(nextSnippetField(view)).toBe(true);
+    expect(view.state.selection.main.head).toBe(view.state.doc.length - 1);
+    expect(undo(view)).toBe(true);
+    expect(view.state.doc.toString()).toBe("obj.fo");
+    expect(snippetTemplate("${1|a,b|}")).toBeNull();
+  });
+
+  it("does not apply additional edits that finish resolving after more typing", async () => {
+    const view = editor();
+    vi.mocked(api.completeCode).mockResolvedValue({
+      items: [{ ...item, resolve: { session: "s", generation: 1, item: { label: "foo" } } }],
+    });
+    let finish!: (completion: CodeCompletion) => void;
+    vi.mocked(api.resolveCompletion).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const result = await lspCompletionSource(
+      "p",
+      "a.ts",
+    )(new CompletionContext(view.state, 6, true));
+    apply(result, view);
+    view.dispatch({ changes: { from: 6, insert: "x" } });
+    finish({ ...item, additionalEdits: [{ from: 0, to: 0, insert: "import foo\n" }] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(view.state.doc.toString()).toBe("obj.fox");
   });
 
   it.each([

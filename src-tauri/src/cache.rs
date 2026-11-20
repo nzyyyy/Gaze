@@ -194,11 +194,16 @@ impl Cache {
     pub async fn delete_project(&self, project_id: &str) -> GazeResult<()> {
         let project_id = project_id.to_string();
         self.run(move |connection| {
-            connection.execute(
+            let transaction = connection.transaction()?;
+            transaction.execute(
+                "DELETE FROM settings WHERE key = ?1",
+                params![crate::python::setting_key(&project_id)],
+            )?;
+            transaction.execute(
                 "DELETE FROM workspace_projects WHERE id = ?1",
                 params![project_id],
             )?;
-            Ok(())
+            transaction.commit()
         })
         .await
     }

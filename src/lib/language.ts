@@ -17,3 +17,7 @@ export function matchLanguage(filename: string): LanguageMatch {
 export function isMarkdownFile(filename: string): boolean {
   return matchLanguage(filename.toLowerCase()).label === "Markdown";
 }
+
+export function isPythonFile(filename: string): boolean {
+  return /\.py(?:i|w)?$/i.test(filename);
+}

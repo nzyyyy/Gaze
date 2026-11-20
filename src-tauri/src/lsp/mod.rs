@@ -1,11 +1,12 @@
 mod client;
 mod completion;
+mod diagnostics;
 mod hover;
 mod positions;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -13,16 +14,19 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 use url::Url;
 
-pub use completion::CompletionResult;
+pub use completion::{CompletionItem, CompletionResolve, CompletionResult};
+pub use diagnostics::{DiagnosticSync, DiagnosticsUpdate};
 pub use hover::HoverContent;
 pub use positions::{LspPosition, LspRange, PositionEncoding, TextIndex};
 
+use crate::cache::Cache;
 use crate::error::{GazeError, GazeResult};
 use crate::files::{path_to_relative, read_file};
 use crate::models::{
     DocumentSymbol, FileContent, FileFingerprint, NavigationResult, OutlineResult, Project,
     SymbolLocation, TextPosition,
 };
+use crate::python::{self, PythonEnvironmentStatus};
 use crate::symbols::word_at;
 use crate::tools::{ResolvedLspServer, Tools};
 
@@ -48,6 +52,7 @@ struct ServerCapabilities {
     implementation: bool,
     document_symbol: bool,
     completion: bool,
+    completion_resolve: bool,
     hover: bool,
 }
 
@@ -56,6 +61,7 @@ struct OpenDocument {
     fingerprint: FileFingerprint,
     text: Arc<String>,
     dirty: bool,
+    diagnostics: Option<Vec<diagnostics::CodeDiagnostic>>,
 }
 
 struct LoadedDocument {
@@ -70,8 +76,11 @@ struct LspSession {
     client: LspClient,
     encoding: PositionEncoding,
     capabilities: ServerCapabilities,
-    documents: tokio::sync::Mutex<HashMap<String, OpenDocument>>,
+    documents: Arc<tokio::sync::Mutex<HashMap<String, OpenDocument>>>,
+    id: String,
     completion_triggers: Vec<String>,
+    completion_generation: tokio::sync::Mutex<u64>,
+    incremental_sync: bool,
 }
 
 impl LspSession {
@@ -79,6 +88,8 @@ impl LspSession {
         project: Project,
         server: &ResolvedLspServer,
         root_uri: &Url,
+        python_path: Option<String>,
+        publish_diagnostics: impl Fn(DiagnosticsUpdate) + Send + Sync + 'static,
     ) -> GazeResult<Self> {
         let executable = server.executable.as_ref().ok_or_else(|| {
             GazeError::ToolMissing(format!(
@@ -86,12 +97,30 @@ impl LspSession {
                 server.config.id, server.config.command
             ))
         })?;
+        let id = uuid::Uuid::new_v4().to_string();
+        let documents = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+        let encoding = Arc::new(OnceLock::new());
+        let diagnostics = {
+            let context = Arc::new(diagnostics::Publisher {
+                project: project.clone(),
+                session: id.clone(),
+                documents: Arc::clone(&documents),
+                encoding: Arc::clone(&encoding),
+                publish: publish_diagnostics,
+            });
+            move |params| {
+                let context = Arc::clone(&context);
+                async move { context.receive(params).await }
+            }
+        };
         let client = LspClient::spawn(
             executable,
             &server.config.args,
             Path::new(&project.root),
             root_uri.as_str(),
             &project.name,
+            python_path,
+            diagnostics,
         )
         .await?;
         let initialize = json!({
@@ -112,6 +141,7 @@ impl LspSession {
                         "willSaveWaitUntil": false,
                         "didSave": false
                     },
+                    "publishDiagnostics": { "versionSupport": true },
                     "definition": { "linkSupport": true },
                     "references": {},
                     "hover": { "contentFormat": ["markdown", "plaintext"] },
@@ -119,7 +149,9 @@ impl LspSession {
                     "completion": {
                         "contextSupport": true,
                         "completionItem": {
-                            "snippetSupport": false,
+                            "snippetSupport": true,
+                            "labelDetailsSupport": true,
+                            "resolveSupport": { "properties": ["documentation", "detail", "additionalTextEdits"] },
                             "documentationFormat": ["plaintext"],
                             "insertReplaceSupport": true
                         }
@@ -147,7 +179,7 @@ impl LspSession {
             }
         };
         let server_capabilities = result.get("capabilities").cloned().unwrap_or(Value::Null);
-        let encoding = PositionEncoding::parse(
+        let negotiated_encoding = PositionEncoding::parse(
             server_capabilities
                 .get("positionEncoding")
                 .and_then(Value::as_str),
@@ -158,8 +190,14 @@ impl LspSession {
             implementation: capability_enabled(&server_capabilities, "implementationProvider"),
             document_symbol: capability_enabled(&server_capabilities, "documentSymbolProvider"),
             completion: capability_enabled(&server_capabilities, "completionProvider"),
+            completion_resolve: server_capabilities
+                .pointer("/completionProvider/resolveProvider")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             hover: capability_enabled(&server_capabilities, "hoverProvider"),
         };
+        let sync = &server_capabilities["textDocumentSync"];
+        let incremental_sync = sync.as_u64().or_else(|| sync["change"].as_u64()) == Some(2);
         let completion_triggers = server_capabilities
             .pointer("/completionProvider/triggerCharacters")
             .and_then(Value::as_array)
@@ -168,15 +206,27 @@ impl LspSession {
             .filter_map(Value::as_str)
             .map(str::to_string)
             .collect();
+        let _ = encoding.set(negotiated_encoding);
         client.notify("initialized", json!({}));
+        if server.config.id == "typescript" {
+            client.notify(
+                "workspace/didChangeConfiguration",
+                json!({
+                    "settings": { "completions": { "completeFunctionCalls": true } }
+                }),
+            );
+        }
         Ok(Self {
             project,
             server_id: server.config.id.clone(),
             client,
-            encoding,
+            encoding: negotiated_encoding,
             capabilities,
-            documents: tokio::sync::Mutex::new(HashMap::new()),
+            documents,
+            id,
             completion_triggers,
+            completion_generation: tokio::sync::Mutex::new(0),
+            incremental_sync,
         })
     }
 
@@ -200,61 +250,24 @@ impl LspSession {
                 "二进制文件不能交给语言服务器。".to_string(),
             ));
         };
-        let disk_text = Arc::new(content);
+        let disk_text = Arc::new(if content.contains('\r') {
+            content.replace("\r\n", "\n").replace('\r', "\n")
+        } else {
+            content
+        });
         let language_id = language_id_for_path(&full_path, self.server_id.as_str());
         let mut documents = self.documents.lock().await;
-        let text = match documents.get(&uri) {
-            Some(document) if document.dirty => {
-                if document.fingerprint == fingerprint {
-                    Arc::clone(&document.text)
-                } else {
-                    let version = document.version + 1;
-                    let unchanged = document.text.as_str() == disk_text.as_str();
-                    documents.insert(
-                        uri.clone(),
-                        OpenDocument {
-                            version,
-                            fingerprint,
-                            text: Arc::clone(&disk_text),
-                            dirty: false,
-                        },
-                    );
-                    if !unchanged {
-                        self.client.notify(
-                            "textDocument/didChange",
-                            json!({
-                                "textDocument": { "uri": uri, "version": version },
-                                "contentChanges": [{ "text": disk_text.as_str() }]
-                            }),
-                        );
-                    }
-                    disk_text
-                }
+        let text = match documents.get_mut(&uri) {
+            Some(document) if document.text.as_str() == disk_text.as_str() => {
+                document.fingerprint = fingerprint;
+                document.dirty = false;
+                Arc::clone(&document.text)
             }
-            Some(document)
-                if document.fingerprint == fingerprint
-                    && document.text.as_str() == disk_text.as_str() =>
-            {
+            Some(document) if document.dirty && document.fingerprint == fingerprint => {
                 Arc::clone(&document.text)
             }
             Some(document) => {
-                let version = document.version + 1;
-                documents.insert(
-                    uri.clone(),
-                    OpenDocument {
-                        version,
-                        fingerprint,
-                        text: Arc::clone(&disk_text),
-                        dirty: false,
-                    },
-                );
-                self.client.notify(
-                    "textDocument/didChange",
-                    json!({
-                        "textDocument": { "uri": uri, "version": version },
-                        "contentChanges": [{ "text": disk_text.as_str() }]
-                    }),
-                );
+                self.change_document(&uri, document, fingerprint, Arc::clone(&disk_text), false);
                 disk_text
             }
             None => {
@@ -266,6 +279,7 @@ impl LspSession {
                         fingerprint,
                         text: Arc::clone(&disk_text),
                         dirty: false,
+                        diagnostics: None,
                     },
                 );
                 self.client.notify(
@@ -287,7 +301,7 @@ impl LspSession {
         Ok(LoadedDocument { uri, text, index })
     }
 
-    async fn sync_buffer(&self, relative_path: &str, content: &str) -> GazeResult<()> {
+    async fn sync_buffer(&self, relative_path: &str, content: &str) -> GazeResult<DiagnosticSync> {
         if content.len() as u64 > crate::files::MAX_FILE_BYTES {
             return Err(GazeError::Unsupported(
                 "文件过大，不能同步到语言服务器。".to_string(),
@@ -309,28 +323,18 @@ impl LspSession {
         .map_err(GazeError::Join)??;
         let text = Arc::new(content.to_string());
         let mut documents = self.documents.lock().await;
-        match documents.get(&uri) {
+        let version = match documents.get_mut(&uri) {
             Some(document) => {
-                if document.text.as_str() == text.as_str() && document.fingerprint == fingerprint {
-                    return Ok(());
+                if document.text.as_str() == text.as_str() {
+                    document.fingerprint = fingerprint;
+                    return Ok(DiagnosticSync {
+                        session: self.id.clone(),
+                        version: document.version,
+                        items: document.diagnostics.clone(),
+                    });
                 }
-                let version = document.version + 1;
-                documents.insert(
-                    uri.clone(),
-                    OpenDocument {
-                        version,
-                        fingerprint,
-                        text: Arc::clone(&text),
-                        dirty: true,
-                    },
-                );
-                self.client.notify(
-                    "textDocument/didChange",
-                    json!({
-                        "textDocument": { "uri": uri, "version": version },
-                        "contentChanges": [{ "text": text.as_str() }]
-                    }),
-                );
+                self.change_document(&uri, document, fingerprint, text, true);
+                document.version
             }
             None => {
                 let version = 1;
@@ -341,6 +345,7 @@ impl LspSession {
                         fingerprint,
                         text: Arc::clone(&text),
                         dirty: true,
+                        diagnostics: None,
                     },
                 );
                 self.client.notify(
@@ -354,9 +359,44 @@ impl LspSession {
                         }
                     }),
                 );
+                version
             }
+        };
+        Ok(DiagnosticSync {
+            session: self.id.clone(),
+            version,
+            items: None,
+        })
+    }
+
+    fn change_document(
+        &self,
+        uri: &str,
+        document: &mut OpenDocument,
+        fingerprint: FileFingerprint,
+        text: Arc<String>,
+        dirty: bool,
+    ) {
+        let mut change = json!({ "text": text.as_str() });
+        if self.incremental_sync {
+            let original = document.text.as_str();
+            let end = TextIndex::new(original)
+                .byte_to_lsp(original, original.len(), self.encoding)
+                .expect("the end of a document is a valid position");
+            change["range"] = json!({ "start": { "line": 0, "character": 0 }, "end": end });
         }
-        Ok(())
+        document.version += 1;
+        document.fingerprint = fingerprint;
+        document.text = text;
+        document.dirty = dirty;
+        document.diagnostics = None;
+        self.client.notify(
+            "textDocument/didChange",
+            json!({
+                "textDocument": { "uri": uri, "version": document.version },
+                "contentChanges": [change]
+            }),
+        );
     }
 
     async fn definition(&self, relative_path: &str, position: TextPosition) -> GazeResult<Value> {
@@ -465,14 +505,16 @@ impl LspSession {
 }
 
 pub struct LspManager {
+    cache: Cache,
     servers: Vec<ResolvedLspServer>,
     sessions: Arc<Mutex<HashMap<String, Arc<LspSession>>>>,
     start_lock: tokio::sync::Mutex<()>,
 }
 
 impl LspManager {
-    pub fn new(tools: &Tools) -> Self {
+    pub fn new(tools: &Tools, cache: Cache) -> Self {
         Self {
+            cache,
             servers: tools.lsp.clone(),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             start_lock: tokio::sync::Mutex::new(()),
@@ -495,32 +537,30 @@ impl LspManager {
             ))
         })?;
         let key = format!("{}\u{0000}{}", project.id, server.config.id);
-        if let Some(session) = self
-            .sessions
-            .lock()
-            .ok()
-            .and_then(|sessions| sessions.get(&key).cloned())
-        {
-            if !session.client.is_closed() {
-                return Ok(session);
-            }
-            if let Ok(mut sessions) = self.sessions.lock() {
-                sessions.remove(&key);
-            }
-            session.client.kill().await;
+        if let Some(session) = self.open_session(&key) {
+            return Ok(session);
         }
 
         let _start_guard = self.start_lock.lock().await;
-        if let Some(session) = self
+        if let Some(session) = self.open_session(&key) {
+            return Ok(session);
+        }
+        let previous = self
             .sessions
             .lock()
             .ok()
-            .and_then(|sessions| sessions.get(&key).cloned())
-        {
-            if !session.client.is_closed() {
-                return Ok(session);
-            }
+            .and_then(|mut sessions| sessions.remove(&key));
+        if let Some(previous) = previous {
+            previous.client.kill().await;
         }
+        let python_path = if serves_python(server) {
+            self.python_environment(project)
+                .await?
+                .environment
+                .map(|environment| environment.path)
+        } else {
+            None
+        };
         emit_status(
             app,
             LspStatus {
@@ -537,7 +577,18 @@ impl LspManager {
         );
         let root_uri = Url::from_directory_path(&project.root)
             .map_err(|_| GazeError::InvalidPath("项目根目录无法转换为 LSP URI。".to_string()))?;
-        let session = match LspSession::start(project.clone(), server, &root_uri).await {
+        let diagnostics_app = app.clone();
+        let session = match LspSession::start(
+            project.clone(),
+            server,
+            &root_uri,
+            python_path,
+            move |update| {
+                let _ = diagnostics_app.emit("gaze://diagnostics", update);
+            },
+        )
+        .await
+        {
             Ok(session) => Arc::new(session),
             Err(error) => {
                 tracing::warn!(
@@ -576,6 +627,69 @@ impl LspManager {
             },
         );
         Ok(session)
+    }
+
+    fn open_session(&self, key: &str) -> Option<Arc<LspSession>> {
+        self.sessions
+            .lock()
+            .ok()?
+            .get(key)
+            .filter(|session| !session.client.is_closed())
+            .cloned()
+    }
+
+    pub async fn python_environment(
+        &self,
+        project: &Project,
+    ) -> GazeResult<PythonEnvironmentStatus> {
+        let selected = self
+            .cache
+            .setting(&python::setting_key(&project.id))
+            .await?
+            .filter(|value| !value.is_empty());
+        let root = PathBuf::from(&project.root);
+        tokio::task::spawn_blocking(move || python::status(&root, selected))
+            .await
+            .map_err(GazeError::Join)
+    }
+
+    pub async fn set_python_environment(
+        &self,
+        project: &Project,
+        interpreter: Option<String>,
+    ) -> GazeResult<PythonEnvironmentStatus> {
+        let _start_guard = self.start_lock.lock().await;
+        let root = PathBuf::from(&project.root);
+        let status = tokio::task::spawn_blocking(move || {
+            if let Some(path) = &interpreter {
+                python::validate_interpreter(Path::new(path))?;
+            }
+            Ok::<_, GazeError>(python::status(&root, interpreter))
+        })
+        .await??;
+        self.cache
+            .set_setting(
+                &python::setting_key(&project.id),
+                status.selected.as_deref().unwrap_or_default(),
+            )
+            .await?;
+        let sessions = {
+            let mut sessions = self
+                .sessions
+                .lock()
+                .map_err(|_| GazeError::Message("语言服务器会话锁已损坏。".into()))?;
+            self.servers
+                .iter()
+                .filter(|server| serves_python(server))
+                .filter_map(|server| {
+                    sessions.remove(&format!("{}\u{0000}{}", project.id, server.config.id))
+                })
+                .collect::<Vec<_>>()
+        };
+        for session in sessions {
+            session.shutdown().await;
+        }
+        Ok(status)
     }
 
     fn server_for_path(&self, relative_path: &str) -> Option<&ResolvedLspServer> {
@@ -709,7 +823,7 @@ impl LspManager {
         project: &Project,
         relative_path: &str,
         content: &str,
-    ) -> GazeResult<()> {
+    ) -> GazeResult<DiagnosticSync> {
         let session = self.session_for(app, project, relative_path).await?;
         session.sync_buffer(relative_path, content).await
     }
@@ -726,6 +840,20 @@ impl LspManager {
         let session = self.session_for(app, project, relative_path).await?;
         session
             .complete(relative_path, content, position, trigger)
+            .await
+    }
+
+    pub async fn resolve_completion(
+        &self,
+        app: &AppHandle,
+        project: &Project,
+        path: &str,
+        content: &str,
+        resolve: CompletionResolve,
+    ) -> GazeResult<Option<CompletionItem>> {
+        self.session_for(app, project, path)
+            .await?
+            .resolve_completion(path, content, resolve)
             .await
     }
 
@@ -810,6 +938,15 @@ impl LspManager {
         }
         while tasks.join_next().await.is_some() {}
     }
+}
+
+fn serves_python(server: &ResolvedLspServer) -> bool {
+    server.config.extensions.iter().any(|ext| {
+        matches!(
+            ext.trim_start_matches('.').to_ascii_lowercase().as_str(),
+            "py" | "pyi" | "pyw"
+        )
+    })
 }
 
 fn language_id_for_path(path: &Path, server_id: &str) -> String {
@@ -929,22 +1066,40 @@ async fn normalize_locations(
     limit: usize,
 ) -> GazeResult<NavigationResult> {
     let mut locations = Vec::new();
-    let mut skipped_outside = 0usize;
+    let mut canonical_paths = HashMap::new();
     let mut text_cache: HashMap<PathBuf, Arc<String>> = HashMap::new();
     for raw_location in raw.into_iter().take(limit) {
         let Ok(url) = Url::parse(&raw_location.uri) else {
             continue;
         };
+        if url.host_str().is_some_and(|host| host != "localhost") {
+            continue;
+        }
         let Ok(path) = url.to_file_path() else {
             continue;
         };
-        let mapped = project_for_path(projects, &path).or_else(|| {
-            path.canonicalize()
-                .ok()
-                .and_then(|canonical| project_for_path(projects, &canonical))
-        });
-        let Some((project, relative)) = mapped else {
-            skipped_outside += 1;
+        let path = canonical_paths
+            .entry(path.clone())
+            .or_insert_with(|| path.canonicalize().unwrap_or(path));
+        let Some((project, relative)) = project_for_path(projects, path) else {
+            let Some(path) = path
+                .to_str()
+                .filter(|path| !path.chars().any(char::is_control))
+            else {
+                continue;
+            };
+            locations.push(SymbolLocation {
+                project_id: String::new(),
+                path: path.to_string(),
+                name: name.to_string(),
+                kind: "reference".to_string(),
+                line: raw_location.range.start.line,
+                character: raw_location.range.start.character,
+                end_line: raw_location.range.end.line,
+                end_character: raw_location.range.end.character,
+                source: source.to_string(),
+                external_encoding: Some(encoding),
+            });
             continue;
         };
         let (start, end) = if encoding == PositionEncoding::Utf16 {
@@ -959,7 +1114,7 @@ async fn normalize_locations(
                 },
             )
         } else {
-            let text = if let Some(text) = text_cache.get(&path) {
+            let text = if let Some(text) = text_cache.get(path) {
                 Arc::clone(text)
             } else {
                 let project_copy = project.clone();
@@ -991,14 +1146,13 @@ async fn normalize_locations(
             end_line: end.line,
             end_character: end.character,
             source: source.to_string(),
+            external_encoding: None,
         });
     }
-    let message = (skipped_outside > 0)
-        .then(|| format!("{skipped_outside} 个结果位于未导入的项目中，已跳过。"));
     Ok(NavigationResult {
         locations,
         source: source.to_string(),
-        message,
+        message: None,
     })
 }
 
@@ -1240,6 +1394,209 @@ mod tests {
         assert_eq!(symbols[1].name, "Shape");
     }
 
+    #[tokio::test]
+    async fn returns_external_local_locations_without_reading_them() {
+        let outside = tempfile::tempdir().unwrap();
+        let missing = outside.path().canonicalize().unwrap().join("unopened.d.ts");
+        let uri = Url::from_file_path(&missing).unwrap().to_string();
+        let range = LspRange {
+            start: LspPosition {
+                line: 10,
+                character: 8,
+            },
+            end: LspPosition {
+                line: 10,
+                character: 12,
+            },
+        };
+        let result = normalize_locations(
+            vec![
+                RawLocation { uri, range },
+                RawLocation {
+                    uri: "https://example.com/a.ts".to_string(),
+                    range,
+                },
+                RawLocation {
+                    uri: "file://example.com/share/a.ts".to_string(),
+                    range,
+                },
+            ],
+            &[],
+            PositionEncoding::Utf8,
+            "lsp",
+            "example",
+            10,
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.locations.len(), 1);
+        assert_eq!(
+            result.locations[0].external_encoding,
+            Some(PositionEncoding::Utf8)
+        );
+        assert_eq!(result.locations[0].path, missing.to_str().unwrap());
+        assert_eq!(result.locations[0].character, 8);
+    }
+
+    #[tokio::test]
+    async fn saving_python_interpreter_is_project_scoped_and_survives_reload() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().canonicalize().unwrap();
+        let project = Project {
+            id: "project".into(),
+            name: "project".into(),
+            root: root.to_str().unwrap().into(),
+        };
+        let other = Project {
+            id: "other".into(),
+            ..project.clone()
+        };
+        let executable = root.join(if cfg!(windows) {
+            "python.exe"
+        } else {
+            "python3"
+        });
+        std::fs::write(&executable, "").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let database = root.join("cache.sqlite3");
+        let cache = Cache::open(&database).unwrap();
+        cache.insert_project(&project).await.unwrap();
+        let tools = Tools {
+            rg: None,
+            ctags: None,
+            lsp: vec![],
+            config_message: None,
+        };
+        let manager = LspManager::new(&tools, cache);
+        let interpreter = executable.to_str().unwrap().to_string();
+        assert!(manager
+            .set_python_environment(&project, Some("relative/python".into()))
+            .await
+            .is_err());
+        manager
+            .set_python_environment(&project, Some(interpreter.clone()))
+            .await
+            .unwrap();
+        let cache = Cache::open(&database).unwrap();
+        let reopened = LspManager::new(&tools, cache.clone());
+        assert_eq!(
+            reopened
+                .python_environment(&project)
+                .await
+                .unwrap()
+                .selected,
+            Some(interpreter)
+        );
+        assert!(reopened
+            .python_environment(&other)
+            .await
+            .unwrap()
+            .selected
+            .is_none());
+        reopened
+            .set_python_environment(&project, None)
+            .await
+            .unwrap();
+        assert!(reopened
+            .python_environment(&project)
+            .await
+            .unwrap()
+            .selected
+            .is_none());
+        cache.delete_project(&project.id).await.unwrap();
+        assert!(cache
+            .setting(&python::setting_key(&project.id))
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn real_pyright_uses_the_automatically_discovered_project_environment() {
+        let (Ok(pyright), Ok(python_executable)) =
+            (which::which("pyright-langserver"), which::which("python3"))
+        else {
+            eprintln!("Pyright or Python unavailable; skipping real integration test");
+            return;
+        };
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().canonicalize().unwrap();
+        let prefix = root.join(".venv");
+        assert!(std::process::Command::new(python_executable)
+            .args(["-m", "venv", "--without-pip"])
+            .arg(&prefix)
+            .status()
+            .unwrap()
+            .success());
+        let environment = python::status(&root, None).environment.unwrap();
+        let python_path = environment.path;
+        let site = std::process::Command::new(&python_path)
+            .args([
+                "-I",
+                "-c",
+                "import sysconfig; print(sysconfig.get_path('purelib'))",
+            ])
+            .output()
+            .unwrap();
+        assert!(site.status.success());
+        let site = PathBuf::from(String::from_utf8(site.stdout).unwrap().trim());
+        assert!(site.starts_with(&prefix));
+        std::fs::write(site.join("gaze_fixture_dependency.py"), "value: int = 42\n").unwrap();
+        let document = "from gaze_fixture_dependency import value\nresult: int = \"wrong\"\n";
+        std::fs::write(root.join("main.py"), document).unwrap();
+        let project = Project {
+            id: "test".into(),
+            name: "test".into(),
+            root: root.to_str().unwrap().into(),
+        };
+        let server = ResolvedLspServer {
+            config: crate::config::LspServerConfig {
+                id: "python".into(),
+                languages: vec!["python".into()],
+                command: pyright.to_str().unwrap().into(),
+                args: vec!["--stdio".into()],
+                extensions: vec!["py".into()],
+                initialization_options: None,
+            },
+            executable: Some(pyright),
+        };
+        let uri = Url::from_directory_path(&root).unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let session = LspSession::start(project, &server, &uri, Some(python_path), move |update| {
+            let _ = tx.send(serde_json::to_value(update).unwrap());
+        })
+        .await
+        .unwrap();
+        session.sync_buffer("main.py", document).await.unwrap();
+        let diagnostics = tokio::time::timeout(Duration::from_secs(12), async {
+            while let Some(message) = rx.recv().await {
+                let items = message["items"].as_array().unwrap();
+                if items
+                    .iter()
+                    .any(|item| item["severity"] == 1 && item["start"]["line"] == 1)
+                {
+                    return message;
+                }
+            }
+            panic!("Pyright stopped publishing diagnostics");
+        })
+        .await
+        .expect("Pyright should analyze the actual virtual environment");
+        assert!(
+            diagnostics["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|item| item["severity"] != 1 || item["start"]["line"] != 0),
+            "{diagnostics}"
+        );
+        session.shutdown().await;
+    }
+
     fn language_server_path() -> Option<PathBuf> {
         if let Ok(path) = which::which("typescript-language-server") {
             return Some(path);
@@ -1265,7 +1622,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn real_typescript_lsp_definition_references_implementation_and_symbols() {
+    async fn real_typescript_lsp_semantics_for_open_and_unsaved_documents() {
         let Some(executable) = language_server_path() else {
             eprintln!("typescript-language-server not installed; skipping real LSP test");
             return;
@@ -1275,7 +1632,12 @@ mod tests {
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(
             root.join("tsconfig.json"),
-            r#"{"compilerOptions":{"target":"ES2022","strict":true},"include":["src"]}"#,
+            r#"{"compilerOptions":{"target":"ES2022","strict":true,"module":"ESNext","moduleResolution":"Bundler"},"include":["src"]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/dependency.ts"),
+            "export function exportedWidget(name: string): string { return name; }",
         )
         .unwrap();
         let source = "export interface Shape {\n  area(): number;\n}\n\nexport class Square implements Shape {\n  area(): number { return 4; }\n}\n\nexport function useShape(shape: Shape): number {\n  return shape.area();\n}\n\n// 😀 emoji before the usage must not shift UTF-16 positions\nconst square = new Square();\nconst area = useShape(square);\n";
@@ -1297,15 +1659,18 @@ mod tests {
                 args: vec!["--stdio".to_string()],
                 extensions: vec!["ts".to_string()],
                 initialization_options: Some(json!({
-                    "tsserver": { "path": tsserver_path }
+                    "tsserver": { "path": tsserver_path, "useSyntaxServer": "never" }
                 })),
             },
             executable: Some(executable),
         };
         let root_uri = Url::from_directory_path(&root).unwrap();
-        let session = LspSession::start(project, &server, &root_uri)
-            .await
-            .expect("TypeScript language server should initialize");
+        let (diagnostics_tx, mut diagnostics_rx) = tokio::sync::mpsc::unbounded_channel();
+        let session = LspSession::start(project, &server, &root_uri, None, move |update| {
+            let _ = diagnostics_tx.send(serde_json::to_value(update).unwrap());
+        })
+        .await
+        .expect("TypeScript language server should initialize");
 
         let symbols = session
             .document_symbols("src/你好.ts")
@@ -1414,11 +1779,87 @@ mod tests {
             .is_err());
         session.sync_buffer("src/你好.ts", &edited).await.unwrap();
 
+        let import_text = format!("{edited}\nconst widget = exportedWidg");
+        let import_candidates = session
+            .complete(
+                "src/你好.ts",
+                &import_text,
+                TextPosition {
+                    line: import_text.lines().count() as u32 - 1,
+                    character: "const widget = exportedWidg".len() as u32,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        let import_candidates = serde_json::to_value(import_candidates).unwrap();
+        let widget = import_candidates["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["label"] == "exportedWidget")
+            .expect("completion should include an exported function from another file");
+        let resolve = serde_json::from_value(widget["resolve"].clone()).unwrap();
+        let completion = session
+            .resolve_completion("src/你好.ts", &import_text, resolve)
+            .await
+            .unwrap()
+            .unwrap();
+        let completion = serde_json::to_value(completion).unwrap();
+        assert!(completion["additionalEdits"][0]["insert"]
+            .as_str()
+            .unwrap()
+            .contains("import { exportedWidget }"));
+
+        assert_eq!(completion["snippet"], true);
+        assert!(completion["insertText"]
+            .as_str()
+            .unwrap()
+            .contains("${1:name}"));
+
+        let invalid = format!("{edited}\nconst wrong: number = \"text\";\n");
+        let sync = session.sync_buffer("src/你好.ts", &invalid).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(12), async {
+            while let Some(batch) = diagnostics_rx.recv().await {
+                if batch["version"] == sync.version
+                    && batch["path"] == "src/你好.ts"
+                    && batch["items"].as_array().unwrap().iter().any(|item| {
+                        item["severity"] == 1
+                            && item["message"].as_str().unwrap().contains("not assignable")
+                    })
+                {
+                    return;
+                }
+            }
+            panic!("TypeScript diagnostics channel closed");
+        })
+        .await
+        .expect("TypeScript should publish a type error for the unsaved buffer");
+
+        let fixed = session.sync_buffer("src/你好.ts", &edited).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(12), async {
+            while let Some(batch) = diagnostics_rx.recv().await {
+                if batch["version"] == fixed.version
+                    && batch["path"] == "src/你好.ts"
+                    && !batch["items"].as_array().unwrap().iter().any(|item| {
+                        item["severity"] == 1
+                            && item["message"].as_str().unwrap().contains("not assignable")
+                    })
+                {
+                    return;
+                }
+            }
+            panic!("TypeScript diagnostics channel closed");
+        })
+        .await
+        .expect("TypeScript should clear the error after the unsaved buffer is corrected");
+
         std::fs::create_dir(root.join("src2")).unwrap();
         std::fs::write(root.join("src2/keep.ts"), "export const keep = 1;").unwrap();
         session.load_document("src2/keep.ts").await.unwrap();
         let session = Arc::new(session);
         let manager = LspManager {
+            cache: Cache::open_in_memory().unwrap(),
             servers: Vec::new(),
             sessions: Arc::new(Mutex::new(HashMap::from([(
                 "lsp-test\0typescript".to_string(),
