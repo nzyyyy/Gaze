@@ -10,7 +10,8 @@ import {
   type CompletionSource,
 } from "@codemirror/autocomplete";
 import { EditorState, Prec, Transaction, type Extension } from "@codemirror/state";
-import { keymap, type EditorView } from "@codemirror/view";
+import { keymap, ViewPlugin, type EditorView } from "@codemirror/view";
+import type { createPathCompletion } from "../plugins/path-completion";
 import { api, type CodeCompletion, type CompletionEdit } from "./api";
 import { errorCode } from "./utils";
 
@@ -236,19 +237,37 @@ export interface CompletionContribution {
   extension: Extension;
 }
 
+export const completionCompositionKeys = ViewPlugin.define((view) => {
+  const keepCompositionKeys = (event: KeyboardEvent) => {
+    // Leave native IME confirmation to the input method before CodeMirror records a change.
+    if (event.isComposing || event.keyCode === 229) event.stopPropagation();
+  };
+  view.dom.addEventListener("keydown", keepCompositionKeys, true);
+  return { destroy: () => view.dom.removeEventListener("keydown", keepCompositionKeys, true) };
+});
+
 export function codeCompletion(
   projectId: string,
   path: string,
   contribution?: CompletionContribution,
   semantic = true,
   aboveCursor = false,
+  pathCompletion?: ReturnType<typeof createPathCompletion>,
 ) {
-  const sources = semantic
-    ? [{ autocomplete: lspCompletionSource(projectId, path) }, { autocomplete: completeAnyWord }]
-    : [{ autocomplete: completeAnyWord }];
+  const ordinarySources = semantic
+    ? [lspCompletionSource(projectId, path), completeAnyWord]
+    : [completeAnyWord];
+  const sources = ordinarySources.map((source) => ({
+    autocomplete: pathCompletion
+      ? (context: Parameters<CompletionSource>[0]) =>
+          pathCompletion.matches(context) ? null : source(context)
+      : source,
+  }));
+  if (pathCompletion) sources.push({ autocomplete: pathCompletion.source });
   return [
     autocompletion({
       aboveCursor,
+      activateOnCompletion: (item) => !!pathCompletion && item.type === "folder",
       interactionDelay: 0,
       maxRenderedOptions: 32,
       compareCompletions(a: RankedCompletion, b: RankedCompletion) {
@@ -272,5 +291,6 @@ export function codeCompletion(
     EditorState.languageData.of((state, pos) => contribution?.sources(state, pos) ?? sources),
     Prec.high(keymap.of([...completionKeymap, { key: "Tab", run: acceptCompletion }])),
     contribution?.extension ?? [],
+    pathCompletion?.extension ?? [],
   ];
 }

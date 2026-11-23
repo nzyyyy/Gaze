@@ -419,6 +419,9 @@ export const english: Record<string, string> = {
     "Add the slash menu and formatting shortcuts to the Markdown editor.",
   "KaTeX 数学公式": "KaTeX math",
   "在 Markdown 预览中排版数学公式。": "Typeset math in Markdown previews.",
+  文件路径补全: "File path completion",
+  "在编辑器中提示当前项目的文件和目录路径。":
+    "Suggest files and directories from the current project in the editor.",
   集成终端: "Integrated terminal",
   "Python 语义支持": "Python language support",
   "启用 Python 解释器选择、语义补全、诊断和导航。":

@@ -164,6 +164,8 @@ typescript-language-server --stdio
 
 LSP 补全保留服务器排序，支持候选详情解析、同文件自动导入和带编号的参数占位，补全和导入可一起撤销。自动导入取决于服务器返回的同文件编辑。补全目前处理编号和默认值占位，不执行 LSP 命令，也不展开 snippet 的变量、选择列表和转换。
 
+**文件路径补全**默认开启，可在「设置 → 插件 → 编辑器」中关闭。Markdown 链接和图片目标支持 `./`、`../` 以及以 `/` 开头的项目根路径。JavaScript、TypeScript、Python、Rust、C/C++、Go、Java、JSON、YAML 和 TOML 的普通引号字符串支持相对路径，JavaScript / TypeScript 的 `import` 和 `export` 模块路径由语言服务处理。输入 `/` 后自动提示，尚未输入 `/` 时可用 `Ctrl+Space` 手动提示。选中目录后会继续提示下一级，选中文件后可单独撤销这次插入。候选来自当前项目的索引，可提示包含已索引文件的目录。
+
 Vue 新版服务器的脚本类型能力依赖 `@vue/typescript-plugin` 与自定义 `tsserver/request` 桥接，目前未实现该桥接，Vue 保留本地／模板补全；需要完整脚本补全时可自定义使用支持独立模式的服务器及其初始化选项。不能把预设等同于各语言服务器均已实机验证。
 
 包体只增加通用补全代码和少量配置；高亮包原本已按语言异步加载，新增语言预设不会打包对应工具链。外部服务器和 SDK 会单独占用本机磁盘，已启动的服务器也会占用内存。
@@ -187,7 +189,7 @@ pnpm tauri dev
 
 ### 插件
 
-在「设置 → 插件 → 全部」可导入包含 `gaze-plugin.json` 的本地目录。Gaze 将清单和入口复制到应用数据目录，初次导入默认停用。启停和卸载即时生效。重新导入同一 ID 会替换安装内容并停用该版本，本机插件需重新授权。Mermaid、Markdown 快捷插入、KaTeX 数学公式、AI 行内补全、Python 语义支持、JavaScript / TypeScript 语义支持和内容缩略图随 Gaze 发布，在「设置 → 插件」中启停，保存设置后生效。缩略图沿用已有的显示偏好。终端和 Git 由 Gaze 直接提供，原有入口和快捷键始终可用。
+在「设置 → 插件 → 全部」可导入包含 `gaze-plugin.json` 的本地目录。Gaze 将清单和入口复制到应用数据目录，初次导入默认停用。启停和卸载即时生效。重新导入同一 ID 会替换安装内容并停用该版本，本机插件需重新授权。Mermaid、Markdown 快捷插入、KaTeX 数学公式、AI 行内补全、Python 语义支持、JavaScript / TypeScript 语义支持、文件路径补全和内容缩略图随 Gaze 发布，在「设置 → 插件」中启停，保存设置后生效。缩略图沿用已有的显示偏好。终端和 Git 由 Gaze 直接提供，原有入口和快捷键始终可用。
 
 - [Text and CSV](examples/plugins/text-tools) 使用受限 JavaScript。启用后，选中文本，再从编辑器的「插件命令」选择 `Uppercase selection`。在 Markdown 预览中，可用 `csv` 围栏将第一行作为表头渲染成表格。
 - [Native Text Tools](examples/plugins/native-command) 是适用于 macOS / Linux 的本机插件示例，需要 `python3` 可从系统默认 `PATH` 找到。授权并启用后，选中多行并运行 `Sort selected lines`。Windows 本机插件使用 `.exe` 入口。

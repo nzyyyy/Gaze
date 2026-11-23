@@ -40,6 +40,7 @@ pub struct Preferences {
     pub mermaid_enabled: bool,
     pub markdown_insert_enabled: bool,
     pub markdown_math_enabled: bool,
+    pub path_completion_enabled: bool,
     pub python_enabled: bool,
     pub typescript_enabled: bool,
     pub ai_completion_enabled: bool,
@@ -89,6 +90,7 @@ impl Default for Preferences {
             mermaid_enabled: true,
             markdown_insert_enabled: true,
             markdown_math_enabled: true,
+            path_completion_enabled: true,
             python_enabled: true,
             typescript_enabled: true,
             ai_completion_enabled: false,
@@ -212,6 +214,7 @@ mod tests {
         ).unwrap();
         assert!(legacy.mermaid_enabled);
         assert!(legacy.markdown_insert_enabled && legacy.markdown_math_enabled);
+        assert!(legacy.path_completion_enabled);
         assert!(legacy.python_enabled);
         assert!(!legacy.show_minimap);
         assert_eq!(legacy.editor_font_size, 18.0);
@@ -239,6 +242,7 @@ mod tests {
                 mermaid_enabled: false,
                 markdown_insert_enabled: false,
                 markdown_math_enabled: false,
+                path_completion_enabled: false,
                 python_enabled: false,
                 typescript_enabled: false,
                 ..defaults.clone()
@@ -253,6 +257,7 @@ mod tests {
             "mermaidEnabled",
             "markdownInsertEnabled",
             "markdownMathEnabled",
+            "pathCompletionEnabled",
             "pythonEnabled",
             "typescriptEnabled",
         ] {

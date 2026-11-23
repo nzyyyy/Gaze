@@ -39,6 +39,12 @@ export const BUILTIN_PLUGINS = [
     description: "启用 JavaScript、TypeScript、JSX 和 TSX 的语义补全、诊断和导航。",
   },
   {
+    key: "pathCompletionEnabled",
+    pluginCategory: "editor",
+    label: "文件路径补全",
+    description: "在编辑器中提示当前项目的文件和目录路径。",
+  },
+  {
     key: "showMinimap",
     pluginCategory: "editor",
     label: "内容缩略图",

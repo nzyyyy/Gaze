@@ -6,6 +6,7 @@ import {
   useEffect,
   useImperativeHandle,
   useId,
+  useMemo,
   useRef,
   useState,
   type Ref,
@@ -560,6 +561,7 @@ export function CodeReader({
     markdown ? "Markdown" : "",
     preferences.markdownInsertEnabled,
   );
+  const pathFeature = useBuiltinFeature("pathCompletionEnabled", preferences.pathCompletionEnabled);
   const plugins = usePlugins();
   const pluginMenuId = useId();
   const pluginRequest = useRef<AbortController | null>(null);
@@ -571,6 +573,13 @@ export function CodeReader({
   const minimap = useBuiltinFeature("showMinimap", preferences.showMinimap);
   const previewVisible =
     preview && markdown && loaded?.content.kind === "text" && loaded.content.mode === "normal";
+  const pathCompletion = useMemo(
+    () =>
+      active && !previewVisible && !gitLocked && !tab.projectId.startsWith("external:")
+        ? pathFeature?.(tab.projectId, tab.path, markdown)
+        : undefined,
+    [active, previewVisible, gitLocked, pathFeature, tab.projectId, tab.path, markdown],
+  );
   useEffect(
     () => () => pluginRequest.current?.abort(),
     [active, tab.key, loaded, previewVisible, gitLocked],
@@ -1315,11 +1324,20 @@ export function CodeReader({
               editorCompletion?.contribution,
               semanticEnabled,
               Boolean(inlineCompletion),
+              pathCompletion,
             )
           : [],
       ]),
     });
-  }, [loaded, tab.projectId, tab.path, editorCompletion, semanticEnabled, inlineCompletion]);
+  }, [
+    loaded,
+    tab.projectId,
+    tab.path,
+    editorCompletion,
+    semanticEnabled,
+    inlineCompletion,
+    pathCompletion,
+  ]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -1334,7 +1352,8 @@ export function CodeReader({
               projectId: tab.projectId,
               path: tab.path,
               language: matchLanguage(markdown ? tab.name.toLowerCase() : tab.name).label,
-              reserved: (state) => editorCompletion?.reservesCompletion(state) ?? false,
+              reserved: (state) =>
+                !!editorCompletion?.reservesCompletion(state) || !!pathCompletion?.reserved(state),
               onError: (message) => onNoticeRef.current?.(message),
             })
           : [],
@@ -1350,6 +1369,7 @@ export function CodeReader({
     tab.name,
     markdown,
     editorCompletion,
+    pathCompletion,
     inlineCompletion,
     preferences.aiCompletion,
   ]);

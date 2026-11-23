@@ -1114,6 +1114,34 @@ async fn search_paths(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+async fn complete_paths(
+    project_id: String,
+    document_path: String,
+    directory: String,
+    prefix: String,
+    directory_only: bool,
+    state: State<'_, AppState>,
+) -> Result<Vec<path_index::PathCompletion>, CommandError> {
+    if !state
+        .read_preferences()
+        .await
+        .map_err(CommandError::from)?
+        .path_completion_enabled
+    {
+        return Ok(Vec::new());
+    }
+    let project = state
+        .project(&project_id)
+        .await
+        .map_err(CommandError::from)?;
+    state
+        .path_index
+        .complete(project, document_path, directory, prefix, directory_only)
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 fn path_index_status(state: State<'_, AppState>) -> Vec<PathIndexStatus> {
     state.path_index.statuses()
 }
@@ -1485,6 +1513,7 @@ pub fn run() {
             resolve_completion,
             hover_code,
             search_paths,
+            complete_paths,
             path_index_status,
             symbol_index_status,
             get_outline,

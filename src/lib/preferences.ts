@@ -80,6 +80,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   mermaidEnabled: true,
   markdownInsertEnabled: true,
   markdownMathEnabled: true,
+  pathCompletionEnabled: true,
   pythonEnabled: true,
   typescriptEnabled: true,
   aiCompletionEnabled: false,

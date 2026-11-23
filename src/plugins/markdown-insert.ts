@@ -8,9 +8,9 @@ import {
 import { isolateHistory } from "@codemirror/commands";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorSelection, Prec, type EditorState } from "@codemirror/state";
-import { EditorView, keymap, ViewPlugin, type Command } from "@codemirror/view";
+import { EditorView, keymap, type Command } from "@codemirror/view";
 import { t } from "../lib/i18n";
-import type { CompletionContribution } from "../lib/completion";
+import { completionCompositionKeys, type CompletionContribution } from "../lib/completion";
 
 interface InsertItem {
   name: string;
@@ -189,15 +189,6 @@ function wrapMarkdown(before: string, after: string, link = false): Command {
   };
 }
 
-const compositionKeys = ViewPlugin.define((view) => {
-  const keepCompositionKeys = (event: KeyboardEvent) => {
-    // Leave native IME confirmation to the input method even before CodeMirror records a change.
-    if (event.isComposing || event.keyCode === 229) event.stopPropagation();
-  };
-  view.dom.addEventListener("keydown", keepCompositionKeys, true);
-  return { destroy: () => view.dom.removeEventListener("keydown", keepCompositionKeys, true) };
-});
-
 const extension = [
   Prec.high(
     keymap.of([
@@ -206,7 +197,7 @@ const extension = [
       { key: "Mod-k", run: wrapMarkdown("[", "]()", true) },
     ]),
   ),
-  compositionKeys,
+  completionCompositionKeys,
   EditorView.domEventHandlers({
     compositionstart(_event, view) {
       if (markdownSlashQuery(view.state, view.state.selection.main.head)) closeCompletion(view);
@@ -215,7 +206,7 @@ const extension = [
       queueMicrotask(() => {
         if (
           view.hasFocus &&
-          view.plugin(compositionKeys) &&
+          view.plugin(completionCompositionKeys) &&
           markdownSlashQuery(view.state, view.state.selection.main.head)
         )
           startCompletion(view);

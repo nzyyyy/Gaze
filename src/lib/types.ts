@@ -122,6 +122,11 @@ export interface PathSearchResponse {
   message: string | null;
 }
 
+export interface PathCompletion {
+  name: string;
+  isDirectory: boolean;
+}
+
 export interface PathIndexStatus {
   projectId: string;
   entryCount: number;

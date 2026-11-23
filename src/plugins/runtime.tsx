@@ -19,6 +19,7 @@ import { PythonEnvironmentSelect } from "./python/PythonEnvironmentSelect";
 import type { Preferences } from "../lib/preferences";
 import { MermaidDiagram } from "./mermaid/MermaidDiagram";
 import { markdownInsert, markdownSlashQuery } from "./markdown-insert";
+import { createPathCompletion } from "./path-completion";
 import { pluginApi, type InstalledPlugin, type PluginInput } from "./api";
 
 type Completion = {
@@ -73,6 +74,7 @@ const builtinFeatures = {
   pythonEnabled: { matches: isPythonFile, Status: PythonEnvironmentSelect },
   typescriptEnabled: { matches: isJavaScriptOrTypeScriptFile },
   showMinimap: minimap,
+  pathCompletionEnabled: createPathCompletion,
 };
 
 type RuntimePreferences = Record<BuiltinPluginKey, boolean>;

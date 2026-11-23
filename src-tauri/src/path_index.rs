@@ -12,10 +12,11 @@ use tauri::{AppHandle, Emitter};
 
 use crate::cache::{Cache, CachedFile};
 use crate::error::{GazeError, GazeResult};
-use crate::files::{fingerprint, path_to_relative};
+use crate::files::{document_relative_target, fingerprint, path_to_relative, resolve_within_root};
 use crate::models::{PathSearchHit, Project};
 
 const MAX_PATH_RESULTS: usize = 120;
+const MAX_PATH_COMPLETIONS: usize = 32;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,11 +35,34 @@ pub struct PathSearchResponse {
     pub message: Option<String>,
 }
 
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathCompletion {
+    name: String,
+    is_directory: bool,
+}
+
 #[derive(Debug, Clone)]
 struct PathEntry {
     project_id: String,
     project_name: String,
     path: String,
+}
+
+fn indexed_entries(
+    project: &Project,
+    paths: impl IntoIterator<Item = String>,
+) -> Arc<Vec<PathEntry>> {
+    let mut entries: Vec<_> = paths
+        .into_iter()
+        .map(|path| PathEntry {
+            project_id: project.id.clone(),
+            project_name: project.name.clone(),
+            path,
+        })
+        .collect();
+    entries.sort_unstable_by(|left, right| left.path.cmp(&right.path));
+    Arc::new(entries)
 }
 
 #[derive(Debug, Default)]
@@ -67,16 +91,7 @@ impl PathIndex {
     pub async fn load_cached(&self, cache: &Cache, projects: &[Project]) -> GazeResult<()> {
         for project in projects {
             let cached = cache.cached_files(&project.id).await?;
-            let entries = Arc::new(
-                cached
-                    .into_iter()
-                    .map(|file| PathEntry {
-                        project_id: project.id.clone(),
-                        project_name: project.name.clone(),
-                        path: file.rel_path,
-                    })
-                    .collect(),
-            );
+            let entries = indexed_entries(project, cached.into_iter().map(|file| file.rel_path));
             if let Ok(mut index) = self.projects.write() {
                 index.entry(project.id.clone()).or_insert(IndexedProject {
                     entries,
@@ -202,17 +217,7 @@ impl PathIndex {
                 match cache.replace_file_index(&project.id, &outcome.cached).await {
                     Ok(()) => {
                         let file_count = outcome.files.len();
-                        let entries = Arc::new(
-                            outcome
-                                .files
-                                .into_iter()
-                                .map(|path| PathEntry {
-                                    project_id: project.id.clone(),
-                                    project_name: project.name.clone(),
-                                    path,
-                                })
-                                .collect(),
-                        );
+                        let entries = indexed_entries(&project, outcome.files);
                         if let Ok(mut projects) = self.projects.write() {
                             projects.insert(
                                 project.id.clone(),
@@ -296,6 +301,117 @@ impl PathIndex {
             message,
         })
     }
+
+    pub async fn complete(
+        &self,
+        project: Project,
+        document_path: String,
+        directory: String,
+        prefix: String,
+        directory_only: bool,
+    ) -> GazeResult<Vec<PathCompletion>> {
+        let entries = self
+            .projects
+            .read()
+            .map_err(|_| GazeError::Message("路径索引读取锁已损坏。".to_string()))?
+            .get(&project.id)
+            .map(|index| Arc::clone(&index.entries));
+        let Some(entries) = entries else {
+            return Ok(Vec::new());
+        };
+        tokio::task::spawn_blocking(move || {
+            complete_children(
+                &project,
+                &document_path,
+                &directory,
+                &prefix,
+                directory_only,
+                &entries,
+            )
+        })
+        .await
+        .map_err(GazeError::Join)?
+    }
+}
+
+fn complete_children(
+    project: &Project,
+    document_path: &str,
+    directory: &str,
+    prefix: &str,
+    directory_only: bool,
+    entries: &[PathEntry],
+) -> GazeResult<Vec<PathCompletion>> {
+    if directory.starts_with("//")
+        || directory.contains(['\\', '\0'])
+        || (cfg!(windows) && directory.contains(':'))
+        || prefix.contains(['/', '\\', '\0'])
+    {
+        return Err(GazeError::InvalidPath("路径补全只接受项目内路径。".into()));
+    }
+    let root = Path::new(&project.root);
+    if !resolve_within_root(root, document_path)?.is_file() {
+        return Ok(Vec::new());
+    }
+    let relative = document_relative_target(document_path, directory)?;
+    let target = resolve_within_root(root, &relative)?;
+    if directory.split('/').any(|part| part == "..") {
+        let authored = if let Some(project_relative) = directory.strip_prefix('/') {
+            root.join(project_relative)
+        } else {
+            let parent = document_path
+                .rsplit_once('/')
+                .map_or("", |(parent, _)| parent);
+            root.join(parent).join(directory)
+        };
+        // A symlink can change what the filesystem resolves before traversing `..`.
+        if authored.canonicalize()? != target {
+            return Ok(Vec::new());
+        }
+    }
+    if !target.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut directory_prefix = path_to_relative(root, &target)?;
+    if !directory_prefix.is_empty() {
+        directory_prefix.push('/');
+    }
+    let prefix = prefix.to_lowercase();
+    let mut candidates = Vec::new();
+    let mut index = entries.partition_point(|entry| entry.path < directory_prefix);
+    while let Some(entry) = entries.get(index) {
+        let Some(child) = entry.path.strip_prefix(&directory_prefix) else {
+            break;
+        };
+        let (name, is_directory) = child
+            .split_once('/')
+            .map_or((child, false), |(name, _)| (name, true));
+        if (!directory_only || is_directory) && name.to_lowercase().starts_with(&prefix) {
+            let path = format!("{directory_prefix}{name}");
+            if resolve_within_root(root, &path).is_ok_and(|resolved| {
+                if is_directory {
+                    resolved.is_dir()
+                } else {
+                    resolved.is_file()
+                }
+            }) {
+                candidates.push(PathCompletion {
+                    name: name.to_owned(),
+                    is_directory,
+                });
+                if candidates.len() == MAX_PATH_COMPLETIONS {
+                    break;
+                }
+            }
+        }
+        index += 1;
+        if is_directory {
+            // All descendants are contiguous in the shared, sorted snapshot.
+            let subtree = &entry.path[..directory_prefix.len() + name.len() + 1];
+            index += entries[index..].partition_point(|entry| entry.path.starts_with(subtree));
+        }
+    }
+    Ok(candidates)
 }
 
 fn finish_task(
@@ -489,17 +605,23 @@ impl PathIndex {
                 if let Some(index) = projects.get_mut(&project.id) {
                     let entries = Arc::make_mut(&mut index.entries);
                     if let Some(prefix) = &update.remove_under {
+                        let descendants = format!("{prefix}/");
                         entries.retain(|entry| {
-                            entry.path != *prefix && !entry.path.starts_with(&format!("{prefix}/"))
+                            entry.path != *prefix && !entry.path.starts_with(&descendants)
                         });
                     }
                     for file in &update.files {
-                        if !entries.iter().any(|entry| entry.path == file.rel_path) {
-                            entries.push(PathEntry {
-                                project_id: project.id.clone(),
-                                project_name: project.name.clone(),
-                                path: file.rel_path.clone(),
-                            });
+                        if let Err(position) =
+                            entries.binary_search_by(|entry| entry.path.cmp(&file.rel_path))
+                        {
+                            entries.insert(
+                                position,
+                                PathEntry {
+                                    project_id: project.id.clone(),
+                                    project_name: project.name.clone(),
+                                    path: file.rel_path.clone(),
+                                },
+                            );
                         }
                     }
                     if update.warning.is_some() {
@@ -863,6 +985,182 @@ mod tests {
             .hits
             .is_empty());
         assert!(cache.cached_files("p").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn completions_are_project_scoped_and_follow_incremental_renames() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().canonicalize().unwrap();
+        let cache = Cache::open_in_memory().unwrap();
+        let projects: Vec<_> = ["first", "second"]
+            .into_iter()
+            .map(|id| {
+                let directory = root.join(id);
+                std::fs::create_dir_all(directory.join("docs")).unwrap();
+                std::fs::create_dir_all(directory.join("config/deep")).unwrap();
+                std::fs::create_dir_all(directory.join("empty")).unwrap();
+                for path in [
+                    "docs/guide.md",
+                    "config/deep/nested.md",
+                    &format!("config/{id}.md"),
+                ] {
+                    std::fs::write(directory.join(path), "").unwrap();
+                }
+                Project {
+                    id: id.into(),
+                    name: id.into(),
+                    root: directory.display().to_string(),
+                }
+            })
+            .collect();
+        for project in &projects {
+            cache.insert_project(project).await.unwrap();
+            let scan = scan_paths(project, &AtomicBool::new(false)).unwrap();
+            cache
+                .replace_file_index(&project.id, &scan.cached)
+                .await
+                .unwrap();
+        }
+        let index = PathIndex::new();
+        index.load_cached(&cache, &projects).await.unwrap();
+        let complete = |directory: &str, prefix: &str, directory_only| {
+            index.complete(
+                projects[0].clone(),
+                "docs/guide.md".into(),
+                directory.into(),
+                prefix.into(),
+                directory_only,
+            )
+        };
+        assert_eq!(
+            complete("/", "C", true).await.unwrap(),
+            [PathCompletion {
+                name: "config".into(),
+                is_directory: true
+            }]
+        );
+        assert!(complete("/", "empty", true).await.unwrap().is_empty());
+        assert!(complete("../../", "", false).await.is_err());
+        assert_eq!(
+            complete("../config/", "", false).await.unwrap(),
+            [
+                PathCompletion {
+                    name: "deep".into(),
+                    is_directory: true
+                },
+                PathCompletion {
+                    name: "first.md".into(),
+                    is_directory: false
+                },
+            ]
+        );
+
+        let config = root.join("first/config");
+        std::fs::rename(config.join("first.md"), config.join("renamed.md")).unwrap();
+        index
+            .apply_changes(
+                &cache,
+                &projects[0],
+                vec![
+                    PathChange::Removed("config/first.md".into()),
+                    PathChange::File("config/renamed.md".into()),
+                ],
+            )
+            .await
+            .unwrap();
+        assert!(complete("../config/", "first", false)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            complete("/config/", "ren", false).await.unwrap()[0].name,
+            "renamed.md"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn completion_omits_paths_that_now_resolve_outside_the_project() {
+        let temporary = tempfile::tempdir().unwrap();
+        let outside = temporary.path().canonicalize().unwrap();
+        let root = outside.join("project");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("guide.md"), "").unwrap();
+        std::fs::write(outside.join("secret.md"), "").unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.md"), root.join("linked.md")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("linked-dir")).unwrap();
+        let project = Project {
+            id: "p".into(),
+            name: "Demo".into(),
+            root: root.display().to_string(),
+        };
+        let entries = indexed_entries(
+            &project,
+            [
+                "guide.md".into(),
+                "linked.md".into(),
+                "linked-dir/secret.md".into(),
+            ],
+        );
+        assert!(
+            complete_children(&project, "guide.md", "/", "linked", false, &entries)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            complete_children(&project, "guide.md", "linked-dir/", "", false, &entries).is_err()
+        );
+        assert!(complete_children(
+            &project,
+            "guide.md",
+            "linked-dir/../",
+            "gui",
+            false,
+            &entries
+        )
+        .unwrap()
+        .is_empty());
+    }
+
+    #[test]
+    fn completion_caps_results_in_a_large_snapshot() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().canonicalize().unwrap();
+        std::fs::write(root.join("guide.md"), "").unwrap();
+        std::fs::create_dir(root.join("config")).unwrap();
+        let project = Project {
+            id: "p".into(),
+            name: "Demo".into(),
+            root: root.display().to_string(),
+        };
+        let files = (0..MAX_PATH_COMPLETIONS + 8).map(|index| {
+            let path = format!("config/file-{index:03}.json");
+            std::fs::write(root.join(&path), "").unwrap();
+            path
+        });
+        let nested = (0..100_000).map(|index| format!("assets/nested/{index}.png"));
+        let entries = indexed_entries(&project, files.chain(nested));
+
+        let started = std::time::Instant::now();
+        for prefix in ["c", "co", "con", "conf", "confi", "config"] {
+            let results =
+                complete_children(&project, "guide.md", "/", prefix, true, &entries).unwrap();
+            assert_eq!(
+                results,
+                [PathCompletion {
+                    name: "config".into(),
+                    is_directory: true
+                }]
+            );
+        }
+        let results =
+            complete_children(&project, "guide.md", "config/", "file", false, &entries).unwrap();
+        assert_eq!(results.len(), MAX_PATH_COMPLETIONS);
+        eprintln!(
+            "seven path queries on {} indexed files: {:?}",
+            entries.len(),
+            started.elapsed()
+        );
     }
 
     #[test]

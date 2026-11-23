@@ -18,6 +18,7 @@ import type {
   LspStatus,
   NavigationResult,
   OutlineResult,
+  PathCompletion,
   PathIndexStatus,
   PathSearchResponse,
   PythonEnvironment,
@@ -209,6 +210,20 @@ export const api = {
   ) => invoke<CodeCompletion | null>("resolve_completion", { projectId, path, content, resolve }),
   getCapabilities: () => invoke<ToolCapabilities>("get_capabilities"),
   searchPaths: (query: string) => invoke<PathSearchResponse>("search_paths", { query }),
+  completePaths: (
+    projectId: string,
+    documentPath: string,
+    directory: string,
+    prefix: string,
+    directoryOnly: boolean,
+  ) =>
+    invoke<PathCompletion[]>("complete_paths", {
+      projectId,
+      documentPath,
+      directory,
+      prefix,
+      directoryOnly,
+    }),
   pathIndexStatus: () => invoke<PathIndexStatus[]>("path_index_status"),
   startSearch: (requestId: string, query: string, options: SearchOptions) =>
     invoke<void>("start_search", { requestId, query, options }),
