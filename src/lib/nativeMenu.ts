@@ -43,8 +43,6 @@ export interface NativeMenuState {
   canGoForward: boolean;
   splitOpen: boolean;
   terminalOpen: boolean;
-  terminalEnabled: boolean;
-  gitEnabled: boolean;
   sidebarView: "files" | "search" | "symbols" | "git";
   theme: ThemePreference;
   autoSave: boolean;

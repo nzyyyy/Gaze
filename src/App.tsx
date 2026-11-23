@@ -1,3 +1,4 @@
+import { PluginProvider, useBuiltinFeature } from "./plugins/runtime";
 import { t, useLanguage, setLanguage, DEFAULT_LANGUAGE } from "./lib/i18n";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -39,7 +40,6 @@ import {
   type BatchFileOperationResult,
 } from "./components/FileOperationDialog";
 import { LocationPicker } from "./components/LocationPicker";
-import { PythonEnvironmentSelect } from "./plugins/python/PythonEnvironmentSelect";
 import { QuickOpen } from "./components/QuickOpen";
 import { SearchPanel } from "./components/SearchPanel";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -47,7 +47,7 @@ import { SidebarLayout, type SidebarLayoutHandle } from "./components/SidebarLay
 import { EditorSplitResizer } from "./components/EditorSplitResizer";
 import { SymbolPanel } from "./components/SymbolPanel";
 import { TabBar } from "./components/TabBar";
-import { TerminalPanel } from "./plugins/terminal/TerminalPanel";
+import { TerminalPanel } from "./components/terminal/TerminalPanel";
 import { Tooltip } from "./components/Tooltip";
 import { UnsavedDialog } from "./components/UnsavedDialog";
 import { api } from "./lib/api";
@@ -147,6 +147,30 @@ function dialogCopy(action: PendingAction) {
   };
 }
 
+function DocumentLanguageStatus({
+  tab,
+  label,
+  onChange,
+  onNotice,
+}: {
+  tab: EditorTab | null;
+  label: string;
+  onChange: (projectId: string) => void;
+  onNotice: (message: string) => void;
+}) {
+  const python = useBuiltinFeature("pythonEnabled", false);
+  return python && tab && python.matches(tab.name) && !tab.projectId.startsWith("external:") ? (
+    <python.Status
+      key={tab.projectId}
+      projectId={tab.projectId}
+      onChange={onChange}
+      onNotice={onNotice}
+    />
+  ) : (
+    <span>{label}</span>
+  );
+}
+
 export default function App() {
   const language = useLanguage();
   useAutoHideScrollbars();
@@ -207,8 +231,7 @@ export default function App() {
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [symbolRefreshToken, setSymbolRefreshToken] = useState(0);
   const [terminalOpen, setTerminalOpen] = useState(false);
-  const [terminalSessionsActive, setTerminalSessionsActive] = useState(false);
-  const gitOpen = preferences.gitEnabled && sidebarView === "git";
+  const gitOpen = sidebarView === "git";
   const [gitSidebar, setGitSidebar] = useState<HTMLDivElement | null>(null);
   const [gitMounted, setGitMounted] = useState(false);
   const [gitPreload, setGitPreload] = useState<{ id: string; root: string } | null>(null);
@@ -220,8 +243,6 @@ export default function App() {
   const fileOperationBusyRef = useRef(false);
   const closingTabsRef = useRef(false);
   const gitOperationBusyRef = useRef(false);
-  const pendingGitOperations = useRef(new Set<Promise<void>>());
-  const stoppingGitRef = useRef(false);
   const gitLockedRootsRef = useRef(new Set<string>());
   const [gitLockedRoots, setGitLockedRoots] = useState<string[]>([]);
   const fileTreeRef = useRef<FileTreeHandle>(null);
@@ -254,11 +275,10 @@ export default function App() {
   }, []);
 
   const toggleTerminal = useCallback(() => {
-    if (preferences.terminalEnabled) setTerminalOpen((current) => !current);
-  }, [preferences.terminalEnabled]);
+    setTerminalOpen((current) => !current);
+  }, []);
 
   useEffect(() => {
-    if (!preferences.terminalEnabled) return;
     const handleTerminalKeyDown = (event: KeyboardEvent) => {
       if (
         !event.ctrlKey ||
@@ -277,7 +297,7 @@ export default function App() {
     // Capture before editor and terminal keymaps consume the shortcut.
     window.addEventListener("keydown", handleTerminalKeyDown, true);
     return () => window.removeEventListener("keydown", handleTerminalKeyDown, true);
-  }, [preferences.terminalEnabled, settingsOpen, toggleTerminal]);
+  }, [settingsOpen, toggleTerminal]);
 
   const registerEditor = useCallback((key: string, handle: CodeReaderHandle | null) => {
     if (handle) editorsRef.current.set(key, handle);
@@ -1821,26 +1841,13 @@ export default function App() {
     settingsBusyRef.current = true;
     setSettingsBusy(true);
     try {
-      stoppingGitRef.current = !next.preferences.gitEnabled;
-      if (!next.preferences.gitEnabled) await Promise.all(pendingGitOperations.current);
       await api.saveSettings(next);
-      if (!next.preferences.gitEnabled) {
-        setSidebarView((view) => (view === "git" ? "files" : view));
-        setGitMounted(false);
-        setGitPreload(null);
-        setGitProjectRoots({});
-      }
-      if (!next.preferences.terminalEnabled) {
-        setTerminalOpen(false);
-        setTerminalSessionsActive(false);
-      }
       setLanguage(next.language);
       setFonts(next.fonts);
       setColorSchemes(next.colorSchemes);
       setTheme(next.theme);
       setPreferences(next.preferences);
     } finally {
-      stoppingGitRef.current = false;
       settingsBusyRef.current = false;
       setSettingsBusy(false);
     }
@@ -1869,11 +1876,11 @@ export default function App() {
   }, [changeTheme, notify, theme]);
 
   const openGit = useCallback(() => {
-    if (!preferences.gitEnabled || settingsBusyRef.current) return;
+    if (settingsBusyRef.current) return;
     sidebarLayoutRef.current?.open();
     setGitMounted(true);
     setSidebarView("git");
-  }, [preferences.gitEnabled]);
+  }, []);
 
   const prepareGitOperation: PrepareGitOperation = useCallback(
     async (root, request, pathHint) => {
@@ -1945,35 +1952,6 @@ export default function App() {
     [flushFsChanges, refreshFiles, reloadFiles, gitBlocksPath, isTabDirty],
   );
 
-  const prepareEnabledGitOperation: PrepareGitOperation = useCallback(
-    async (root, request, pathHint) => {
-      if (stoppingGitRef.current || !preferences.gitEnabled)
-        throw new Error(t("Git 操作暂不可用。"));
-      let release!: () => void;
-      const done = new Promise<void>((resolve) => (release = resolve));
-      const pending = pendingGitOperations.current;
-      pending.add(done);
-      const finish = () => {
-        pending.delete(done);
-        release();
-      };
-      try {
-        const settle = await prepareGitOperation(root, request, pathHint);
-        return async (outcome) => {
-          try {
-            await settle(outcome);
-          } finally {
-            finish();
-          }
-        };
-      } catch (error) {
-        finish();
-        throw error;
-      }
-    },
-    [preferences.gitEnabled, prepareGitOperation],
-  );
-
   const openGitFile = useCallback(
     (root: string, path: string) => {
       void (async () => {
@@ -2008,7 +1986,6 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (!preferences.gitEnabled) return;
     const listener = (event: KeyboardEvent) => {
       if (
         (isMac ? event.metaKey : event.ctrlKey) &&
@@ -2021,13 +1998,12 @@ export default function App() {
     };
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
-  }, [isMac, openGit, preferences.gitEnabled]);
+  }, [isMac, openGit]);
 
   const snapshot = loadState.status === "ready" ? loadState.snapshot : null;
   const defaultGitProject = snapshot?.projects.find(({ id }) => id === snapshot.activeProjectId);
   useEffect(() => {
     if (
-      !preferences.gitEnabled ||
       !defaultGitProject ||
       gitOpen ||
       gitProjectRoots[defaultGitProject.id] === defaultGitProject.root
@@ -2045,13 +2021,7 @@ export default function App() {
     }
     const task = window.setTimeout(preload, 300);
     return () => window.clearTimeout(task);
-  }, [
-    defaultGitProject?.id,
-    defaultGitProject?.root,
-    gitOpen,
-    gitProjectRoots,
-    preferences.gitEnabled,
-  ]);
+  }, [defaultGitProject?.id, defaultGitProject?.root, gitOpen, gitProjectRoots]);
 
   const currentProject =
     snapshot?.projects.find(
@@ -2059,7 +2029,7 @@ export default function App() {
         project.id ===
         (gitOpen ? snapshot.activeProjectId : (activeTab?.projectId ?? snapshot.activeProjectId)),
     ) ?? null;
-  const currentBranch = useProjectBranch(preferences.gitEnabled ? currentProject : null);
+  const currentBranch = useProjectBranch(currentProject);
 
   useEffect(() => {
     if (!gitOpen || !currentProject) return;
@@ -2109,8 +2079,6 @@ export default function App() {
       canGoForward: navigationHistory.forward > 0,
       splitOpen,
       terminalOpen,
-      terminalEnabled: preferences.terminalEnabled,
-      gitEnabled: preferences.gitEnabled,
       sidebarView,
       theme,
       autoSave: preferences.autoSave,
@@ -2135,8 +2103,6 @@ export default function App() {
       navigationHistory.forward,
       splitOpen,
       terminalOpen,
-      preferences.terminalEnabled,
-      preferences.gitEnabled,
       sidebarView,
       theme,
       preferences.autoSave,
@@ -2346,7 +2312,7 @@ export default function App() {
     </Fragment>
   );
 
-  return (
+  const workspace = (
     <div className="app-shell">
       <Tooltip />
       {dropHint && (
@@ -2438,17 +2404,15 @@ export default function App() {
             >
               <Boxes size={17} />
             </button>
-            {preferences.gitEnabled && (
-              <button
-                className={`rail-button ${gitOpen ? "is-active" : ""}`}
-                onClick={openGit}
-                aria-label={t("Git 管理")}
-                aria-pressed={gitOpen}
-                data-tooltip={t("Git 管理（{0}）", shortcut("Shift+G"))}
-              >
-                <GitBranch size={17} />
-              </button>
-            )}
+            <button
+              className={`rail-button ${gitOpen ? "is-active" : ""}`}
+              onClick={openGit}
+              aria-label={t("Git 管理")}
+              aria-pressed={gitOpen}
+              data-tooltip={t("Git 管理（{0}）", shortcut("Shift+G"))}
+            >
+              <GitBranch size={17} />
+            </button>
             <div className="sidebar-rail-actions">
               <button
                 className="rail-button"
@@ -2486,7 +2450,6 @@ export default function App() {
                 activeProjectId={snapshot?.activeProjectId ?? null}
                 activeFilePath={activeTab?.path ?? null}
                 active={sidebarView === "files"}
-                gitEnabled={preferences.gitEnabled}
                 refresh={treeRefresh}
                 initialOpenProjects={initialSession.tree.openProjects}
                 initialExpandedDirectories={initialSession.tree.expandedDirectories}
@@ -2585,7 +2548,7 @@ export default function App() {
               );
             })}
           </div>
-          {preferences.gitEnabled && gitMounted && (
+          {gitMounted && (
             <div className="document-panel git-main-panel" hidden={!gitOpen}>
               <Suspense
                 fallback={
@@ -2603,30 +2566,25 @@ export default function App() {
                     onSelectProject={handleOpenProject}
                     active={gitOpen && project?.id === currentProject?.id}
                     preload={project?.id === gitPreload?.id && project?.root === gitPreload?.root}
-                    prepareOperation={prepareEnabledGitOperation}
+                    prepareOperation={prepareGitOperation}
                     onOpenFile={openGitFile}
-                    onOpenTerminal={
-                      preferences.terminalEnabled ? () => setTerminalOpen(true) : undefined
-                    }
+                    onOpenTerminal={() => setTerminalOpen(true)}
                     onNotice={notify}
                   />
                 ))}
               </Suspense>
             </div>
           )}
-          {preferences.terminalEnabled && (
-            <TerminalPanel
-              open={terminalOpen}
-              project={currentProject}
-              theme={resolvedTheme}
-              fontFamily={fontStack(fonts.terminal, "terminal")}
-              colorScheme={colorSchemes[resolvedTheme]}
-              preferences={preferences}
-              onHide={() => setTerminalOpen(false)}
-              onNotice={notify}
-              onActiveSessionsChange={setTerminalSessionsActive}
-            />
-          )}
+          <TerminalPanel
+            open={terminalOpen}
+            project={currentProject}
+            theme={resolvedTheme}
+            fontFamily={fontStack(fonts.terminal, "terminal")}
+            colorScheme={colorSchemes[resolvedTheme]}
+            preferences={preferences}
+            onHide={() => setTerminalOpen(false)}
+            onNotice={notify}
+          />
           <footer className="statusbar" hidden={!preferences.showStatusBar}>
             <div className="status-left">
               {editorStatus?.readOnly && <span className="readonly-badge">{t("只读")}</span>}
@@ -2641,20 +2599,14 @@ export default function App() {
                 <span className="status-warning">{t("正在请求符号服务…")}</span>
               ) : editorStatus ? (
                 <>
-                  {preferences.showLanguage &&
-                    (preferences.pythonEnabled &&
-                    activeTab &&
-                    isPythonFile(activeTab.name) &&
-                    !activeTab.projectId.startsWith("external:") ? (
-                      <PythonEnvironmentSelect
-                        key={activeTab.projectId}
-                        projectId={activeTab.projectId}
-                        onChange={refreshPython}
-                        onNotice={notify}
-                      />
-                    ) : (
-                      <span>{editorStatus.language}</span>
-                    ))}
+                  {preferences.showLanguage && (
+                    <DocumentLanguageStatus
+                      tab={activeTab}
+                      label={editorStatus.language}
+                      onChange={refreshPython}
+                      onNotice={notify}
+                    />
+                  )}
                   {preferences.showEncoding && <span>{editorStatus.encoding}</span>}
                   {editorStatus.mode !== "normal" && (
                     <span className="status-warning">{t("大文件纯文本模式")}</span>
@@ -2665,7 +2617,7 @@ export default function App() {
               )}
             </div>
             <div className="status-right">
-              {preferences.terminalEnabled && preferences.showTerminalButton && (
+              {preferences.showTerminalButton && (
                 <button
                   className="status-terminal"
                   onClick={toggleTerminal}
@@ -2691,7 +2643,6 @@ export default function App() {
         <SettingsDialog
           settings={{ language, fonts, colorSchemes, theme, preferences }}
           isMac={isMac}
-          terminalSessionsActive={terminalSessionsActive}
           onClose={() => setSettingsOpen(false)}
           onSave={async (next, layout) => {
             await persistSettings(next);
@@ -2758,4 +2709,5 @@ export default function App() {
       )}
     </div>
   );
+  return <PluginProvider preferences={preferences}>{workspace}</PluginProvider>;
 }

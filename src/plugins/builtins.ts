@@ -2,6 +2,7 @@ export const BUILTIN_PLUGIN_CATEGORIES = {
   markdown: "Markdown",
   languages: "语言支持",
   tools: "开发工具",
+  editor: "编辑器",
 } as const;
 
 export type BuiltinPluginCategory = keyof typeof BUILTIN_PLUGIN_CATEGORIES;
@@ -38,16 +39,10 @@ export const BUILTIN_PLUGINS = [
     description: "启用 JavaScript、TypeScript、JSX 和 TSX 的语义补全、诊断和导航。",
   },
   {
-    key: "terminalEnabled",
-    pluginCategory: "tools",
-    label: "集成终端",
-    description: "在 Gaze 中使用终端面板和终端快捷键。",
-  },
-  {
-    key: "gitEnabled",
-    pluginCategory: "tools",
-    label: "Git 集成",
-    description: "启用 Git 工作区、文件树状态和编辑器变更标记。",
+    key: "showMinimap",
+    pluginCategory: "editor",
+    label: "内容缩略图",
+    description: "在右侧显示语法配色缩略图，支持点击、拖动定位和悬停代码预览。",
   },
   {
     key: "aiCompletionEnabled",

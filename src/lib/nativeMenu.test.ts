@@ -16,8 +16,6 @@ const state: NativeMenuState = {
   canGoForward: false,
   splitOpen: false,
   terminalOpen: false,
-  terminalEnabled: true,
-  gitEnabled: true,
   sidebarView: "files",
   theme: "system",
   autoSave: true,

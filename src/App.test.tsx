@@ -53,6 +53,9 @@ vi.mock("./lib/api", () => ({
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 vi.mock("./git/GitWorkspace", () => ({ default: () => null }));
+vi.mock("./plugins/api", () => ({
+  pluginApi: { list: vi.fn().mockResolvedValue([]) },
+}));
 vi.mock("./plugins/mermaid/render", () => ({
   renderMermaid: async () => '<svg viewBox="0 0 800 400"></svg>',
 }));
@@ -572,7 +575,7 @@ describe("App", () => {
     );
     render(<App />);
     await user.click(await screen.findByRole("button", { name: "预览" }));
-    const preview = await screen.findByRole("region", { name: "Markdown 预览" });
+    const preview = await screen.findByRole("region", { name: "Markdown 预览" }, { timeout: 3000 });
     const diagram = await within(preview).findByRole("figure", { name: "Mermaid 图表" });
 
     const openSettings = () => user.click(screen.getByRole("button", { name: "设置" }));

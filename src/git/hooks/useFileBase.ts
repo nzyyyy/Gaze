@@ -6,20 +6,15 @@ import { gitApi } from "../../lib/api";
  * The file's committed (HEAD) text, used to paint local changes in the editor.
  * `null` means "show no change markers": not a repository, binary, or unavailable.
  */
-export function useFileBase(
-  projectId: string,
-  path: string,
-  active = true,
-  enabled = true,
-): string | null {
+export function useFileBase(projectId: string, path: string, active = true): string | null {
   const [base, setBase] = useState<string | null>(null);
 
   useEffect(() => {
     setBase(null);
-  }, [projectId, path, enabled]);
+  }, [projectId, path]);
 
   useEffect(() => {
-    if (!active || !enabled) return;
+    if (!active) return;
     let disposed = false;
     let timer: number | undefined;
     const load = async () => {
@@ -53,7 +48,7 @@ export function useFileBase(
       window.clearTimeout(timer);
       stop?.();
     };
-  }, [projectId, path, active, enabled]);
+  }, [projectId, path, active]);
 
-  return enabled ? base : null;
+  return base;
 }

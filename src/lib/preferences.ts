@@ -15,7 +15,6 @@ export interface Preferences extends Record<BuiltinPluginKey, boolean> {
   tabSize: number;
   wordWrap: boolean;
   lineNumbers: boolean;
-  showMinimap: boolean;
   highlightActiveLine: boolean;
   codeFolding: boolean;
   matchBrackets: boolean;
@@ -81,10 +80,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   mermaidEnabled: true,
   markdownInsertEnabled: true,
   markdownMathEnabled: true,
-  terminalEnabled: true,
   pythonEnabled: true,
   typescriptEnabled: true,
-  gitEnabled: true,
   aiCompletionEnabled: false,
   aiCompletion: { protocol: "responses", url: "", model: "", apiKey: "" },
 };
@@ -176,13 +173,6 @@ export const PREFERENCE_FIELDS: PreferenceField[] = [
     category: "editor",
     label: "显示行号",
     description: "在编辑器左侧显示行号。",
-  },
-  {
-    key: "showMinimap",
-    type: "boolean",
-    category: "editor",
-    label: "内容缩略图",
-    description: "在右侧显示语法配色缩略图，支持点击、拖动定位和悬停代码预览。",
   },
   {
     key: "highlightActiveLine",

@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Eye, EyeOff, LoaderCircle, Search, X } from 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { Select } from "./Select";
+import { ExternalPlugins } from "./ExternalPlugins";
 
 import mapleLicense from "../assets/fonts/LICENSE.txt?raw";
 import {
@@ -34,7 +35,6 @@ import {
 interface SettingsDialogProps {
   settings: AppSettings;
   isMac?: boolean;
-  terminalSessionsActive?: boolean;
   onSave: (settings: AppSettings, layout: Layout) => Promise<void>;
   onClose: () => void;
 }
@@ -85,13 +85,7 @@ const LAYOUT_FIELDS = [
   { key: "outputHeight", label: "Git 输出面板高度", ...LAYOUT_SIZE_LIMITS.outputHeight },
 ] as const;
 
-export function SettingsDialog({
-  settings,
-  isMac = false,
-  terminalSessionsActive = false,
-  onSave,
-  onClose,
-}: SettingsDialogProps) {
+export function SettingsDialog({ settings, isMac = false, onSave, onClose }: SettingsDialogProps) {
   useLanguage();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -112,11 +106,6 @@ export function SettingsDialog({
   const [aiTest, setAiTest] = useState<{ ok: boolean; message: string } | null>(null);
   const aiConfig = draft.preferences.aiCompletion;
   const manualShortcut = isMac ? "⌘⇧↩" : "Ctrl+Shift+Enter";
-  const endingTerminal =
-    terminalSessionsActive &&
-    settings.preferences.terminalEnabled &&
-    !draft.preferences.terminalEnabled;
-  const disablingGit = settings.preferences.gitEnabled && !draft.preferences.gitEnabled;
   const search = query.trim().toLowerCase();
   const matches = (id: SettingsCategory, text: string) =>
     search
@@ -206,6 +195,7 @@ export function SettingsDialog({
             ))}
           </div>
         )}
+        {id === "plugins" && !search && pluginFilter === "all" && <ExternalPlugins />}
         {locale && (
           <SettingRow id="language" label={t("语言")} description={t("选择界面语言，保存后生效。")}>
             <Select<Language>
@@ -707,11 +697,6 @@ export function SettingsDialog({
             {error}
           </p>
         )}
-        {endingTerminal && (
-          <p className="settings-error" id="settings-terminal-warning">
-            {t("保存后将结束所有终端会话，其中运行的任务可能中断。")}
-          </p>
-        )}
         <footer className="settings-actions">
           <button
             type="button"
@@ -737,16 +722,9 @@ export function SettingsDialog({
           <button type="button" className="button" onClick={onClose} disabled={busy}>
             {t("取消")}
           </button>
-          <button
-            type="submit"
-            className="button button-primary"
-            disabled={busy || testingAi}
-            aria-describedby={endingTerminal ? "settings-terminal-warning" : undefined}
-          >
+          <button type="submit" className="button button-primary" disabled={busy || testingAi}>
             {busy && <LoaderCircle size={13} className="spin" />}
-            {busy
-              ? t(disablingGit ? "正在停用 Git…" : "保存中…")
-              : t(endingTerminal ? "保存并结束终端会话" : "保存设置")}
+            {t(busy ? "保存中…" : "保存设置")}
           </button>
         </footer>
       </form>

@@ -4372,3 +4372,25 @@ button:focus-visible,
 .file-operation-dialog .dialog-error {
   white-space: pre-wrap;
 }
+
+.settings-external-plugins .setting-copy h4 {
+  margin: 0;
+  font-size: inherit;
+  overflow-wrap: anywhere;
+}
+
+.editor-plugin-commands {
+  align-self: flex-start;
+  flex: 0 0 auto;
+  margin: 4px 12px;
+}
+
+.editor-plugin-commands .app-select-trigger {
+  min-height: 24px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.markdown-plugin-output {
+  overflow-x: auto;
+}

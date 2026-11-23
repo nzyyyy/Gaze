@@ -54,6 +54,8 @@ import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
 import type { RecoveryRecord } from "../lib/api";
 import { setLanguage } from "../lib/i18n";
 import { EditorState, StateEffect } from "@codemirror/state";
+import { pluginApi } from "../plugins/api";
+import { PluginProvider } from "../plugins/runtime";
 
 const tab: EditorTab = {
   key: "p1\u0000src/a.ts",
@@ -94,6 +96,7 @@ function renderReader(
     initialView?: { line: number; character: number; scrollTop: number };
     recovery?: RecoveryRecord | null;
     preferences?: Preferences;
+    withPlugins?: boolean;
     onGoToDefinition?: (position: { line: number; character: number }) => void;
   } = {},
 ) {
@@ -132,7 +135,13 @@ function renderReader(
     onDirtyChange,
     onSaved,
   };
-  return { ...render(<CodeReader {...props} />), ref, onDirtyChange, onSaved, onStatus, props };
+  const reader = <CodeReader {...props} />;
+  const tree = overrides.withPlugins ? (
+    <PluginProvider preferences={DEFAULT_PREFERENCES}>{reader}</PluginProvider>
+  ) : (
+    reader
+  );
+  return { ...render(tree), ref, onDirtyChange, onSaved, onStatus, props };
 }
 
 async function editorContent(): Promise<HTMLElement> {
@@ -694,7 +703,7 @@ describe("CodeReader editing", () => {
     try {
       await user.click(screen.getByRole("button", { name: "预览" }));
       expect(await screen.findByRole("table")).toBeInTheDocument();
-      expect(container.querySelector(".katex")).not.toBeNull();
+      await waitFor(() => expect(container.querySelector(".katex")).not.toBeNull());
       const preview = screen.getByRole("region", { name: "Markdown 预览" });
       expect(within(preview).getByText("After")).toBeInTheDocument();
       const diagram = await within(preview).findByRole(
@@ -1311,4 +1320,71 @@ describe("CodeReader editing", () => {
     expect(ref.current!.isDirty()).toBe(false);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
+});
+
+describe("editor plugin commands", () => {
+  it.each(["unchanged", "edit", "selection", "tab switch"])(
+    "applies a single undoable transaction only when the editor snapshot stays unchanged (%s)",
+    async (scenario) => {
+      const installed = {
+        manifest: {
+          id: "example.text-tools",
+          name: "Text Tools",
+          version: "1",
+          apiVersion: 1,
+          runtime: "javaScript" as const,
+          entry: "plugin.js",
+          contributes: [{ kind: "command" as const, id: "upper", title: "Uppercase" }],
+        },
+        revision: "test-version",
+        enabled: true,
+      };
+      const list = vi.spyOn(pluginApi, "list").mockResolvedValue([installed]);
+      let finish!: (value: { kind: "replace"; text: string }) => void;
+      const run = vi.spyOn(pluginApi, "run").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      try {
+        const { rerender, props } = renderReader({ content: "abc def", withPlugins: true });
+        const view = EditorView.findFromDOM(await editorContent())!;
+        if (scenario === "unchanged") {
+          act(() => view.dispatch({ changes: { from: 3, insert: "!" }, userEvent: "input.type" }));
+        }
+        act(() => view.dispatch({ selection: { anchor: 0, head: 3 } }));
+        fireEvent.click(await screen.findByRole("combobox", { name: "插件命令" }));
+        fireEvent.click(screen.getByRole("option", { name: "Uppercase, Text Tools" }));
+        expect(run).toHaveBeenCalledOnce();
+        expect(run.mock.calls[0]?.[1]).toMatchObject({ kind: "command", id: "upper", text: "abc" });
+        const signal = run.mock.calls[0]![2];
+        if (scenario === "edit") {
+          act(() => view.dispatch({ changes: { from: 7, insert: "!" } }));
+        } else if (scenario === "selection") {
+          act(() => view.dispatch({ selection: { anchor: 4, head: 7 } }));
+        } else if (scenario === "tab switch") {
+          rerender(
+            <PluginProvider preferences={DEFAULT_PREFERENCES}>
+              <CodeReader {...props} active={false} />
+            </PluginProvider>,
+          );
+        }
+        await act(async () => finish({ kind: "replace", text: "ABC" }));
+        if (scenario === "unchanged") {
+          expect(view.state.doc.toString()).toBe("ABC! def");
+          act(() => {
+            undo(view);
+          });
+          expect(view.state.doc.toString()).toBe("abc! def");
+        } else {
+          expect(signal.aborted).toBe(true);
+          expect(view.state.doc.toString()).toBe(scenario === "edit" ? "abc def!" : "abc def");
+        }
+      } finally {
+        list.mockRestore();
+        run.mockRestore();
+      }
+    },
+  );
 });

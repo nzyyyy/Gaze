@@ -1,0 +1,9 @@
+{
+  "id": "example.native-command",
+  "name": "Native Text Tools",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "runtime": "native",
+  "entry": "plugin.py",
+  "contributes": [{ "kind": "command", "id": "sort-lines", "title": "Sort selected lines" }]
+}

@@ -13,7 +13,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ComponentType,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -46,8 +45,9 @@ import yaml from "refractor/lang/yaml";
 import { api } from "../lib/api";
 import { errorMessage } from "../lib/utils";
 import type { MarkdownPreviewRequest } from "./CodeReader";
-import { MermaidDiagram } from "../plugins/mermaid/MermaidDiagram";
-import { markdownMath } from "../plugins/markdown-math";
+import { useMarkdownRenderers } from "../plugins/runtime";
+import { ExternalCodeBlock } from "./ExternalCodeBlock";
+import { useMarkdownMath } from "../plugins/markdown-math";
 
 const HEADING_PREFIX = "gaze-markdown-";
 const MAX_MARKDOWN_IMAGES = 50;
@@ -66,8 +66,6 @@ const rehypePlugins: NonNullable<React.ComponentProps<typeof Markdown>["rehypePl
   rehypeSanitize,
   [rehypeSlug, { prefix: HEADING_PREFIX }],
 ];
-const remarkWithMath = [...remarkPlugins, markdownMath.remark];
-const rehypeWithMath = [...rehypePlugins, markdownMath.rehype];
 
 for (const language of [
   bash,
@@ -115,11 +113,7 @@ function childText(node: ReactNode): string {
   return "";
 }
 
-type CodeBlockRenderer = ComponentType<{ code: string }>;
-const noCodeBlockRenderers = new Map<string, CodeBlockRenderer>();
-const mermaidCodeBlockRenderers = new Map<string, CodeBlockRenderer>([["mermaid", MermaidDiagram]]);
-const CodeBlockRenderers =
-  createContext<ReadonlyMap<string, CodeBlockRenderer>>(noCodeBlockRenderers);
+const CodeBlockRenderers = createContext<ReturnType<typeof useMarkdownRenderers> | null>(null);
 
 function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
   const renderers = useContext(CodeBlockRenderers);
@@ -128,19 +122,29 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
   const className = code?.props.className ?? "";
   const text = code ? childText(code.props.children) : childText(children);
   const language = /(?:^|\s)language-([^\s]+)/.exec(className)?.[1];
-  const Renderer = language ? renderers.get(language) : undefined;
+  const renderer = language ? renderers?.get(language.toLowerCase()) : undefined;
   const highlighted = useMemo(
     () =>
-      language && !Renderer && text.length <= MAX_HIGHLIGHT_CHARS && refractor.registered(language)
+      language && !renderer && text.length <= MAX_HIGHLIGHT_CHARS && refractor.registered(language)
         ? (refractor.highlight(text, language) as unknown as HighlightNode[])
         : null,
-    [language, Renderer, text],
+    [language, renderer, text],
   );
-  if (Renderer) return <Renderer code={text.replace(/\n$/, "")} />;
-  return (
+  const source = (
     <pre>
       <code className={className}>{highlighted ? highlightNodes(highlighted) : text}</code>
     </pre>
+  );
+  if (!renderer) return source;
+  const content = text.replace(/\n$/, "");
+  if ("component" in renderer) return <renderer.component code={content} />;
+  return (
+    <ExternalCodeBlock
+      key={renderer.revision}
+      renderer={renderer}
+      code={content}
+      fallback={source}
+    />
   );
 }
 
@@ -438,6 +442,8 @@ export default function MarkdownPreview({
 }: MarkdownPreviewProps) {
   useLanguage();
   const rootRef = useRef<HTMLDivElement>(null);
+  const renderers = useMarkdownRenderers(mermaidEnabled);
+  const math = useMarkdownMath(markdownMathEnabled);
   const scrollToFragment = useCallback(
     (fragment: string) => {
       const root = rootRef.current;
@@ -476,14 +482,12 @@ export default function MarkdownPreview({
         aria-label={t("Markdown 预览")}
         tabIndex={0}
       >
-        <CodeBlockRenderers
-          value={mermaidEnabled ? mermaidCodeBlockRenderers : noCodeBlockRenderers}
-        >
+        <CodeBlockRenderers value={renderers}>
           <MarkdownBody
             content={content}
             projectId={projectId}
             documentPath={documentPath}
-            markdownMathEnabled={markdownMathEnabled}
+            math={math}
             onOpenFile={onOpenFile}
             onNotice={onNotice}
             scrollToFragment={scrollToFragment}
@@ -500,17 +504,20 @@ const MarkdownBody = memo(function MarkdownBody({
   content,
   projectId,
   documentPath,
-  markdownMathEnabled,
+  math,
   onOpenFile,
   onNotice,
   scrollToFragment,
   remoteTrusted,
   onTrustRemote,
-}: Omit<MarkdownPreviewProps, "active" | "mermaidEnabled" | "request"> & {
+}: Omit<MarkdownPreviewProps, "active" | "mermaidEnabled" | "markdownMathEnabled" | "request"> & {
+  math?: ReturnType<typeof useMarkdownMath>;
   scrollToFragment: (fragment: string) => void;
   remoteTrusted: boolean;
   onTrustRemote: () => void;
 }) {
+  const remark = useMemo(() => (math ? [...remarkPlugins, math.remark] : remarkPlugins), [math]);
+  const rehype = useMemo(() => (math ? [...rehypePlugins, math.rehype] : rehypePlugins), [math]);
   let imageIndex = 0;
   const components: Components = {
     img: ({ src, alt, title }) => {
@@ -563,8 +570,8 @@ const MarkdownBody = memo(function MarkdownBody({
   return (
     <article className="markdown-body">
       <Markdown
-        remarkPlugins={markdownMathEnabled ? remarkWithMath : remarkPlugins}
-        rehypePlugins={markdownMathEnabled ? rehypeWithMath : rehypePlugins}
+        remarkPlugins={remark}
+        rehypePlugins={rehype}
         components={components}
         urlTransform={safeUrl}
       >

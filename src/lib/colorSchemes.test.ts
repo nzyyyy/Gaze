@@ -5,7 +5,7 @@ import {
   PALETTES,
   type ColorScheme,
 } from "./colorSchemes";
-import { terminalTheme } from "../plugins/terminal/terminalTabs";
+import { terminalTheme } from "../components/terminal/terminalTabs";
 
 function luminance(hex: string) {
   const [r, g, b] = hex

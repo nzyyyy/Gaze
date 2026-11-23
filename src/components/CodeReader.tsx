@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useId,
   useRef,
   useState,
   type Ref,
@@ -12,7 +13,13 @@ import {
 import { flushSync } from "react-dom";
 import { closeBrackets, closeBracketsKeymap, closeCompletion } from "@codemirror/autocomplete";
 import { setDiagnostics } from "@codemirror/lint";
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+  indentWithTab,
+  isolateHistory,
+} from "@codemirror/commands";
 import {
   bracketMatching,
   indentUnit,
@@ -54,17 +61,16 @@ import { codeHover } from "../lib/hover";
 import { definitionLink } from "../lib/definitionLink";
 import { detectIndentation } from "../lib/indentation";
 import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
-import { minimap } from "../lib/minimap";
 import { rainbowBrackets } from "../lib/rainbowBrackets";
 import type { EditorViewState } from "../lib/session";
+import { isMarkdownFile, matchLanguage } from "../lib/language";
 import {
-  isJavaScriptOrTypeScriptFile,
-  isMarkdownFile,
-  isPythonFile,
-  matchLanguage,
-} from "../lib/language";
-import { markdownInsert, markdownSlashQuery } from "../plugins/markdown-insert";
-import { aiInlineCompletion } from "../plugins/ai-completion";
+  useBuiltinFeature,
+  useEditorCompletion,
+  usePlugins,
+  useSemanticAvailability,
+} from "../plugins/runtime";
+import { Select } from "./Select";
 import type {
   EditorPane,
   EditorStatus,
@@ -434,7 +440,6 @@ function preferenceExtensions(
     ),
   ];
   if (preferences.lineNumbers) extensions.push(lineNumbers());
-  if (preferences.showMinimap) extensions.push(minimap);
   if (preferences.highlightActiveLine)
     extensions.push(highlightActiveLine(), highlightActiveLineGutter());
   if (preferences.indentWithTab && editable) extensions.push(keymap.of([indentWithTab]));
@@ -486,11 +491,11 @@ export function CodeReader({
   const diagnosticsCompartment = useRef(new Compartment());
   const languageToolsCompartment = useRef(new Compartment());
   const aiCompletionCompartment = useRef(new Compartment());
-  const gitGutterCompartment = useRef(new Compartment());
   const previousPythonRevision = useRef(pythonRevision);
   const localeCompartment = useRef(new Compartment());
   const themeCompartment = useRef(new Compartment());
   const preferencesCompartment = useRef(new Compartment());
+  const minimapCompartment = useRef(new Compartment());
   const preferencesRef = useRef(preferences);
   preferencesRef.current = preferences;
   const highlightCompartment = useRef(new Compartment());
@@ -528,7 +533,7 @@ export function CodeReader({
     status: "clean",
   }));
   const scheduleAutoSaveRef = useRef<() => void>(() => undefined);
-  const gitBase = useFileBase(tab.projectId, tab.path, active, preferences.gitEnabled);
+  const gitBase = useFileBase(tab.projectId, tab.path, active);
   const gitBaseRef = useRef<string | null>(null);
   const gitDiffTimerRef = useRef<number | null>(null);
   const gitDiffRequestRef = useRef(0);
@@ -551,12 +556,25 @@ export function CodeReader({
   const previewTimerRef = useRef<number | null>(null);
   const [previewNotice, setPreviewNotice] = useState<string | null>(null);
   const markdown = isMarkdownFile(tab.name);
-  const quickInsertEnabled = markdown && preferences.markdownInsertEnabled;
-  const semanticEnabled =
-    (!isPythonFile(tab.name) || preferences.pythonEnabled) &&
-    (!isJavaScriptOrTypeScriptFile(tab.name) || preferences.typescriptEnabled);
+  const editorCompletion = useEditorCompletion(
+    markdown ? "Markdown" : "",
+    preferences.markdownInsertEnabled,
+  );
+  const plugins = usePlugins();
+  const pluginMenuId = useId();
+  const pluginRequest = useRef<AbortController | null>(null);
+  const semanticEnabled = useSemanticAvailability(tab.name, preferences);
+  const inlineCompletion = useBuiltinFeature(
+    "aiCompletionEnabled",
+    preferences.aiCompletionEnabled,
+  );
+  const minimap = useBuiltinFeature("showMinimap", preferences.showMinimap);
   const previewVisible =
     preview && markdown && loaded?.content.kind === "text" && loaded.content.mode === "normal";
+  useEffect(
+    () => () => pluginRequest.current?.abort(),
+    [active, tab.key, loaded, previewVisible, gitLocked],
+  );
   const previewRef = useRef(false);
   const lastPreviewRequestRef = useRef<MarkdownPreviewRequest | null>(null);
   previewRef.current = previewVisible;
@@ -1067,7 +1085,7 @@ export function CodeReader({
       extensions: [
         localeCompartment.current.of([]),
         diagnosticsCompartment.current.of([]),
-        gitGutterCompartment.current.of([]),
+        gitChangeGutter((block, element) => gitSelectRef.current(block, element)),
         initialExtensions(
           theme,
           content.editable,
@@ -1117,6 +1135,7 @@ export function CodeReader({
           : [],
         languageToolsCompartment.current.of([]),
         aiCompletionCompartment.current.of([]),
+        minimapCompartment.current.of([]),
         preferencesCompartment.current.of(
           preferenceExtensions(
             preferencesRef.current,
@@ -1130,6 +1149,11 @@ export function CodeReader({
             ? Prec.highest([EditorState.readOnly.of(true), EditorView.editable.of(false)])
             : [],
         ),
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged || !update.startState.selection.eq(update.state.selection)) {
+            pluginRequest.current?.abort();
+          }
+        }),
         EditorState.transactionFilter.of((transaction) =>
           transaction.docChanged && (operationLockedRef.current || gitLockedRef.current)
             ? []
@@ -1210,23 +1234,6 @@ export function CodeReader({
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
-    view.dispatch({
-      effects: gitGutterCompartment.current.reconfigure(
-        preferences.gitEnabled
-          ? gitChangeGutter((block, element) => gitSelectRef.current(block, element))
-          : [],
-      ),
-    });
-    if (!preferences.gitEnabled) {
-      gitDiffRequestRef.current += 1;
-      setGitBlocks([]);
-      setChangePopup(null);
-    }
-  }, [preferences.gitEnabled, loaded]);
-
-  useEffect(() => {
-    const view = viewRef.current;
-    if (!view) return;
     if (gitDiffTimerRef.current !== null) {
       window.clearTimeout(gitDiffTimerRef.current);
       gitDiffTimerRef.current = null;
@@ -1290,6 +1297,10 @@ export function CodeReader({
   }, [preferences, loaded]);
 
   useEffect(() => {
+    viewRef.current?.dispatch({ effects: minimapCompartment.current.reconfigure(minimap ?? []) });
+  }, [loaded, minimap]);
+
+  useEffect(() => {
     const view = viewRef.current;
     const document = documentRef.current;
     if (!view || document?.mode !== "normal") return;
@@ -1301,41 +1312,29 @@ export function CodeReader({
           ? codeCompletion(
               tab.projectId,
               tab.path,
-              quickInsertEnabled ? markdownInsert : undefined,
+              editorCompletion?.contribution,
               semanticEnabled,
-              preferences.aiCompletionEnabled,
+              Boolean(inlineCompletion),
             )
           : [],
       ]),
     });
-  }, [
-    loaded,
-    tab.projectId,
-    tab.path,
-    quickInsertEnabled,
-    semanticEnabled,
-    preferences.aiCompletionEnabled,
-  ]);
+  }, [loaded, tab.projectId, tab.path, editorCompletion, semanticEnabled, inlineCompletion]);
 
   useEffect(() => {
     const view = viewRef.current;
     const document = documentRef.current;
     if (!view || document?.mode !== "normal") return;
-    const enabled =
-      active &&
-      !previewVisible &&
-      !gitLocked &&
-      document.editable &&
-      preferences.aiCompletionEnabled;
+    const plugin =
+      active && !previewVisible && !gitLocked && document.editable ? inlineCompletion : undefined;
     view.dispatch({
       effects: aiCompletionCompartment.current.reconfigure(
-        enabled
-          ? aiInlineCompletion({
+        plugin
+          ? plugin({
               projectId: tab.projectId,
               path: tab.path,
               language: matchLanguage(markdown ? tab.name.toLowerCase() : tab.name).label,
-              reserved: (state) =>
-                quickInsertEnabled && !!markdownSlashQuery(state, state.selection.main.head),
+              reserved: (state) => editorCompletion?.reservesCompletion(state) ?? false,
               onError: (message) => onNoticeRef.current?.(message),
             })
           : [],
@@ -1350,8 +1349,8 @@ export function CodeReader({
     tab.path,
     tab.name,
     markdown,
-    quickInsertEnabled,
-    preferences.aiCompletionEnabled,
+    editorCompletion,
+    inlineCompletion,
     preferences.aiCompletion,
   ]);
 
@@ -1510,6 +1509,77 @@ export function CodeReader({
     );
   }
 
+  const runPluginCommand = async (key: string) => {
+    const command = plugins?.commands.find((item) => item.key === key);
+    const view = viewRef.current;
+    if (
+      !plugins ||
+      !command ||
+      !view ||
+      !activeRef.current ||
+      previewRef.current ||
+      view.state.readOnly ||
+      operationLockedRef.current ||
+      gitLockedRef.current
+    )
+      return;
+    const { doc, selection } = view.state;
+    const { from, to } = selection.main;
+    if (from === to || selection.ranges.length !== 1) {
+      onNoticeRef.current?.(t("请选择一段文本后运行插件命令。"));
+      return;
+    }
+    pluginRequest.current?.abort();
+    const request = new AbortController();
+    pluginRequest.current = request;
+    try {
+      const result = await plugins.run(
+        command.revision,
+        {
+          kind: "command",
+          id: command.id,
+          text: doc.sliceString(from, to),
+          language: languageLabel,
+        },
+        request.signal,
+      );
+      if (
+        result?.kind !== "replace" ||
+        request.signal.aborted ||
+        !plugins.isEnabled(command.revision)
+      )
+        return;
+      if (
+        viewRef.current !== view ||
+        !activeRef.current ||
+        previewRef.current ||
+        view.state.doc !== doc ||
+        !view.state.selection.eq(selection) ||
+        view.state.readOnly ||
+        view.compositionStarted ||
+        operationLockedRef.current ||
+        gitLockedRef.current
+      )
+        return;
+      if (result.text !== doc.sliceString(from, to)) {
+        pluginRequest.current = null;
+        view.dispatch({
+          changes: { from, to, insert: result.text },
+          selection: { anchor: from, head: from + view.state.toText(result.text).length },
+          userEvent: "input.plugin",
+          annotations: isolateHistory.of("full"),
+        });
+      }
+      view.focus();
+    } catch (error) {
+      if (!request.signal.aborted && plugins.isEnabled(command.revision)) {
+        onNoticeRef.current?.(errorMessage(error));
+      }
+    } finally {
+      if (pluginRequest.current === request) pluginRequest.current = null;
+    }
+  };
+
   const text = documentRef.current ?? loaded.content;
   return (
     <section
@@ -1565,6 +1635,24 @@ export function CodeReader({
           >
             {t("预览")}
           </button>
+        </div>
+      )}
+      {active && !previewVisible && text.editable && !!plugins?.commands.length && (
+        <div className="editor-plugin-commands">
+          <Select
+            id={pluginMenuId}
+            value=""
+            label={t("插件命令")}
+            triggerLabel={t("插件命令")}
+            commitOnTab={false}
+            disabled={gitLocked}
+            options={plugins.commands.map((command) => ({
+              value: command.key,
+              label: command.title,
+              description: command.pluginName,
+            }))}
+            onChange={(key) => void runPluginCommand(key)}
+          />
         </div>
       )}
       {previewNotice && (
@@ -1627,7 +1715,6 @@ export function CodeReader({
             projectId={tab.projectId}
             documentPath={tab.path}
             active={active}
-            mermaidEnabled={preferences.mermaidEnabled}
             markdownMathEnabled={preferences.markdownMathEnabled}
             request={previewRequest}
             onOpenFile={onOpenMarkdownFile}
@@ -1636,11 +1723,11 @@ export function CodeReader({
         </Suspense>
       )}
       <div
-        className={`editor-surface-wrap${preferences.showMinimap ? " has-minimap" : ""}`}
+        className={`editor-surface-wrap${minimap ? " has-minimap" : ""}`}
         hidden={previewVisible}
       >
         <div className="editor-surface" ref={surfaceRef} />
-        {preferences.gitEnabled && gitBlocks.length > 0 && lineCount > 1 && (
+        {gitBlocks.length > 0 && lineCount > 1 && (
           <div className="git-change-map" role="group" aria-label={t("变更位置")}>
             {gitBlocks.map((block, index) => {
               const lines = block.kind === "deleted" ? 1 : Math.max(1, block.to - block.from + 1);
@@ -1661,7 +1748,7 @@ export function CodeReader({
           </div>
         )}
       </div>
-      {preferences.gitEnabled && changePopup && (
+      {changePopup && (
         <div
           className="git-change-popover"
           role="dialog"

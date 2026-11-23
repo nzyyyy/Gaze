@@ -185,6 +185,30 @@ pnpm tauri dev
 
 ## 用户配置
 
+### 插件
+
+在「设置 → 插件 → 全部」可导入包含 `gaze-plugin.json` 的本地目录。Gaze 将清单和入口复制到应用数据目录，初次导入默认停用。启停和卸载即时生效。重新导入同一 ID 会替换安装内容并停用该版本，本机插件需重新授权。Mermaid、Markdown 快捷插入、KaTeX 数学公式、AI 行内补全、Python 语义支持、JavaScript / TypeScript 语义支持和内容缩略图随 Gaze 发布，在「设置 → 插件」中启停，保存设置后生效。缩略图沿用已有的显示偏好。终端和 Git 由 Gaze 直接提供，原有入口和快捷键始终可用。
+
+- [Text and CSV](examples/plugins/text-tools) 使用受限 JavaScript。启用后，选中文本，再从编辑器的「插件命令」选择 `Uppercase selection`。在 Markdown 预览中，可用 `csv` 围栏将第一行作为表头渲染成表格。
+- [Native Text Tools](examples/plugins/native-command) 是适用于 macOS / Linux 的本机插件示例，需要 `python3` 可从系统默认 `PATH` 找到。授权并启用后，选中多行并运行 `Sort selected lines`。Windows 本机插件使用 `.exe` 入口。
+
+#### 编写外部插件
+
+以示例清单为起点。`id` 使用 `publisher.name`，各部分以小写字母起始，后续可使用小写字母、数字或连字符。`gaze` 是保留的发布者。`name` 与 `version` 用于展示，`apiVersion` 填 `1`，`runtime` 填 `javaScript` 或 `native`。`entry` 是插件目录下的普通文件名。`contributes` 声明命令的 `id` 和 `title`，或 Markdown 渲染器的 `language`。内置渲染器的语言名保留，同一语言只能启用一个外部渲染器。
+
+受限 JS 将同步函数赋给 `globalThis.gazePlugin`。脚本可以预先打包为一个 UTF-8 `.js` 文件。它只通过函数参数和返回值与 Gaze 交换数据，在独立的 QuickJS 进程中按次执行，文件、网络、模块加载和 Tauri IPC 均不可用。本机插件由 Gaze 直接启动，读取标准输入直到 EOF，将一个 JSON 结果写到标准输出后正常退出。本机插件只声明命令，以当前系统用户权限运行，适合可信代码。
+
+| 贡献 | 请求 | 响应 |
+| --- | --- | --- |
+| 编辑器命令 | `{"kind":"command","id":"uppercase","text":"hello","language":"Plain Text"}` | `{"kind":"unchanged"}` 或 `{"kind":"replace","text":"HELLO"}` |
+| Markdown 渲染 | `{"kind":"markdown","language":"csv","code":"name\nGaze"}` | `{"kind":"text","text":"Gaze"}` 或 `{"kind":"table","headers":["name"],"rows":[["Gaze"]]}` |
+
+请求正文最大 64 KiB，响应 JSON 最大 256 KiB，表格最多 32 列和 256 行。Markdown 在代码块可见时执行，失败时展示源码。编辑器命令的替换由 Gaze 校验并写入撤销历史。
+
+#### 开发内置插件
+
+内置插件在 `src/plugins/builtins.ts` 声明启用设置，在 `src/plugins/runtime.tsx` 注册贡献。Markdown 渲染器可直接提供 React 组件，编辑器的内置补全可提供现有的 `CompletionContribution`。编辑器和预览从运行时取已启用的贡献，同类插件只需实现并注册贡献。
+
 ### 字体
 
 右上角的设置页支持系统默认、Maple Mono NF CN 和 Consolas。界面默认使用系统字体，编辑器与终端默认使用内置 Maple Mono NF CN；更改后点击“保存设置”立即生效，不会重建文件编辑器或终端会话。“恢复默认”会重置预览，保存后应用。

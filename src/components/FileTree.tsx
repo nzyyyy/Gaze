@@ -64,7 +64,6 @@ interface FileTreeProps {
   activeProjectId: string | null;
   activeFilePath: string | null;
   active: boolean;
-  gitEnabled?: boolean;
   refresh: TreeRefresh;
   initialOpenProjects?: string[];
   initialExpandedDirectories?: string[];
@@ -103,7 +102,6 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
     activeProjectId,
     activeFilePath,
     active,
-    gitEnabled = true,
     refresh,
     initialOpenProjects,
     initialExpandedDirectories,
@@ -132,7 +130,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<ReadonlySet<string>>(() => new Set());
   const selectionAnchor = useRef<string | null>(null);
-  const gitStatuses = useFileTreeGit(projects, refresh.token, active, gitEnabled);
+  const gitStatuses = useFileTreeGit(projects, refresh.token, active);
   const closeMenu = useCallback(() => setMenu(null), []);
   const [pasteBusy, setPasteBusy] = useState(false);
   const pastingRef = useRef(false);

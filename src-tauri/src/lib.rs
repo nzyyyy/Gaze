@@ -13,6 +13,7 @@ mod models;
 mod native_files;
 mod native_menu;
 mod path_index;
+mod plugins;
 mod preferences;
 mod python;
 mod recovery;
@@ -82,6 +83,11 @@ impl AppState {
             .try_init();
 
         let cache = Cache::open(&data_dir.join("gaze.sqlite3"))?;
+        app.manage(plugins::Plugins::new(
+            data_dir.join("plugins"),
+            cache.clone(),
+            std::env::current_exe()?,
+        ));
         let config_path = config_dir.join("config.json");
         let (config, config_error) = match AppConfig::load(&config_path) {
             Ok(config) => (config, None),
@@ -124,18 +130,6 @@ impl AppState {
         })
     }
 
-    async fn apply_builtin_plugins(&self, app: &AppHandle, preferences: &preferences::Preferences) {
-        self.lsp
-            .set_python_enabled(preferences.python_enabled)
-            .await;
-        self.lsp
-            .set_typescript_enabled(preferences.typescript_enabled)
-            .await;
-        self.terminal.set_enabled(preferences.terminal_enabled);
-        app.state::<git_workspace::AppState>()
-            .set_enabled(preferences.git_enabled);
-    }
-
     async fn project(&self, project_id: &str) -> GazeResult<Project> {
         self.cache
             .projects()
@@ -158,7 +152,7 @@ impl AppState {
             .cache
             .setting("preferences")
             .await?
-            .and_then(|value| serde_json::from_str::<preferences::Preferences>(&value).ok())
+            .and_then(|value| preferences::Preferences::from_stored(&value).ok())
             .filter(|value| value.validate().is_ok())
             .unwrap_or_default())
     }
@@ -323,9 +317,7 @@ async fn bootstrap_workspace(
     let snapshot = {
         let _settings = state.settings_lock.lock().await;
         let snapshot = state.snapshot().await.map_err(CommandError::from)?;
-        state
-            .apply_builtin_plugins(&app, &snapshot.preferences)
-            .await;
+        plugins::apply_builtin_preferences(&state, None, &snapshot.preferences).await;
         snapshot
     };
     state
@@ -510,14 +502,11 @@ async fn set_theme(theme: String, state: State<'_, AppState>) -> Result<(), Comm
 #[tauri::command(rename_all = "camelCase")]
 async fn save_settings(
     settings: preferences::AppSettings,
-    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
     let _settings = state.settings_lock.lock().await;
     let previous = state.read_preferences().await.map_err(CommandError::from)?;
     let next = &settings.preferences;
-    let ai_changed = previous.ai_completion != next.ai_completion
-        || previous.ai_completion_enabled != next.ai_completion_enabled;
     if next.ai_completion_enabled {
         next.ai_completion.validate().map_err(CommandError::from)?;
     }
@@ -525,12 +514,7 @@ async fn save_settings(
         .save(&state.cache)
         .await
         .map_err(CommandError::from)?;
-    if ai_changed {
-        state.ai_completion.reset();
-    }
-    state
-        .apply_builtin_plugins(&app, &settings.preferences)
-        .await;
+    plugins::apply_builtin_preferences(&state, Some(&previous), next).await;
     Ok(())
 }
 
@@ -1427,6 +1411,16 @@ fn get_capabilities(state: State<'_, AppState>) -> Result<ToolCapabilities, Comm
     Ok(state.tools.capabilities())
 }
 
+pub fn is_plugin_worker() -> bool {
+    std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == plugins::WORKER_FLAG)
+}
+
+pub fn run_plugin_worker() -> bool {
+    plugins::worker().is_ok()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -1454,6 +1448,12 @@ pub fn run() {
             set_active_project,
             set_theme,
             save_settings,
+            plugins::list_plugins,
+            plugins::install_plugin,
+            plugins::set_plugin_enabled,
+            plugins::uninstall_plugin,
+            plugins::invoke_plugin,
+            plugins::cancel_plugin,
             ai_completion::request_ai_completion,
             ai_completion::cancel_ai_completion,
             ai_completion::test_ai_completion,
@@ -1561,6 +1561,7 @@ pub fn run() {
             state.terminal.close_all();
             let lsp = Arc::clone(&state.lsp);
             tauri::async_runtime::block_on(async move {
+                app_handle.state::<plugins::Plugins>().shutdown().await;
                 lsp.shutdown().await;
             });
         }

@@ -22,7 +22,7 @@ use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
         mpsc, Mutex,
     },
     time::{Duration, Instant},
@@ -47,7 +47,6 @@ pub struct AppState {
     registry: Mutex<Registry>,
     git: Mutex<Result<Git, String>>,
     git_path: Option<String>,
-    enabled: AtomicBool,
     working_tree: Mutex<working_tree::Cache>,
     next_repository_id: AtomicU64,
     next_snapshot_id: AtomicU64,
@@ -82,7 +81,6 @@ impl AppState {
             registry: Mutex::new(Registry::default()),
             git: Mutex::new(Err("Git has not been initialized".into())),
             git_path: git_path.map(str::to_string),
-            enabled: AtomicBool::new(true),
             working_tree: Mutex::new(working_tree::Cache::default()),
             next_repository_id: AtomicU64::new(1),
             next_snapshot_id: AtomicU64::new(1),
@@ -103,9 +101,6 @@ impl AppState {
     }
 
     fn git(&self) -> Result<Git, String> {
-        if !self.enabled.load(Ordering::Acquire) {
-            return Err("Git 集成已停用。".into());
-        }
         let mut git = self
             .git
             .lock()
@@ -114,19 +109,6 @@ impl AppState {
             *git = Git::discover(self.git_path.as_deref());
         }
         git.clone()
-    }
-
-    pub fn set_enabled(&self, enabled: bool) {
-        if let Ok(mut watchers) = self.watchers.lock() {
-            if self.enabled.swap(enabled, Ordering::AcqRel) != enabled {
-                if !enabled {
-                    watchers.clear();
-                }
-                if let Ok(mut cache) = self.working_tree.lock() {
-                    *cache = working_tree::Cache::default();
-                }
-            }
-        }
     }
 
     fn record(&self, id: RepositoryId) -> Result<RepositoryRecord, String> {
@@ -231,7 +213,7 @@ impl AppState {
         app: &AppHandle,
     ) -> Result<(), String> {
         let mut watchers = self.watchers.lock().map_err(|_| "Git watcher is busy")?;
-        if !self.enabled.load(Ordering::Acquire) || watchers.contains_key(&id) {
+        if watchers.contains_key(&id) {
             return Ok(());
         }
         let (send, recv) = mpsc::channel();
@@ -261,7 +243,7 @@ impl AppState {
                     && recv.recv_timeout(Duration::from_millis(300)).is_ok()
                 {}
                 let state = app.state::<AppState>();
-                if !state.enabled.load(Ordering::Acquire) || state.record(id).is_err() {
+                if state.record(id).is_err() {
                     break;
                 }
                 if state
@@ -457,10 +439,6 @@ mod tests {
         cache.insert_project(&a).await.unwrap();
         cache.insert_project(&b).await.unwrap();
         let state = AppState::new(cache.clone(), None);
-        state.set_enabled(false);
-        assert!(state.git().is_err());
-        assert!(state.editor_guard(Path::new(&a.root)).is_ok());
-        state.set_enabled(true);
         assert!(state.git().is_ok());
         let inspection = git.inspect_repository(dir.path()).unwrap();
         let one = state.attach(&a, &inspection).unwrap();

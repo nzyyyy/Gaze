@@ -34,7 +34,6 @@ interface TerminalPanelProps {
   fontFamily: string;
   onHide: () => void;
   onNotice: (message: string) => void;
-  onActiveSessionsChange?: (active: boolean) => void;
 }
 
 export function TerminalPanel({
@@ -46,7 +45,6 @@ export function TerminalPanel({
   fontFamily,
   onHide,
   onNotice,
-  onActiveSessionsChange,
 }: TerminalPanelProps) {
   useLanguage();
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
@@ -55,12 +53,6 @@ export function TerminalPanel({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const heightRef = useRef(height);
   heightRef.current = height;
-
-  const sessionsActive = tabs.some((tab) => !tab.exited);
-  useEffect(
-    () => onActiveSessionsChange?.(sessionsActive),
-    [sessionsActive, onActiveSessionsChange],
-  );
 
   const createTab = useCallback((target: Project | null) => {
     const id = crypto.randomUUID();

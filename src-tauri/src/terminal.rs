@@ -52,19 +52,9 @@ enum ReaderMessage {
 #[derive(Default)]
 pub struct TerminalManager {
     sessions: Arc<Mutex<HashMap<String, Session>>>,
-    disabled: Mutex<bool>,
 }
 
 impl TerminalManager {
-    pub fn set_enabled(&self, enabled: bool) {
-        if let Ok(mut disabled) = self.disabled.lock() {
-            if !enabled && !*disabled {
-                self.close_all();
-            }
-            *disabled = !enabled;
-        }
-    }
-
     pub fn create(
         &self,
         session_id: String,
@@ -90,13 +80,6 @@ impl TerminalManager {
         rows: u16,
         emit: impl Fn(TerminalEvent) + Send + 'static,
     ) -> GazeResult<TerminalSessionInfo> {
-        let disabled = self
-            .disabled
-            .lock()
-            .map_err(|_| GazeError::Message("终端会话锁已损坏。".into()))?;
-        if *disabled {
-            return Err(GazeError::Unsupported("集成终端已停用。".into()));
-        }
         if !cwd.is_dir() {
             return Err(GazeError::Message("终端启动目录不存在。".to_string()));
         }
@@ -482,19 +465,8 @@ mod tests {
             }
         }
         assert!(output.contains("ping"), "output = {output:?}");
-        manager.set_enabled(false);
+        manager.close_all();
         assert!(manager.sessions.lock().unwrap().is_empty());
         assert!(manager.write("write-test", b"stale").is_err());
-        assert!(matches!(
-            manager.create(
-                "disabled".into(),
-                None,
-                std::env::temp_dir(),
-                80,
-                24,
-                |_| {}
-            ),
-            Err(GazeError::Unsupported(_))
-        ));
     }
 }

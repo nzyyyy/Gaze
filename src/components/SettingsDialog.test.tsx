@@ -36,7 +36,7 @@ it("filters plugins by category and keeps pending switches available in global s
   await user.click(category("插件"));
   const filters = within(screen.getByRole("group", { name: "插件分类" }));
   expect(filters.getByRole("button", { name: "全部", pressed: true })).toBeInTheDocument();
-  expect(screen.getAllByRole("switch")).toHaveLength(8);
+  expect(screen.getAllByRole("switch")).toHaveLength(7);
 
   const markdown = filters.getByRole("button", { name: "Markdown" });
   markdown.focus();
@@ -55,18 +55,20 @@ it("filters plugins by category and keeps pending switches available in global s
   await user.click(typescript);
 
   await user.click(filters.getByRole("button", { name: "开发工具" }));
-  expect(screen.getByRole("switch", { name: "集成终端" })).toBeInTheDocument();
-  await user.click(screen.getByRole("switch", { name: "Git 集成" }));
-  await user.click(markdown);
+  expect(screen.getByRole("switch", { name: "AI 行内补全" })).toBeInTheDocument();
+  expect(screen.queryByRole("switch", { name: "集成终端" })).not.toBeInTheDocument();
   expect(screen.queryByRole("switch", { name: "Git 集成" })).not.toBeInTheDocument();
+  await user.click(filters.getByRole("button", { name: "编辑器" }));
+  await user.click(screen.getByRole("switch", { name: "内容缩略图" }));
+  await user.click(markdown);
+  expect(screen.queryByRole("switch", { name: "内容缩略图" })).not.toBeInTheDocument();
   expect(onSave).not.toHaveBeenCalled();
-  await user.type(screen.getByRole("searchbox", { name: "搜索设置" }), "开发工具");
-  expect(screen.getByRole("switch", { name: "Git 集成" })).not.toBeChecked();
-  expect(screen.getByRole("switch", { name: "集成终端" })).toBeInTheDocument();
+  await user.type(screen.getByRole("searchbox", { name: "搜索设置" }), "内容缩略图");
+  expect(screen.getByRole("switch", { name: "内容缩略图" })).not.toBeChecked();
   await user.click(screen.getByRole("button", { name: "保存设置" }));
   expect(onSave).toHaveBeenCalledWith(
     expect.objectContaining({
-      preferences: { ...DEFAULT_PREFERENCES, gitEnabled: false, typescriptEnabled: false },
+      preferences: { ...DEFAULT_PREFERENCES, showMinimap: false, typescriptEnabled: false },
     }),
     expect.any(Object),
   );
@@ -173,6 +175,7 @@ it("shows one category and preserves drafts across categories and searches", asy
   await user.clear(screen.getByRole("spinbutton", { name: "编辑器字号" }));
   await user.type(screen.getByRole("spinbutton", { name: "编辑器字号" }), "16");
   await user.click(screen.getByRole("switch", { name: "自动换行" }));
+  await user.click(category("插件"));
   expect(screen.getByRole("switch", { name: "内容缩略图" })).toBeChecked();
   await user.click(screen.getByRole("switch", { name: "内容缩略图" }));
   await user.click(category("终端"));
@@ -184,6 +187,7 @@ it("shows one category and preserves drafts across categories and searches", asy
   expect(screen.getByRole("spinbutton", { name: "编辑器字号" })).toHaveValue(16);
   await user.click(category("编辑器"));
   expect(screen.getByRole("switch", { name: "自动换行" })).not.toBeChecked();
+  await user.click(category("插件"));
   expect(screen.getByRole("switch", { name: "内容缩略图" })).not.toBeChecked();
   await user.click(screen.getByRole("button", { name: "保存设置" }));
   expect(onSave).toHaveBeenCalledWith(
