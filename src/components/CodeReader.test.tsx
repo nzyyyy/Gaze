@@ -14,6 +14,8 @@ const apiMock = vi.hoisted(() => ({
   deleteRecovery: vi.fn(),
   writeFile: vi.fn(),
   completeCode: vi.fn(),
+  requestAiCompletion: vi.fn(),
+  cancelAiCompletion: vi.fn(),
   syncDocument: vi.fn(),
   findDefinitions: vi.fn(),
   resolveMarkdownLink: vi.fn(),
@@ -33,6 +35,8 @@ beforeEach(() => {
   apiMock.writeRecovery.mockResolvedValue(null);
   apiMock.deleteRecovery.mockResolvedValue(undefined);
   apiMock.completeCode.mockResolvedValue({ items: [] });
+  apiMock.requestAiCompletion.mockReset().mockResolvedValue({ type: "empty" });
+  apiMock.cancelAiCompletion.mockReset().mockResolvedValue(undefined);
   apiMock.syncDocument.mockResolvedValue(undefined);
   apiMock.findDefinitions.mockResolvedValue({
     source: "lsp",
@@ -514,6 +518,43 @@ describe("CodeReader editing", () => {
     rerender(<CodeReader {...props} active={false} />);
     rerender(<CodeReader {...props} active />);
     await waitFor(() => expect(gitApiMock.getFileBase).toHaveBeenCalledTimes(2));
+  });
+
+  it("only requests AI from the active editor and cancels on tab changes", async () => {
+    const { props, rerender } = renderReader({
+      active: false,
+      content: "const value = ",
+      preferences: { ...DEFAULT_PREFERENCES, aiCompletionEnabled: true },
+    });
+    const content = await editorContent();
+    const view = EditorView.findFromDOM(content)!;
+    const manual = () =>
+      fireEvent.keyDown(content, { key: "Enter", code: "Enter", ctrlKey: true, shiftKey: true });
+    act(() => {
+      view.focus();
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+      manual();
+    });
+    expect(apiMock.requestAiCompletion).not.toHaveBeenCalled();
+
+    let respond!: (value: { type: "suggestion"; text: string }) => void;
+    apiMock.requestAiCompletion.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          respond = resolve;
+        }),
+    );
+    rerender(<CodeReader {...props} active />);
+    act(() => manual());
+    // The request waits briefly for the document to reach the language server.
+    await waitFor(() => expect(apiMock.requestAiCompletion).toHaveBeenCalledTimes(1));
+    const request = apiMock.requestAiCompletion.mock.calls[0]![0];
+    expect(request).toMatchObject({ manual: true, prefix: "const value = " });
+    rerender(<CodeReader {...props} active={false} />);
+    expect(apiMock.cancelAiCompletion).toHaveBeenCalledWith(request.id);
+    await act(async () => respond({ type: "suggestion", text: "42" }));
+    expect(view.dom.querySelector(".cm-gaze-ai-suggestion")).toBeNull();
+    expect(view.state.doc.toString()).toBe("const value = ");
   });
 
   it("previews unsaved Markdown without rebuilding the editor or losing undo and selection", async () => {

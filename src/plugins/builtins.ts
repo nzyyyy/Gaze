@@ -43,6 +43,12 @@ export const BUILTIN_PLUGINS = [
     label: "Git 集成",
     description: "启用 Git 工作区、文件树状态和编辑器变更标记。",
   },
+  {
+    key: "aiCompletionEnabled",
+    pluginCategory: "tools",
+    label: "AI 行内补全",
+    description: "在 LSP 候选旁显示 AI 灰字。Tab 采纳 AI 建议，Enter 采纳列表候选。",
+  },
 ] as const;
 
 export type BuiltinPluginKey = (typeof BUILTIN_PLUGINS)[number]["key"];

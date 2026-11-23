@@ -241,12 +241,14 @@ export function codeCompletion(
   path: string,
   contribution?: CompletionContribution,
   semantic = true,
+  aboveCursor = false,
 ) {
   const sources = semantic
     ? [{ autocomplete: lspCompletionSource(projectId, path) }, { autocomplete: completeAnyWord }]
     : [{ autocomplete: completeAnyWord }];
   return [
     autocompletion({
+      aboveCursor,
       interactionDelay: 0,
       maxRenderedOptions: 32,
       compareCompletions(a: RankedCompletion, b: RankedCompletion) {

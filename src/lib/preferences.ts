@@ -7,6 +7,7 @@ import {
 import type { ColorSchemes } from "./colorSchemes";
 import type { FontSettings } from "./fonts";
 import type { ThemePreference } from "./types";
+import type { AiCompletionConfig } from "../plugins/ai-completion-config";
 
 export interface Preferences extends Record<BuiltinPluginKey, boolean> {
   editorFontSize: number;
@@ -37,6 +38,7 @@ export interface Preferences extends Record<BuiltinPluginKey, boolean> {
   windowGlassEnabled: boolean;
   windowSurfaceOpacity: number;
   terminalCursorStyle: "block" | "underline" | "bar";
+  aiCompletion: AiCompletionConfig;
 }
 
 export interface AppSettings {
@@ -82,6 +84,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminalEnabled: true,
   pythonEnabled: true,
   gitEnabled: true,
+  aiCompletionEnabled: false,
+  aiCompletion: { protocol: "responses", url: "", model: "", apiKey: "" },
 };
 
 export const SETTINGS_CATEGORIES = [

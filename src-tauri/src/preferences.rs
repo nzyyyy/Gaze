@@ -43,6 +43,8 @@ pub struct Preferences {
     pub terminal_enabled: bool,
     pub python_enabled: bool,
     pub git_enabled: bool,
+    pub ai_completion_enabled: bool,
+    pub ai_completion: crate::ai_completion::Config,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
@@ -91,6 +93,8 @@ impl Default for Preferences {
             terminal_enabled: true,
             python_enabled: true,
             git_enabled: true,
+            ai_completion_enabled: false,
+            ai_completion: Default::default(),
         }
     }
 }

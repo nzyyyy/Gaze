@@ -1,3 +1,4 @@
+mod ai_completion;
 mod cache;
 mod color_schemes;
 mod config;
@@ -56,6 +57,7 @@ pub struct AppState {
     watchers: WatcherService,
     terminal: TerminalManager,
     settings_lock: tokio::sync::Mutex<()>,
+    ai_completion: ai_completion::Completion,
     background_started: AtomicBool,
     external_files: external_files::ExternalFiles,
     recovery: recovery::RecoveryStore,
@@ -113,6 +115,7 @@ impl AppState {
             watchers: WatcherService::new(),
             terminal: TerminalManager::default(),
             settings_lock: tokio::sync::Mutex::new(()),
+            ai_completion: ai_completion::Completion::default(),
             background_started: AtomicBool::new(false),
             external_files: external_files::ExternalFiles::default(),
             recovery: recovery::RecoveryStore::new(data_dir.join("recovery")),
@@ -147,6 +150,16 @@ impl AppState {
         }
     }
 
+    async fn read_preferences(&self) -> GazeResult<preferences::Preferences> {
+        Ok(self
+            .cache
+            .setting("preferences")
+            .await?
+            .and_then(|value| serde_json::from_str::<preferences::Preferences>(&value).ok())
+            .filter(|value| value.validate().is_ok())
+            .unwrap_or_default())
+    }
+
     async fn snapshot(&self) -> GazeResult<WorkspaceSnapshot> {
         let projects = self.cache.projects().await?;
         let mut active_project_id = self.cache.setting("active_project").await?;
@@ -174,13 +187,7 @@ impl AppState {
             projects,
             active_project_id,
             theme,
-            preferences: self
-                .cache
-                .setting("preferences")
-                .await?
-                .and_then(|value| serde_json::from_str::<preferences::Preferences>(&value).ok())
-                .filter(|value| value.validate().is_ok())
-                .unwrap_or_default(),
+            preferences: self.read_preferences().await?,
             color_schemes: self
                 .cache
                 .setting("color_schemes")
@@ -504,10 +511,20 @@ async fn save_settings(
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
     let _settings = state.settings_lock.lock().await;
+    let previous = state.read_preferences().await.map_err(CommandError::from)?;
+    let next = &settings.preferences;
+    let ai_changed = previous.ai_completion != next.ai_completion
+        || previous.ai_completion_enabled != next.ai_completion_enabled;
+    if next.ai_completion_enabled {
+        next.ai_completion.validate().map_err(CommandError::from)?;
+    }
     settings
         .save(&state.cache)
         .await
         .map_err(CommandError::from)?;
+    if ai_changed {
+        state.ai_completion.reset();
+    }
     state
         .apply_builtin_plugins(&app, &settings.preferences)
         .await;
@@ -1434,6 +1451,9 @@ pub fn run() {
             set_active_project,
             set_theme,
             save_settings,
+            ai_completion::request_ai_completion,
+            ai_completion::cancel_ai_completion,
+            ai_completion::test_ai_completion,
             list_directory,
             create_entry,
             move_entry,

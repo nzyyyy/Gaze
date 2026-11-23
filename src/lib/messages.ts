@@ -411,6 +411,37 @@ export const english: Record<string, string> = {
   "Git 集成": "Git integration",
   "启用 Git 工作区、文件树状态和编辑器变更标记。":
     "Enable the Git workspace and Git indicators in the file tree and editor.",
+  "AI 行内补全": "AI inline completion",
+  配置: "Configure",
+  "配置 AI 行内补全": "Configure AI inline completion",
+  返回插件列表: "Back to plugins",
+  "在 LSP 候选旁显示 AI 灰字。Tab 采纳 AI 建议，Enter 采纳列表候选。":
+    "Show AI ghost text alongside LSP suggestions. Tab accepts AI, and Enter accepts a list item.",
+  "API 格式": "API format",
+  "选择服务支持的请求协议；保存时按协议在 Base URL 后补全路径。":
+    "Choose the protocol your provider supports. Saving appends its path to the base URL.",
+  "Base URL": "Base URL",
+  "只填基础地址。保存时按所选接口补全路径，已带的版本不会重复；补全会把光标附近的代码和少量相关声明发送到此接口。":
+    "Enter only the base URL. Saving appends the selected API path without repeating a version already present; completion sends nearby code and a few related declarations to it.",
+  "模型 ID": "Model ID",
+  "填写接口要求的模型标识。按 {0} 手动触发补全。":
+    "Enter the provider's model identifier. Press {0} to request a suggestion.",
+  "随设置保存在本机，只会发送给上面填写的接口。":
+    "Stored with your settings on this machine and only sent to the endpoint above.",
+  "显示 API Key": "Show API key",
+  "隐藏 API Key": "Hide API key",
+  测试连接: "Test connection",
+  "正在测试连接…": "Testing connection…",
+  "模型连接成功。": "Model connection succeeded.",
+  "请检查 AI 补全的 HTTPS 接口、模型 ID 和 API Key。":
+    "Check the AI completion HTTPS endpoint, model ID, and API key.",
+  "请填写有效的 HTTPS 接口、模型 ID 和 API Key。":
+    "Enter a valid HTTPS endpoint, model ID, and API key.",
+  "AI 补全鉴权失败，请检查 API Key。": "AI completion authentication failed. Check the API key.",
+  "AI 补全暂时受限，请稍后重试。": "AI completion is rate limited. Try again shortly.",
+  "AI 补全请求超时。": "AI completion timed out.",
+  "模型没有返回可用的补全。": "The model returned no usable completion.",
+  "AI 补全服务暂时无法连接。": "The AI completion service is unreachable.",
   "Git 操作暂不可用。": "Git operations are temporarily unavailable.",
   "正在停用 Git…": "Disabling Git…",
   "保存后将结束所有终端会话，其中运行的任务可能中断。":

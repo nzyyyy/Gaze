@@ -18,6 +18,26 @@ const MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
 
 type PendingMap = Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>;
 
+struct PendingRequest<'a> {
+    client: &'a LspClient,
+    id: i64,
+}
+
+impl Drop for PendingRequest<'_> {
+    fn drop(&mut self) {
+        let removed = self
+            .client
+            .pending
+            .lock()
+            .ok()
+            .and_then(|mut pending| pending.remove(&self.id));
+        if removed.is_some() {
+            self.client
+                .notify("$/cancelRequest", json!({ "id": self.id }));
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct LspClient {
     sender: mpsc::UnboundedSender<Value>,
@@ -198,20 +218,15 @@ impl LspClient {
             }
             return Err(GazeError::Message("无法写入语言服务器。".to_string()));
         }
+        let _pending_request = PendingRequest { client: self, id };
         match tokio::time::timeout(timeout, response_receiver).await {
             Ok(Ok(Ok(value))) => Ok(value),
             Ok(Ok(Err(message))) => Err(GazeError::Message(message)),
             Ok(Err(_)) => Err(GazeError::Message("语言服务器请求已中断。".to_string())),
-            Err(_) => {
-                if let Ok(mut pending) = self.pending.lock() {
-                    pending.remove(&id);
-                }
-                self.notify("$/cancelRequest", json!({ "id": id }));
-                Err(GazeError::Message(format!(
-                    "语言服务器在 {} 秒内未响应 {method} 请求。",
-                    timeout.as_secs()
-                )))
-            }
+            Err(_) => Err(GazeError::Message(format!(
+                "语言服务器在 {} 秒内未响应 {method} 请求。",
+                timeout.as_secs()
+            ))),
         }
     }
 

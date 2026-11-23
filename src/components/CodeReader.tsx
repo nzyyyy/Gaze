@@ -58,7 +58,8 @@ import { minimap } from "../lib/minimap";
 import { rainbowBrackets } from "../lib/rainbowBrackets";
 import type { EditorViewState } from "../lib/session";
 import { isMarkdownFile, isPythonFile, matchLanguage } from "../lib/language";
-import { markdownInsert } from "../plugins/markdown-insert";
+import { markdownInsert, markdownSlashQuery } from "../plugins/markdown-insert";
+import { aiInlineCompletion } from "../plugins/ai-completion";
 import type {
   EditorPane,
   EditorStatus,
@@ -479,6 +480,7 @@ export function CodeReader({
   const viewRef = useRef<EditorView | null>(null);
   const diagnosticsCompartment = useRef(new Compartment());
   const languageToolsCompartment = useRef(new Compartment());
+  const aiCompletionCompartment = useRef(new Compartment());
   const gitGutterCompartment = useRef(new Compartment());
   const previousPythonRevision = useRef(pythonRevision);
   const localeCompartment = useRef(new Compartment());
@@ -497,6 +499,8 @@ export function CodeReader({
   const initialViewDocumentRef = useRef<LoadedState | null>(null);
   const revealRef = useRef(reveal);
   const activeRef = useRef(active);
+  const onNoticeRef = useRef(onNotice);
+  onNoticeRef.current = onNotice;
   const onDirtyChangeRef = useRef(onDirtyChange);
   const onSavedRef = useRef(onSaved);
   const onOpenFileLinkRef = useRef(onOpenMarkdownFile);
@@ -1105,6 +1109,7 @@ export function CodeReader({
             )
           : [],
         languageToolsCompartment.current.of([]),
+        aiCompletionCompartment.current.of([]),
         preferencesCompartment.current.of(
           preferenceExtensions(
             preferencesRef.current,
@@ -1291,11 +1296,57 @@ export function CodeReader({
               tab.path,
               quickInsertEnabled ? markdownInsert : undefined,
               semanticEnabled,
+              preferences.aiCompletionEnabled,
             )
           : [],
       ]),
     });
-  }, [loaded, tab.projectId, tab.path, quickInsertEnabled, semanticEnabled]);
+  }, [
+    loaded,
+    tab.projectId,
+    tab.path,
+    quickInsertEnabled,
+    semanticEnabled,
+    preferences.aiCompletionEnabled,
+  ]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    const document = documentRef.current;
+    if (!view || document?.mode !== "normal") return;
+    const enabled =
+      active &&
+      !previewVisible &&
+      !gitLocked &&
+      document.editable &&
+      preferences.aiCompletionEnabled;
+    view.dispatch({
+      effects: aiCompletionCompartment.current.reconfigure(
+        enabled
+          ? aiInlineCompletion({
+              projectId: tab.projectId,
+              path: tab.path,
+              language: matchLanguage(markdown ? tab.name.toLowerCase() : tab.name).label,
+              reserved: (state) =>
+                quickInsertEnabled && !!markdownSlashQuery(state, state.selection.main.head),
+              onError: (message) => onNoticeRef.current?.(message),
+            })
+          : [],
+      ),
+    });
+  }, [
+    active,
+    previewVisible,
+    gitLocked,
+    loaded,
+    tab.projectId,
+    tab.path,
+    tab.name,
+    markdown,
+    quickInsertEnabled,
+    preferences.aiCompletionEnabled,
+    preferences.aiCompletion,
+  ]);
 
   useEffect(() => {
     const view = viewRef.current;

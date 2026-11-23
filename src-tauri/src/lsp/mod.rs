@@ -4,7 +4,7 @@ mod diagnostics;
 mod hover;
 mod positions;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -27,6 +27,7 @@ use crate::models::{
     DocumentSymbol, FileContent, FileFingerprint, NavigationResult, OutlineResult, Project,
     SymbolLocation, TextPosition,
 };
+use crate::path_index::IgnoreCache;
 use crate::python::{self, PythonEnvironmentStatus};
 use crate::symbols::word_at;
 use crate::tools::{ResolvedLspServer, Tools};
@@ -783,6 +784,173 @@ impl LspManager {
         Ok(navigation)
     }
 
+    pub(crate) async fn inline_declarations(
+        &self,
+        project: &Project,
+        path: &str,
+        cursor: TextPosition,
+        context: (&str, &str),
+        snapshot: (&str, i64),
+    ) -> Vec<String> {
+        self.inline_declarations_inner(project, path, cursor, context, snapshot)
+            .await
+            .unwrap_or_default()
+    }
+
+    async fn inline_declarations_inner(
+        &self,
+        project: &Project,
+        path: &str,
+        cursor: TextPosition,
+        (prefix, suffix): (&str, &str),
+        (session_id, expected_version): (&str, i64),
+    ) -> Option<Vec<String>> {
+        static IDENTIFIER: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+            regex::Regex::new(r"[_\p{XID_Start}][_\p{XID_Continue}]*").expect("identifier pattern")
+        });
+        let server = self.server_for_path(path)?;
+        let session = self.open_session(&format!("{}\u{0000}{}", project.id, server.config.id))?;
+        if !session.capabilities.definition || session.id != session_id {
+            return None;
+        }
+        let uri = Url::from_file_path(Path::new(&project.root).join(path))
+            .ok()?
+            .to_string();
+        let (text, version) = {
+            let documents = session.documents.lock().await;
+            let doc = documents.get(&uri)?;
+            if doc.version != expected_version {
+                return None;
+            }
+            (Arc::clone(&doc.text), doc.version)
+        };
+        let index = TextIndex::new(&text);
+        let offset = index.utf16_to_byte(&text, cursor).ok()?;
+        if !text[..offset].ends_with(prefix) || !text[offset..].starts_with(suffix) {
+            return None;
+        }
+        let mut positions = Vec::with_capacity(2);
+        let mut seen = HashSet::new();
+        for (distance, line) in prefix.rsplit('\n').take(3).enumerate() {
+            let line_number = cursor.line.checked_sub(distance as u32)?;
+            let line_width = line.encode_utf16().count() as u32;
+            let column = if distance == 0 {
+                cursor.character.checked_sub(line_width)?
+            } else {
+                0
+            };
+            let targets = IDENTIFIER.find_iter(line).collect::<Vec<_>>();
+            for target in targets.into_iter().rev() {
+                let symbol = target.as_str();
+                if matches!(
+                    symbol,
+                    "return"
+                        | "const"
+                        | "let"
+                        | "var"
+                        | "await"
+                        | "async"
+                        | "new"
+                        | "if"
+                        | "else"
+                        | "fn"
+                        | "def"
+                        | "pub"
+                        | "function"
+                        | "export"
+                ) || !seen.insert(symbol)
+                {
+                    continue;
+                }
+                let character = column + line[..target.start()].encode_utf16().count() as u32;
+                if let Ok(position) = index.utf16_to_lsp(
+                    &text,
+                    TextPosition {
+                        line: line_number,
+                        character,
+                    },
+                    session.encoding,
+                ) {
+                    positions.push(position);
+                }
+                if positions.len() == 2 {
+                    break;
+                }
+            }
+            if positions.len() == 2 {
+                break;
+            }
+        }
+        let first = positions.first().copied()?;
+        let definition = |position| {
+            session.client.request(
+                "textDocument/definition",
+                json!({ "textDocument": { "uri": uri }, "position": position }),
+                Duration::from_millis(50),
+            )
+        };
+        let (first, second) = if let Some(second) = positions.get(1).copied() {
+            let (first, second) = tokio::join!(definition(first), definition(second));
+            (first.ok(), second.ok())
+        } else {
+            (definition(first).await.ok(), None)
+        };
+        let locations = first
+            .iter()
+            .chain(second.iter())
+            .flat_map(|value| extract_locations(value, true))
+            .collect::<Vec<_>>();
+        let project = project.clone();
+        let snippets = tokio::task::spawn_blocking(move || {
+            let root = Path::new(&project.root);
+            let mut ignores = IgnoreCache::new(root);
+            let mut visited = HashSet::new();
+            let mut found = Vec::new();
+            for location in locations {
+                if found.len() >= 2 {
+                    break;
+                }
+                let Some(path) = Url::parse(&location.uri)
+                    .ok()
+                    .and_then(|uri| uri.to_file_path().ok())
+                else {
+                    continue;
+                };
+                let Some(relative) = path.strip_prefix(root).ok().and_then(Path::to_str) else {
+                    continue;
+                };
+                let Some(path) =
+                    crate::ai_completion::eligible_path_with(&project, relative, &mut ignores)
+                else {
+                    continue;
+                };
+                // One declaration line per file keeps the context small and the reads distinct.
+                if !visited.insert(path.clone()) {
+                    continue;
+                }
+                let Some(line) = declaration_line(&path, location.range.start.line as usize) else {
+                    continue;
+                };
+                let line = line.trim();
+                if !line.is_empty()
+                    && line.chars().count() <= 500
+                    && !found.iter().any(|previous| previous == line)
+                {
+                    found.push(line.to_owned());
+                }
+            }
+            found
+        })
+        .await
+        .ok()?
+        .into_iter()
+        .filter(|snippet| !prefix.contains(snippet) && !suffix.contains(snippet))
+        .take(2)
+        .collect();
+        let documents = session.documents.lock().await;
+        (documents.get(&uri)?.version == version).then_some(snippets)
+    }
+
     pub async fn references(
         &self,
         app: &AppHandle,
@@ -1053,6 +1221,23 @@ fn capability_enabled(capabilities: &Value, key: &str) -> bool {
         Some(Value::Object(_)) => true,
         _ => false,
     }
+}
+
+/// Reads a single declaration line without loading the whole file into memory.
+fn declaration_line(path: &Path, line: usize) -> Option<String> {
+    use std::io::Read as _;
+    const MAX_BYTES: u64 = 256 * 1024;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > MAX_BYTES {
+        return None;
+    }
+    let text = String::from_utf8(bytes).ok()?;
+    text.lines().nth(line).map(str::to_owned)
 }
 
 fn extract_locations(value: &Value, links: bool) -> Vec<RawLocation> {
@@ -1756,7 +1941,7 @@ mod tests {
         };
         let root_uri = Url::from_directory_path(&root).unwrap();
         let (diagnostics_tx, mut diagnostics_rx) = tokio::sync::mpsc::unbounded_channel();
-        let session = LspSession::start(project, &server, &root_uri, None, move |update| {
+        let session = LspSession::start(project.clone(), &server, &root_uri, None, move |update| {
             let _ = diagnostics_tx.send(serde_json::to_value(update).unwrap());
         })
         .await
@@ -1950,7 +2135,7 @@ mod tests {
         let session = Arc::new(session);
         let manager = LspManager {
             cache: Cache::open_in_memory().unwrap(),
-            servers: Vec::new(),
+            servers: vec![server],
             sessions: Arc::new(Mutex::new(HashMap::from([(
                 "lsp-test\0typescript".to_string(),
                 Arc::clone(&session),
@@ -1958,6 +2143,47 @@ mod tests {
             start_lock: tokio::sync::Mutex::new(()),
             python_enabled: AtomicBool::new(true),
         };
+        let recorded = format!(
+            "{edited}\nimport {{ exportedWidget }} from './dependency';\nconst widget = exportedWidget("
+        );
+        let buffer = format!("{recorded});\n");
+        let cursor = TextPosition {
+            line: recorded.lines().count() as u32 - 1,
+            character: "const widget = exportedWidget(".len() as u32,
+        };
+        let sync = session.sync_buffer("src/你好.ts", &buffer).await.unwrap();
+        assert!(manager
+            .inline_declarations(
+                &project,
+                "src/你好.ts",
+                cursor,
+                (&recorded, ");"),
+                (&sync.session, sync.version - 1)
+            )
+            .await
+            .is_empty());
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let declarations = manager
+                    .inline_declarations(
+                        &project,
+                        "src/你好.ts",
+                        cursor,
+                        (&recorded, ");"),
+                        (&sync.session, sync.version),
+                    )
+                    .await;
+                if declarations
+                    .iter()
+                    .any(|declaration| declaration.contains("exportedWidget(name: string)"))
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("AI context should extract a declaration from the warmed language server");
         manager.forget_documents(&root.join("src")).await;
         let documents = session.documents.lock().await;
         assert_eq!(documents.len(), 1);

@@ -36,7 +36,7 @@ it("filters plugins by category and keeps pending switches available in global s
   await user.click(category("插件"));
   const filters = within(screen.getByRole("group", { name: "插件分类" }));
   expect(filters.getByRole("button", { name: "全部", pressed: true })).toBeInTheDocument();
-  expect(screen.getAllByRole("switch")).toHaveLength(6);
+  expect(screen.getAllByRole("switch")).toHaveLength(7);
 
   const markdown = filters.getByRole("button", { name: "Markdown" });
   markdown.focus();
@@ -65,6 +65,63 @@ it("filters plugins by category and keeps pending switches available in global s
     expect.objectContaining({ preferences: { ...DEFAULT_PREFERENCES, gitEnabled: false } }),
     expect.any(Object),
   );
+});
+
+it("keeps AI configuration on a detail page and saves its draft after returning", async () => {
+  const user = userEvent.setup();
+  const onSave = vi.fn().mockResolvedValue(undefined);
+  render(<SettingsDialog settings={settings} onSave={onSave} onClose={vi.fn()} />);
+  await user.click(category("插件"));
+  await user.click(screen.getByRole("button", { name: "开发工具" }));
+  expect(screen.getByRole("switch", { name: "AI 行内补全" })).not.toBeChecked();
+  expect(screen.queryByLabelText("Base URL")).not.toBeInTheDocument();
+  const openDetail = () => screen.getByRole("button", { name: "配置 AI 行内补全" });
+  openDetail().focus();
+  await user.keyboard("{Enter}");
+  expect(screen.getByRole("heading", { name: "AI 行内补全" })).toHaveFocus();
+  expect(screen.queryByRole("switch", { name: "Git 集成" })).not.toBeInTheDocument();
+  const endpoint = "https://model.example";
+  await user.type(screen.getByLabelText("Base URL"), endpoint);
+  await user.type(screen.getByLabelText("模型 ID"), "test-model");
+  await user.type(screen.getByLabelText("API Key", { exact: true }), "test-key");
+  await user.click(screen.getByRole("button", { name: "返回插件列表" }));
+  expect(screen.getByRole("button", { name: "开发工具", pressed: true })).toBeInTheDocument();
+  expect(openDetail()).toHaveFocus();
+  expect(screen.queryByLabelText("Base URL")).not.toBeInTheDocument();
+  expect(onSave).not.toHaveBeenCalled();
+  await user.click(openDetail());
+  expect(screen.getByLabelText("Base URL")).toHaveValue(endpoint);
+  expect(screen.getByLabelText("模型 ID")).toHaveValue("test-model");
+  expect(screen.getByLabelText("API Key", { exact: true })).toHaveValue("test-key");
+  await user.click(screen.getByRole("button", { name: "保存设置" }));
+  expect(onSave).toHaveBeenCalledWith(
+    expect.objectContaining({
+      preferences: {
+        ...DEFAULT_PREFERENCES,
+        aiCompletionEnabled: true,
+        aiCompletion: {
+          protocol: "responses",
+          url: endpoint,
+          model: "test-model",
+          apiKey: "test-key",
+        },
+      },
+    }),
+    expect.any(Object),
+  );
+});
+
+it("finds the AI plugin by its detail fields and restores search results on back", async () => {
+  const user = userEvent.setup();
+  render(<SettingsDialog settings={settings} onSave={vi.fn()} onClose={vi.fn()} />);
+  const search = screen.getByRole("searchbox", { name: "搜索设置" });
+  await user.type(search, "Base URL");
+  expect(screen.queryByLabelText("Base URL")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "配置 AI 行内补全" }));
+  expect(screen.getByLabelText("Base URL")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "返回插件列表" }));
+  expect(search).toHaveValue("Base URL");
+  expect(screen.getByRole("button", { name: "配置 AI 行内补全" })).toHaveFocus();
 });
 
 it("selects Codex by default and finds and saves both palettes", async () => {

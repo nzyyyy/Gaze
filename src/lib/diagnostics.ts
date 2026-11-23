@@ -4,6 +4,58 @@ import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { api, type DiagnosticSnapshot } from "./api";
 import { errorCode } from "./utils";
 
+type LspVersion = Pick<DiagnosticSnapshot, "session" | "version">;
+
+interface SyncTracker {
+  record: { doc: Text; version: LspVersion } | null;
+  /** A document sync is scheduled or in flight. */
+  pending: boolean;
+  /** The file has no language server, so no version will ever arrive. */
+  unsupported: boolean;
+  waiters: Set<() => void>;
+}
+
+const trackers = new WeakMap<EditorView, SyncTracker>();
+
+function track(view: EditorView) {
+  let tracker = trackers.get(view);
+  if (!tracker) {
+    tracker = { record: null, pending: true, unsupported: false, waiters: new Set() };
+    trackers.set(view, tracker);
+  }
+  return tracker;
+}
+
+export function synchronizedLspVersion(view: EditorView): LspVersion | undefined {
+  const record = trackers.get(view)?.record;
+  return record?.doc === view.state.doc ? record.version : undefined;
+}
+
+/**
+ * Waits for the document sync when one is still pending. Returns `undefined`
+ * when the editor has no server or nothing left to wait for, so callers can
+ * proceed immediately without an extra microtask.
+ */
+export function pendingLspVersion(
+  view: EditorView,
+  doc: Text,
+  timeout: number,
+): Promise<LspVersion | undefined> | undefined {
+  const tracker = trackers.get(view);
+  if (!tracker || tracker.unsupported || !tracker.pending) return undefined;
+  if (tracker.record?.doc === doc) return Promise.resolve(tracker.record.version);
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = () => {
+      clearTimeout(timer);
+      tracker.waiters.delete(finish);
+      resolve(tracker.record?.doc === doc ? tracker.record.version : undefined);
+    };
+    timer = setTimeout(finish, timeout);
+    tracker.waiters.add(finish);
+  });
+}
+
 function sameVersion(a: DiagnosticSnapshot | null, b: DiagnosticSnapshot | null) {
   return a && b && a.session === b.session && a.version === b.version;
 }
@@ -15,12 +67,14 @@ export function codeDiagnostics(projectId: string, path: string) {
       class {
         private disposed = false;
         private unavailable = false;
+        private syncing = false;
         private timer: ReturnType<typeof setTimeout> | undefined;
         private listen: Promise<(() => void) | undefined>;
         private snapshot: DiagnosticSnapshot | null = null;
         private received: DiagnosticSnapshot | null = null;
 
         constructor(private view: EditorView) {
+          track(view);
           this.listen = Promise.resolve()
             .then(() =>
               api.onDiagnostics((batch) => {
@@ -47,26 +101,58 @@ export function codeDiagnostics(projectId: string, path: string) {
         destroy() {
           this.disposed = true;
           clearTimeout(this.timer);
+          const tracker = trackers.get(this.view);
+          if (tracker) {
+            tracker.pending = false;
+            tracker.waiters.forEach((resolve) => resolve());
+            tracker.waiters.clear();
+            trackers.delete(this.view);
+          }
           void this.listen.then((unlisten) => unlisten?.());
+        }
+
+        /** Marks the sync as settled once nothing is queued or in flight. */
+        private notify() {
+          const tracker = track(this.view);
+          tracker.pending = this.timer !== undefined || this.syncing;
+          if (tracker.pending) return;
+          tracker.waiters.forEach((resolve) => resolve());
+          tracker.waiters.clear();
         }
 
         private schedule() {
           if (this.unavailable) return;
           clearTimeout(this.timer);
-          this.timer = setTimeout(() => void this.sync(), 250);
+          track(this.view).pending = true;
+          this.timer = setTimeout(() => {
+            this.timer = undefined;
+            void this.sync();
+          }, 250);
         }
 
         private async sync() {
           await this.listen;
-          if (this.disposed || this.unavailable) return;
-          const { doc } = this.view.state;
+          if (this.disposed || this.unavailable) {
+            this.notify();
+            return;
+          }
+          this.syncing = true;
           try {
+            const { doc } = this.view.state;
             const snapshot = await api.syncDocument(projectId, path, doc.toString());
             if (this.disposed || this.view.state.doc !== doc || !snapshot) return;
             this.snapshot = snapshot;
+            track(this.view).record = {
+              doc,
+              version: { session: snapshot.session, version: snapshot.version },
+            };
             this.show(sameVersion(this.received, snapshot) ? this.received!.items : snapshot.items);
           } catch (error) {
             this.unavailable = ["toolMissing", "unsupported"].includes(errorCode(error) ?? "");
+            if (this.unavailable) track(this.view).unsupported = true;
+          } finally {
+            this.syncing = false;
+            this.notify();
           }
         }
 
