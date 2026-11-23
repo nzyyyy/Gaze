@@ -10,7 +10,7 @@ import {
   type Ref,
 } from "react";
 import { flushSync } from "react-dom";
-import { closeCompletion } from "@codemirror/autocomplete";
+import { closeBrackets, closeBracketsKeymap, closeCompletion } from "@codemirror/autocomplete";
 import { setDiagnostics } from "@codemirror/lint";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import {
@@ -377,6 +377,7 @@ function initialExtensions(
     { key: "Mod-f", run: openEditorSearch, scope: "editor search-panel" },
     ...searchKeymap,
     ...foldKeymap,
+    ...(editable ? closeBracketsKeymap : []),
     ...defaultKeymap,
     ...historyKeymap,
   ];
@@ -385,6 +386,7 @@ function initialExtensions(
     highlightSpecialChars(),
     drawSelection(),
     rectangularSelection(),
+    ...(editable ? [closeBrackets()] : []),
     history(),
     EditorState.readOnly.of(!editable),
     EditorView.editable.of(editable),

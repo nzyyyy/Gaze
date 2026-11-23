@@ -167,6 +167,42 @@ describe("CodeReader editing", () => {
     });
   });
 
+  it.each([
+    ["a.ts", "(", ")"],
+    ["a.ts", "{", "}"],
+    ["a.ts", "'", "'"],
+    ["notes.md", "[", "]"],
+    ["notes.md", '"', '"'],
+  ])("auto-closes %s input %s with %s", async (filename, open, close) => {
+    renderReader({ filename, content: "" });
+    const view = EditorView.findFromDOM(await editorContent())!;
+    await waitFor(() => expect(syntaxTree(view.state).topNode.name).not.toBe(""));
+    const type = (character: string) => {
+      const { from, to } = view.state.selection.main;
+      act(() => {
+        const handled = view.state
+          .facet(EditorView.inputHandler)
+          .some((handler) =>
+            handler(view, from, to, character, () =>
+              view.state.update(view.state.replaceSelection(character)),
+            ),
+          );
+        expect(handled).toBe(true);
+      });
+    };
+
+    type(open);
+    expect(view.state.doc.toString()).toBe(open + close);
+    expect(view.state.selection.main.head).toBe(1);
+    type(close);
+    expect(view.state.doc.toString()).toBe(open + close);
+    expect(view.state.selection.main.head).toBe(2);
+
+    act(() => view.dispatch({ selection: { anchor: 1 } }));
+    fireEvent.keyDown(view.contentDOM, { key: "Backspace" });
+    expect(view.state.doc.toString()).toBe("");
+  });
+
   it.each([136, 400, 612])(
     "keeps tooltips inside the editor viewport near vertical position %s",
     async (top) => {
