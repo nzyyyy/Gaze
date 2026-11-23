@@ -6,6 +6,7 @@ import { DEFAULT_COLOR_SCHEMES } from "../lib/colorSchemes";
 import { DEFAULT_PREFERENCES, type AppSettings } from "../lib/preferences";
 import { DEFAULT_LAYOUT } from "../lib/layout";
 import { SettingsDialog } from "./SettingsDialog";
+import { api } from "../lib/api";
 
 const settings: AppSettings = {
   language: "zh-CN",
@@ -74,7 +75,7 @@ it("filters plugins by category and keeps pending switches available in global s
   );
 });
 
-it("keeps AI configuration on a detail page and saves its draft after returning", async () => {
+it("keeps AI configuration on a detail page and preserves an explicit disabled choice", async () => {
   const user = userEvent.setup();
   const onSave = vi.fn().mockResolvedValue(undefined);
   render(<SettingsDialog settings={settings} onSave={onSave} onClose={vi.fn()} />);
@@ -100,12 +101,18 @@ it("keeps AI configuration on a detail page and saves its draft after returning"
   expect(screen.getByLabelText("Base URL")).toHaveValue(endpoint);
   expect(screen.getByLabelText("模型 ID")).toHaveValue("test-model");
   expect(screen.getByLabelText("API Key", { exact: true })).toHaveValue("test-key");
+  await user.click(screen.getByRole("button", { name: "返回插件列表" }));
+  const enabled = screen.getByRole("switch", { name: "AI 行内补全" });
+  await user.click(enabled);
+  expect(enabled).toBeChecked();
+  await user.click(enabled);
+  expect(enabled).not.toBeChecked();
   await user.click(screen.getByRole("button", { name: "保存设置" }));
   expect(onSave).toHaveBeenCalledWith(
     expect.objectContaining({
       preferences: {
         ...DEFAULT_PREFERENCES,
-        aiCompletionEnabled: true,
+        aiCompletionEnabled: false,
         aiCompletion: {
           protocol: "responses",
           url: endpoint,
@@ -116,6 +123,43 @@ it("keeps AI configuration on a detail page and saves its draft after returning"
     }),
     expect.any(Object),
   );
+});
+
+it("disables reset while an AI connection test is pending", async () => {
+  const user = userEvent.setup();
+  let finish!: () => void;
+  const test = vi.spyOn(api, "testAiCompletion").mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  try {
+    const configured = {
+      ...settings,
+      preferences: {
+        ...DEFAULT_PREFERENCES,
+        aiCompletion: {
+          protocol: "responses" as const,
+          url: "https://model.example",
+          model: "test-model",
+          apiKey: "test-key",
+        },
+      },
+    };
+    render(<SettingsDialog settings={configured} onSave={vi.fn()} onClose={vi.fn()} />);
+    await user.click(category("插件"));
+    await user.click(screen.getByRole("button", { name: "配置 AI 行内补全" }));
+    await user.click(screen.getByRole("button", { name: "测试连接" }));
+    const reset = screen.getByRole("button", { name: "恢复默认" });
+    expect(reset).toBeDisabled();
+    await user.click(reset);
+    expect(screen.getByLabelText("Base URL")).toHaveValue("https://model.example");
+    await act(async () => finish());
+    expect(reset).toBeEnabled();
+  } finally {
+    test.mockRestore();
+  }
 });
 
 it("finds the AI plugin by its detail fields and restores search results on back", async () => {

@@ -593,18 +593,13 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
               apiKey: aiConfig.apiKey.trim(),
             };
             const configured = !!config.url && !!config.model && !!config.apiKey;
-            const firstConfig =
-              configured &&
-              (!settings.preferences.aiCompletion.url || !settings.preferences.aiCompletion.apiKey);
             const next = {
               ...draft,
               preferences: {
                 ...draft.preferences,
                 aiCompletion: config,
                 // An incomplete configuration cannot be enabled, so clearing a field disables it.
-                aiCompletionEnabled: configured
-                  ? firstConfig || draft.preferences.aiCompletionEnabled
-                  : false,
+                aiCompletionEnabled: configured && draft.preferences.aiCompletionEnabled,
               },
             };
             await onSave(next, layout);
@@ -701,7 +696,7 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
           <button
             type="button"
             className="button button-quiet"
-            disabled={busy}
+            disabled={busy || testingAi}
             onClick={() => {
               setDraft({
                 language: DEFAULT_LANGUAGE,
