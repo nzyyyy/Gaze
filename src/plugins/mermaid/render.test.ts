@@ -5,7 +5,7 @@ const { render } = vi.hoisted(() => ({
 }));
 vi.mock("mermaid", () => ({ default: { initialize: vi.fn(), render } }));
 
-import { renderMermaid } from "./mermaid";
+import { renderMermaid } from "./render";
 
 afterEach(() => vi.useRealTimers());
 

@@ -17,6 +17,8 @@ pub struct NativeMenuState {
     can_go_forward: bool,
     split_open: bool,
     terminal_open: bool,
+    terminal_enabled: bool,
+    git_enabled: bool,
     sidebar_view: String,
     theme: ThemePreference,
     auto_save: bool,
@@ -38,6 +40,8 @@ impl NativeMenuState {
             "back" => self.can_go_back,
             "forward" => self.can_go_forward,
             "toggle-split" => self.has_file || self.split_open,
+            "terminal" => self.terminal_enabled,
+            "git" => self.git_enabled,
             _ => true,
         }
     }
@@ -368,7 +372,8 @@ mod tests {
         serde_json::from_value(serde_json::json!({
             "ready": true, "blocked": false, "hasFile": false,
             "canSave": false, "canNavigate": false, "canGoBack": false, "canGoForward": false,
-            "splitOpen": false, "terminalOpen": false, "sidebarView": "files", "theme": "system", "autoSave": true,
+            "splitOpen": false, "terminalOpen": false, "terminalEnabled": true, "gitEnabled": true,
+            "sidebarView": "files", "theme": "system", "autoSave": true,
             "wordWrap": true, "lineNumbers": true, "showStatusBar": true
         }))
         .unwrap()
@@ -387,6 +392,12 @@ mod tests {
         let mut state = state();
         assert!(state.enabled("open-file"));
         assert!(state.enabled("terminal"));
+        state.terminal_enabled = false;
+        state.git_enabled = false;
+        assert!(!state.enabled("terminal"));
+        assert!(!state.enabled("git"));
+        state.terminal_enabled = true;
+        state.git_enabled = true;
         for action in [
             "save",
             "find",

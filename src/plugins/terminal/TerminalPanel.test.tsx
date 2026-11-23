@@ -1,12 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { fontStack } from "../lib/fonts";
-import { DEFAULT_PREFERENCES } from "../lib/preferences";
-import { saveLayout } from "../lib/layout";
-import type { TerminalEvent } from "../lib/types";
+import { fontStack } from "../../lib/fonts";
+import { DEFAULT_PREFERENCES } from "../../lib/preferences";
+import { saveLayout } from "../../lib/layout";
+import type { TerminalEvent } from "../../lib/types";
 import { act } from "@testing-library/react";
-import { setLanguage } from "../lib/i18n";
+import { setLanguage } from "../../lib/i18n";
 
 const mocks = vi.hoisted(() => ({
   create: vi.fn().mockResolvedValue({ shell: "/bin/zsh" }),
@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => ({
   unicode: null as { activeVersion: string } | null,
 }));
 
-vi.mock("../lib/api", () => ({
+vi.mock("../../lib/api", () => ({
   api: {
     createTerminal: mocks.create,
     closeTerminal: mocks.close,

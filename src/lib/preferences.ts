@@ -1,9 +1,14 @@
 import { t } from "./i18n";
+import {
+  BUILTIN_PLUGINS,
+  type BuiltinPluginCategory,
+  type BuiltinPluginKey,
+} from "../plugins/builtins";
 import type { ColorSchemes } from "./colorSchemes";
 import type { FontSettings } from "./fonts";
 import type { ThemePreference } from "./types";
 
-export interface Preferences {
+export interface Preferences extends Record<BuiltinPluginKey, boolean> {
   editorFontSize: number;
   editorLineHeight: number;
   tabSize: number;
@@ -71,6 +76,12 @@ export const DEFAULT_PREFERENCES: Preferences = {
   windowGlassEnabled: true,
   windowSurfaceOpacity: 0.8,
   terminalCursorStyle: "block",
+  mermaidEnabled: true,
+  markdownInsertEnabled: true,
+  markdownMathEnabled: true,
+  terminalEnabled: true,
+  pythonEnabled: true,
+  gitEnabled: true,
 };
 
 export const SETTINGS_CATEGORIES = [
@@ -80,6 +91,7 @@ export const SETTINGS_CATEGORIES = [
   { id: "search", label: "搜索" },
   { id: "terminal", label: "终端" },
   { id: "layout", label: "窗口与布局" },
+  { id: "plugins", label: "插件" },
 ] as const;
 export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number]["id"];
 
@@ -90,6 +102,7 @@ interface FieldInfo {
   category: SettingsCategory;
   label: string;
   description: string;
+  pluginCategory?: BuiltinPluginCategory;
 }
 export type PreferenceField = FieldInfo &
   (
@@ -311,6 +324,11 @@ export const PREFERENCE_FIELDS: PreferenceField[] = [
     label: "显示终端按钮",
     description: "在状态栏显示终端入口；快捷键仍可使用。",
   },
+  ...BUILTIN_PLUGINS.map<PreferenceField>((plugin) => ({
+    ...plugin,
+    type: "boolean",
+    category: "plugins",
+  })),
 ];
 
 export function preferencesError(preferences: Preferences): string | null {

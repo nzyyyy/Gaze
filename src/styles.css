@@ -2376,6 +2376,46 @@ button:focus-visible,
 .settings-section + .settings-section {
   margin-top: 32px;
 }
+.settings-plugin-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-plugin-filters button {
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.settings-plugin-filters button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.settings-plugin-filters button[aria-pressed="true"] {
+  background: var(--sidebar-active);
+  border-color: var(--border);
+  color: var(--text);
+}
+.settings-plugin-filters button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.settings-plugin-tag {
+  display: inline-block;
+  margin-inline-start: 8px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
 .setting-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(140px, 220px);
@@ -2553,6 +2593,9 @@ button:focus-visible,
 .settings-header h2 {
   margin: 0;
   font-size: 16px;
+}
+.settings-header h2:focus {
+  outline: none;
 }
 
 .settings-content {

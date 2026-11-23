@@ -55,6 +55,7 @@ pub struct AppState {
     lsp: Arc<LspManager>,
     watchers: WatcherService,
     terminal: TerminalManager,
+    settings_lock: tokio::sync::Mutex<()>,
     background_started: AtomicBool,
     external_files: external_files::ExternalFiles,
     recovery: recovery::RecoveryStore,
@@ -111,12 +112,22 @@ impl AppState {
             lsp,
             watchers: WatcherService::new(),
             terminal: TerminalManager::default(),
+            settings_lock: tokio::sync::Mutex::new(()),
             background_started: AtomicBool::new(false),
             external_files: external_files::ExternalFiles::default(),
             recovery: recovery::RecoveryStore::new(data_dir.join("recovery")),
             replace_previews: replace::ReplacePreviewService::default(),
             replace_lock: tokio::sync::Mutex::new(()),
         })
+    }
+
+    async fn apply_builtin_plugins(&self, app: &AppHandle, preferences: &preferences::Preferences) {
+        self.lsp
+            .set_python_enabled(preferences.python_enabled)
+            .await;
+        self.terminal.set_enabled(preferences.terminal_enabled);
+        app.state::<git_workspace::AppState>()
+            .set_enabled(preferences.git_enabled);
     }
 
     async fn project(&self, project_id: &str) -> GazeResult<Project> {
@@ -299,7 +310,14 @@ async fn bootstrap_workspace(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<WorkspaceSnapshot, CommandError> {
-    let snapshot = state.snapshot().await.map_err(CommandError::from)?;
+    let snapshot = {
+        let _settings = state.settings_lock.lock().await;
+        let snapshot = state.snapshot().await.map_err(CommandError::from)?;
+        state
+            .apply_builtin_plugins(&app, &snapshot.preferences)
+            .await;
+        snapshot
+    };
     state
         .path_index
         .load_cached(&state.cache, &snapshot.projects)
@@ -482,12 +500,18 @@ async fn set_theme(theme: String, state: State<'_, AppState>) -> Result<(), Comm
 #[tauri::command(rename_all = "camelCase")]
 async fn save_settings(
     settings: preferences::AppSettings,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
+    let _settings = state.settings_lock.lock().await;
     settings
         .save(&state.cache)
         .await
-        .map_err(CommandError::from)
+        .map_err(CommandError::from)?;
+    state
+        .apply_builtin_plugins(&app, &settings.preferences)
+        .await;
+    Ok(())
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -1045,6 +1069,10 @@ async fn list_python_environments(
     project_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<python::PythonEnvironment>, CommandError> {
+    state
+        .lsp
+        .ensure_python_enabled()
+        .map_err(CommandError::from)?;
     let project = state
         .project(&project_id)
         .await

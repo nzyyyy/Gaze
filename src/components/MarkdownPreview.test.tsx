@@ -8,7 +8,7 @@ const apiMock = vi.hoisted(() => ({
   openExternalUrl: vi.fn(),
 }));
 vi.mock("../lib/api", () => ({ api: apiMock }));
-vi.mock("../lib/mermaid", () => ({
+vi.mock("../plugins/mermaid/render", () => ({
   renderMermaid: vi.fn(
     async (code: string) =>
       `<svg viewBox="0 0 800 400" data-code="${encodeURIComponent(code)}"></svg>`,
@@ -20,7 +20,7 @@ vi.mock("@tauri-apps/api/core", async (importOriginal) => ({
     `${protocol}://localhost/${encodeURIComponent(filePath)}`,
 }));
 
-import { renderMermaid } from "../lib/mermaid";
+import { renderMermaid } from "../plugins/mermaid/render";
 import MarkdownPreview from "./MarkdownPreview";
 
 const props = {
@@ -186,12 +186,17 @@ describe("MarkdownPreview", () => {
     expect(container.querySelector("script, iframe")).toBeNull();
   });
 
-  it("renders math and highlights fenced code", () => {
-    const { container } = render(
-      <MarkdownPreview {...props} content={"$x^2$\n\n```ts\nconst x = 1;\n```"} />,
-    );
+  it("hot toggles math rendering independently of code highlighting", () => {
+    const content = "$x^2$\n\n```ts\nconst x = 1;\n```";
+    const { container, rerender } = render(<MarkdownPreview {...props} content={content} />);
     expect(container.querySelector(".katex")).not.toBeNull();
     expect(container.querySelector("pre code .token.keyword")?.textContent).toBe("const");
+    rerender(<MarkdownPreview {...props} content={content} markdownMathEnabled={false} />);
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(screen.getByText("$x^2$")).toBeInTheDocument();
+    expect(container.querySelector("pre code .token.keyword")?.textContent).toBe("const");
+    rerender(<MarkdownPreview {...props} content={content} />);
+    expect(container.querySelector(".katex")).not.toBeNull();
   });
 
   it("zooms Mermaid without rebuilding the SVG or rerendering the diagram", async () => {
@@ -222,6 +227,39 @@ describe("MarkdownPreview", () => {
     expect(canvas).toHaveStyle({ width: "100%" });
     expect(canvas?.firstElementChild).toBe(svg);
     expect(renderMermaid).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders Mermaid source while the plugin is off and renders a diagram when re-enabled", async () => {
+    const code = "flowchart TB\n  A --> B";
+    const content = `\`\`\`mermaid\n${code}\n\`\`\``;
+    const { container, rerender } = render(
+      <MarkdownPreview {...props} content={content} mermaidEnabled={false} />,
+    );
+    expect(container.querySelector("pre code.language-mermaid")?.textContent).toBe(`${code}\n`);
+    expect(renderMermaid).not.toHaveBeenCalled();
+
+    rerender(<MarkdownPreview {...props} content={content} mermaidEnabled />);
+    expect(await screen.findByRole("figure", { name: "Mermaid 图表" })).toBeInTheDocument();
+
+    rerender(<MarkdownPreview {...props} content={content} mermaidEnabled={false} />);
+    expect(screen.queryByRole("figure", { name: "Mermaid 图表" })).not.toBeInTheDocument();
+    expect(container.querySelector("pre code.language-mermaid")?.textContent).toBe(`${code}\n`);
+    expect(renderMermaid).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels pending Mermaid work when the plugin is disabled and drops a late result", async () => {
+    let finish!: (svg: string) => void;
+    const renderDiagram = vi.mocked(renderMermaid);
+    renderDiagram.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    const content = "```mermaid\nflowchart TB\n  A --> B\n```";
+    const { rerender } = render(<MarkdownPreview {...props} content={content} />);
+    expect(renderDiagram).toHaveBeenCalledOnce();
+    const signal = renderDiagram.mock.calls[0]![1];
+
+    rerender(<MarkdownPreview {...props} content={content} mermaidEnabled={false} />);
+    expect(signal.aborted).toBe(true);
+    await act(async () => finish('<svg viewBox="0 0 800 400"></svg>'));
+    expect(screen.queryByRole("figure", { name: "Mermaid 图表" })).not.toBeInTheDocument();
   });
 
   it("defers an offscreen Mermaid diagram and discards a result after leaving the viewport", async () => {

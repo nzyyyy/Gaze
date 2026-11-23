@@ -18,6 +18,55 @@ function category(name: string) {
   return within(screen.getByRole("navigation", { name: "设置分类" })).getByRole("button", { name });
 }
 
+it("focuses the heading on open and keeps the close button reachable with Tab", async () => {
+  const user = userEvent.setup();
+  const onClose = vi.fn();
+  render(<SettingsDialog settings={settings} onSave={vi.fn()} onClose={onClose} />);
+  expect(screen.getByRole("heading", { name: "设置" })).toHaveFocus();
+  await user.tab();
+  expect(screen.getByRole("button", { name: "关闭设置" })).toHaveFocus();
+  await user.keyboard("{Enter}");
+  expect(onClose).toHaveBeenCalledOnce();
+});
+
+it("filters plugins by category and keeps pending switches available in global search", async () => {
+  const user = userEvent.setup();
+  const onSave = vi.fn().mockResolvedValue(undefined);
+  render(<SettingsDialog settings={settings} onSave={onSave} onClose={vi.fn()} />);
+  await user.click(category("插件"));
+  const filters = within(screen.getByRole("group", { name: "插件分类" }));
+  expect(filters.getByRole("button", { name: "全部", pressed: true })).toBeInTheDocument();
+  expect(screen.getAllByRole("switch")).toHaveLength(6);
+
+  const markdown = filters.getByRole("button", { name: "Markdown" });
+  markdown.focus();
+  await user.keyboard("{Enter}");
+  expect(markdown).toHaveAttribute("aria-pressed", "true");
+  for (const name of ["Mermaid", "Markdown 快捷插入", "KaTeX 数学公式"]) {
+    expect(screen.getByRole("switch", { name })).toBeInTheDocument();
+  }
+  expect(screen.getAllByRole("switch")).toHaveLength(3);
+
+  await user.click(filters.getByRole("button", { name: "语言支持" }));
+  expect(screen.getByRole("switch", { name: "Python 语义支持" })).toBeInTheDocument();
+  expect(screen.getAllByRole("switch")).toHaveLength(1);
+
+  await user.click(filters.getByRole("button", { name: "开发工具" }));
+  expect(screen.getByRole("switch", { name: "集成终端" })).toBeInTheDocument();
+  await user.click(screen.getByRole("switch", { name: "Git 集成" }));
+  await user.click(markdown);
+  expect(screen.queryByRole("switch", { name: "Git 集成" })).not.toBeInTheDocument();
+  expect(onSave).not.toHaveBeenCalled();
+  await user.type(screen.getByRole("searchbox", { name: "搜索设置" }), "开发工具");
+  expect(screen.getByRole("switch", { name: "Git 集成" })).not.toBeChecked();
+  expect(screen.getByRole("switch", { name: "集成终端" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "保存设置" }));
+  expect(onSave).toHaveBeenCalledWith(
+    expect.objectContaining({ preferences: { ...DEFAULT_PREFERENCES, gitEnabled: false } }),
+    expect.any(Object),
+  );
+});
+
 it("selects Codex by default and finds and saves both palettes", async () => {
   const user = userEvent.setup();
   const onSave = vi.fn().mockResolvedValue(undefined);
@@ -259,6 +308,13 @@ it("saves the selected language and searches translated settings", async () => {
     await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "font size");
     expect(screen.getByRole("spinbutton", { name: "Editor font size" })).toBeInTheDocument();
     expect(screen.getByRole("spinbutton", { name: "Terminal font size" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Plugins" }));
+    const filters = within(screen.getByRole("group", { name: "Plugin categories" }));
+    expect(filters.getByRole("button", { name: "Language support" })).toBeInTheDocument();
+    expect(filters.getByRole("button", { name: "Developer tools" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Mermaid" })).toHaveAccessibleDescription(
+      "Render Mermaid diagrams in Markdown previews",
+    );
   } finally {
     view.unmount();
     act(() => setLanguage("zh-CN"));

@@ -37,6 +37,12 @@ pub struct Preferences {
     pub window_glass_enabled: bool,
     pub window_surface_opacity: f64,
     pub terminal_cursor_style: CursorStyle,
+    pub mermaid_enabled: bool,
+    pub markdown_insert_enabled: bool,
+    pub markdown_math_enabled: bool,
+    pub terminal_enabled: bool,
+    pub python_enabled: bool,
+    pub git_enabled: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
@@ -79,6 +85,12 @@ impl Default for Preferences {
             window_glass_enabled: true,
             window_surface_opacity: 0.80,
             terminal_cursor_style: CursorStyle::Block,
+            mermaid_enabled: true,
+            markdown_insert_enabled: true,
+            markdown_math_enabled: true,
+            terminal_enabled: true,
+            python_enabled: true,
+            git_enabled: true,
         }
     }
 }
@@ -184,6 +196,11 @@ mod tests {
         assert!(serde_json::from_str::<Language>("\"fr\"").is_err());
         let defaults = Preferences::default();
         assert_eq!(serde_json::from_str::<Preferences>("{}").unwrap(), defaults);
+        let legacy = serde_json::from_str::<Preferences>(r#"{"wordWrap":false}"#).unwrap();
+        assert!(legacy.mermaid_enabled);
+        assert!(legacy.markdown_insert_enabled && legacy.markdown_math_enabled);
+        assert!(legacy.terminal_enabled && legacy.python_enabled && legacy.git_enabled);
+        assert!(!legacy.word_wrap);
         assert!(defaults.show_minimap);
         assert!(defaults.window_glass_enabled);
         assert_eq!(defaults.window_surface_opacity, 0.80);
@@ -202,20 +219,35 @@ mod tests {
                 word_wrap: false,
                 show_minimap: false,
                 terminal_font_size: 16.0,
+                mermaid_enabled: false,
+                markdown_insert_enabled: false,
+                markdown_math_enabled: false,
+                terminal_enabled: false,
+                python_enabled: false,
+                git_enabled: false,
                 ..defaults.clone()
             },
         };
         let cache = Cache::open_in_memory().unwrap();
         settings.save(&cache).await.unwrap();
+        let saved_preferences = cache.setting("preferences").await.unwrap().unwrap();
+        let saved_json: serde_json::Value = serde_json::from_str(&saved_preferences).unwrap();
+        for key in [
+            "mermaidEnabled",
+            "markdownInsertEnabled",
+            "markdownMathEnabled",
+            "terminalEnabled",
+            "pythonEnabled",
+            "gitEnabled",
+        ] {
+            assert_eq!(saved_json[key], false, "{key}");
+        }
         assert_eq!(
             cache.setting("theme").await.unwrap().as_deref(),
             Some("dark")
         );
         assert_eq!(
-            serde_json::from_str::<Preferences>(
-                &cache.setting("preferences").await.unwrap().unwrap()
-            )
-            .unwrap(),
+            serde_json::from_str::<Preferences>(&saved_preferences).unwrap(),
             settings.preferences
         );
         assert_eq!(

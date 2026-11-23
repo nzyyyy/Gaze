@@ -6,6 +6,7 @@ mod positions;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -509,6 +510,7 @@ pub struct LspManager {
     servers: Vec<ResolvedLspServer>,
     sessions: Arc<Mutex<HashMap<String, Arc<LspSession>>>>,
     start_lock: tokio::sync::Mutex<()>,
+    python_enabled: AtomicBool,
 }
 
 impl LspManager {
@@ -518,6 +520,7 @@ impl LspManager {
             servers: tools.lsp.clone(),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             start_lock: tokio::sync::Mutex::new(()),
+            python_enabled: AtomicBool::new(true),
         }
     }
 
@@ -542,6 +545,13 @@ impl LspManager {
         }
 
         let _start_guard = self.start_lock.lock().await;
+        if Path::new(relative_path)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(is_python_extension)
+        {
+            self.ensure_python_enabled()?;
+        }
         if let Some(session) = self.open_session(&key) {
             return Ok(session);
         }
@@ -553,7 +563,7 @@ impl LspManager {
         if let Some(previous) = previous {
             previous.client.kill().await;
         }
-        let python_path = if serves_python(server) {
+        let python_path = if self.python_enabled.load(Ordering::Acquire) && serves_python(server) {
             self.python_environment(project)
                 .await?
                 .environment
@@ -642,6 +652,7 @@ impl LspManager {
         &self,
         project: &Project,
     ) -> GazeResult<PythonEnvironmentStatus> {
+        self.ensure_python_enabled()?;
         let selected = self
             .cache
             .setting(&python::setting_key(&project.id))
@@ -659,6 +670,7 @@ impl LspManager {
         interpreter: Option<String>,
     ) -> GazeResult<PythonEnvironmentStatus> {
         let _start_guard = self.start_lock.lock().await;
+        self.ensure_python_enabled()?;
         let root = PathBuf::from(&project.root);
         let status = tokio::task::spawn_blocking(move || {
             if let Some(path) = &interpreter {
@@ -673,23 +685,54 @@ impl LspManager {
                 status.selected.as_deref().unwrap_or_default(),
             )
             .await?;
-        let sessions = {
-            let mut sessions = self
-                .sessions
-                .lock()
-                .map_err(|_| GazeError::Message("语言服务器会话锁已损坏。".into()))?;
-            self.servers
-                .iter()
-                .filter(|server| serves_python(server))
-                .filter_map(|server| {
-                    sessions.remove(&format!("{}\u{0000}{}", project.id, server.config.id))
-                })
-                .collect::<Vec<_>>()
-        };
-        for session in sessions {
-            session.shutdown().await;
-        }
+        shutdown_sessions(self.take_python_sessions(Some(&project.id))?).await;
         Ok(status)
+    }
+
+    pub fn ensure_python_enabled(&self) -> GazeResult<()> {
+        if !self.python_enabled.load(Ordering::Acquire) {
+            return Err(GazeError::Unsupported("Python 语义支持已停用。".into()));
+        }
+        Ok(())
+    }
+
+    pub async fn set_python_enabled(&self, enabled: bool) {
+        if self.python_enabled.load(Ordering::Acquire) == enabled {
+            return;
+        }
+        let _start_guard = self.start_lock.lock().await;
+        if self.python_enabled.swap(enabled, Ordering::AcqRel) && !enabled {
+            match self.take_python_sessions(None) {
+                Ok(sessions) => shutdown_sessions(sessions).await,
+                Err(error) => {
+                    tracing::warn!(message = %error.message(), "could not stop Python LSP sessions")
+                }
+            }
+        }
+    }
+
+    fn take_python_sessions(&self, project_id: Option<&str>) -> GazeResult<Vec<Arc<LspSession>>> {
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| GazeError::Message("语言服务器会话锁已损坏。".into()))?;
+        let keys: Vec<_> = sessions
+            .keys()
+            .filter(|key| {
+                key.split_once('\0').is_some_and(|(project, id)| {
+                    project_id.is_none_or(|wanted| wanted == project)
+                        && self
+                            .servers
+                            .iter()
+                            .any(|server| server.config.id == id && serves_python(server))
+                })
+            })
+            .cloned()
+            .collect();
+        Ok(keys
+            .into_iter()
+            .filter_map(|key| sessions.remove(&key))
+            .collect())
     }
 
     fn server_for_path(&self, relative_path: &str) -> Option<&ResolvedLspServer> {
@@ -697,6 +740,9 @@ impl LspManager {
             .extension()
             .and_then(|extension| extension.to_str())
             .map(str::to_lowercase)?;
+        if is_python_extension(&extension) && self.ensure_python_enabled().is_err() {
+            return None;
+        }
         self.servers.iter().find(|server| {
             server.config.extensions.iter().any(|item| {
                 item.trim_start_matches('.')
@@ -930,23 +976,32 @@ impl LspManager {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        let mut tasks = tokio::task::JoinSet::new();
-        for session in sessions {
-            tasks.spawn(async move {
-                session.shutdown().await;
-            });
-        }
-        while tasks.join_next().await.is_some() {}
+        shutdown_sessions(sessions).await;
     }
 }
 
+async fn shutdown_sessions(sessions: Vec<Arc<LspSession>>) {
+    let mut tasks = tokio::task::JoinSet::new();
+    for session in sessions {
+        tasks.spawn(async move {
+            session.shutdown().await;
+        });
+    }
+    while tasks.join_next().await.is_some() {}
+}
+
+fn is_python_extension(extension: &str) -> bool {
+    ["py", "pyi", "pyw"]
+        .iter()
+        .any(|item| extension.eq_ignore_ascii_case(item))
+}
+
 fn serves_python(server: &ResolvedLspServer) -> bool {
-    server.config.extensions.iter().any(|ext| {
-        matches!(
-            ext.trim_start_matches('.').to_ascii_lowercase().as_str(),
-            "py" | "pyi" | "pyw"
-        )
-    })
+    server
+        .config
+        .extensions
+        .iter()
+        .any(|ext| is_python_extension(ext.trim_start_matches('.')))
 }
 
 fn language_id_for_path(path: &Path, server_id: &str) -> String {
@@ -1468,7 +1523,14 @@ mod tests {
         let tools = Tools {
             rg: None,
             ctags: None,
-            lsp: vec![],
+            lsp: crate::config::AppConfig::default()
+                .servers()
+                .into_iter()
+                .map(|config| ResolvedLspServer {
+                    config,
+                    executable: None,
+                })
+                .collect(),
             config_message: None,
         };
         let manager = LspManager::new(&tools, cache);
@@ -1483,6 +1545,13 @@ mod tests {
             .unwrap();
         let cache = Cache::open(&database).unwrap();
         let reopened = LspManager::new(&tools, cache.clone());
+        assert!(reopened.has_server_for("main.py"));
+        reopened.set_python_enabled(false).await;
+        assert!(!reopened.has_server_for("main.py"));
+        assert!(reopened.has_server_for("main.ts"));
+        assert!(reopened.python_environment(&project).await.is_err());
+        reopened.set_python_enabled(true).await;
+        assert!(reopened.has_server_for("main.py"));
         assert_eq!(
             reopened
                 .python_environment(&project)
@@ -1594,7 +1663,28 @@ mod tests {
                 .all(|item| item["severity"] != 1 || item["start"]["line"] != 0),
             "{diagnostics}"
         );
-        session.shutdown().await;
+        let tools = Tools {
+            rg: None,
+            ctags: None,
+            lsp: vec![server],
+            config_message: None,
+        };
+        let manager = LspManager::new(&tools, Cache::open_in_memory().unwrap());
+        let session = Arc::new(session);
+        manager
+            .sessions
+            .lock()
+            .unwrap()
+            .insert("test\0python".into(), Arc::clone(&session));
+        manager.set_python_enabled(false).await;
+        assert!(manager.sessions.lock().unwrap().is_empty());
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !session.client.is_closed() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("disabled Python language server should exit");
     }
 
     fn language_server_path() -> Option<PathBuf> {
@@ -1866,6 +1956,7 @@ mod tests {
                 Arc::clone(&session),
             )]))),
             start_lock: tokio::sync::Mutex::new(()),
+            python_enabled: AtomicBool::new(true),
         };
         manager.forget_documents(&root.join("src")).await;
         let documents = session.documents.lock().await;

@@ -11,7 +11,12 @@ interface ProjectStatus {
   files: FileChange[];
 }
 
-export function useFileTreeGit(projects: Project[], refreshToken: number, active = true) {
+export function useFileTreeGit(
+  projects: Project[],
+  refreshToken: number,
+  active = true,
+  enabled = true,
+) {
   const language = useLanguage();
   const [statuses, setStatuses] = useState<Record<string, ProjectStatus>>({});
   const scheduleRef = useRef(() => {});
@@ -20,6 +25,10 @@ export function useFileTreeGit(projects: Project[], refreshToken: number, active
   const scope = JSON.stringify(projects.map((project) => [project.id, project.root]));
 
   useEffect(() => {
+    if (!enabled) {
+      setStatuses({});
+      return;
+    }
     const visible = projects;
     const contexts = new Map<string, { repositoryId: number; prefix: string }>();
     const versions = new Map<number, number>();
@@ -120,7 +129,7 @@ export function useFileTreeGit(projects: Project[], refreshToken: number, active
     };
     // Project membership and roots own subscriptions; selection and expansion don't clear status.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope]);
+  }, [scope, enabled]);
 
   useEffect(() => {
     if (refreshToken) scheduleRef.current();
@@ -134,12 +143,12 @@ export function useFileTreeGit(projects: Project[], refreshToken: number, active
     () =>
       new Map(
         projects
-          .filter((project) => statuses[project.id]?.root === project.root)
+          .filter((project) => enabled && statuses[project.id]?.root === project.root)
           .map((project) => {
             const status = statuses[project.id]!;
             return [project.id, fileTreeStatus(status.files, status.prefix)] as const;
           }),
       ),
-    [projects, statuses, language],
+    [projects, statuses, language, enabled],
   );
 }

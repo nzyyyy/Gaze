@@ -567,6 +567,31 @@ describe("CodeReader editing", () => {
     expect(ref.current!.getText()).toBe("/");
   });
 
+  it("hot toggles Markdown quick insert without recreating the editor or losing undo", async () => {
+    const { ref, props, rerender } = renderReader({ filename: "guide.md", content: "text" });
+    const view = await markdownEditor(0);
+    act(() => view.dispatch({ selection: { anchor: 0, head: 4 } }));
+    pressMarkdownShortcut(view, "b");
+    expect(ref.current!.getText()).toBe("**text**");
+
+    rerender(
+      <CodeReader
+        {...props}
+        preferences={{ ...DEFAULT_PREFERENCES, markdownInsertEnabled: false }}
+      />,
+    );
+    expect(EditorView.findFromDOM(await editorContent())).toBe(view);
+    pressMarkdownShortcut(view, "i");
+    expect(ref.current!.getText()).toBe("**text**");
+    act(() => expect(undo(view)).toBe(true));
+    expect(ref.current!.getText()).toBe("text");
+
+    rerender(<CodeReader {...props} />);
+    act(() => view.dispatch({ selection: { anchor: 0, head: 4 } }));
+    pressMarkdownShortcut(view, "i");
+    expect(ref.current!.getText()).toBe("*text*");
+  });
+
   it("filters in either language and limits commands after prose to inline templates", async () => {
     setLanguage("en");
     try {

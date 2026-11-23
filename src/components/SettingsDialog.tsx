@@ -23,10 +23,12 @@ import {
   type SettingsCategory,
 } from "../lib/preferences";
 import { DEFAULT_LAYOUT, LAYOUT_SIZE_LIMITS, readLayout, type Layout } from "../lib/layout";
+import { BUILTIN_PLUGIN_CATEGORIES, type BuiltinPluginCategory } from "../plugins/builtins";
 
 interface SettingsDialogProps {
   settings: AppSettings;
   isMac?: boolean;
+  terminalSessionsActive?: boolean;
   onSave: (settings: AppSettings, layout: Layout) => Promise<void>;
   onClose: () => void;
 }
@@ -41,15 +43,20 @@ const AREAS = [
   { key: "terminal", label: "终端", sample: "❯ ~/项目/gaze   main\n pnpm dev  ✓ ready" },
 ] as const;
 
+const PLUGIN_FILTERS = { all: "全部", ...BUILTIN_PLUGIN_CATEGORIES };
+const pluginFilterIds = Object.keys(PLUGIN_FILTERS) as (keyof typeof PLUGIN_FILTERS)[];
+
 function SettingRow({
   id,
   label,
   description,
+  tag,
   children,
 }: {
   id: string;
   label: string;
   description: string;
+  tag?: string;
   children: ReactNode;
 }) {
   return (
@@ -58,6 +65,7 @@ function SettingRow({
         <label id={`${id}-label`} htmlFor={id}>
           {label}
         </label>
+        {tag && <span className="settings-plugin-tag">{tag}</span>}
         <p id={`${id}-description`}>{description}</p>
       </div>
       <div className="setting-control">{children}</div>
@@ -71,16 +79,29 @@ const LAYOUT_FIELDS = [
   { key: "outputHeight", label: "Git 输出面板高度", ...LAYOUT_SIZE_LIMITS.outputHeight },
 ] as const;
 
-export function SettingsDialog({ settings, isMac = false, onSave, onClose }: SettingsDialogProps) {
+export function SettingsDialog({
+  settings,
+  isMac = false,
+  terminalSessionsActive = false,
+  onSave,
+  onClose,
+}: SettingsDialogProps) {
   useLanguage();
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState(settings);
   const [layout, setLayout] = useState(readLayout);
   const [category, setCategory] = useState<SettingsCategory>("appearance");
+  const [pluginFilter, setPluginFilter] = useState<BuiltinPluginCategory | "all">("all");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const endingTerminal =
+    terminalSessionsActive &&
+    settings.preferences.terminalEnabled &&
+    !draft.preferences.terminalEnabled;
+  const disablingGit = settings.preferences.gitEnabled && !draft.preferences.gitEnabled;
   const search = query.trim().toLowerCase();
   const matches = (id: SettingsCategory, text: string) =>
     search
@@ -93,6 +114,7 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
     const previous = document.activeElement;
     const dialog = dialogRef.current;
     dialog?.showModal();
+    titleRef.current?.focus({ preventScroll: true });
     return () => {
       dialog?.close();
       if (previous instanceof HTMLElement) previous.focus();
@@ -104,9 +126,14 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
   };
 
   const sections = SETTINGS_CATEGORIES.map(({ id, label }) => {
-    const fields = PREFERENCE_FIELDS.filter(
-      (field) => field.category === id && matches(id, `${t(field.label)} ${t(field.description)}`),
-    );
+    const fields = PREFERENCE_FIELDS.filter((field) => {
+      if (field.category !== id) return false;
+      if (!search && id === "plugins" && pluginFilter !== "all") {
+        return category === id && field.pluginCategory === pluginFilter;
+      }
+      const tag = field.pluginCategory ? t(BUILTIN_PLUGIN_CATEGORIES[field.pluginCategory]) : "";
+      return matches(id, `${t(field.label)} ${t(field.description)} ${tag}`);
+    });
     const fonts = AREAS.filter(
       (area) =>
         (area.key === "ui" ? "appearance" : area.key) === id &&
@@ -124,6 +151,20 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
     return (
       <section className="settings-section" key={id} aria-labelledby={`settings-${id}-title`}>
         <h3 id={`settings-${id}-title`}>{t(label)}</h3>
+        {id === "plugins" && !search && (
+          <div className="settings-plugin-filters" role="group" aria-label={t("插件分类")}>
+            {pluginFilterIds.map((filter) => (
+              <button
+                key={filter}
+                type="button"
+                aria-pressed={pluginFilter === filter}
+                onClick={() => setPluginFilter(filter)}
+              >
+                {t(PLUGIN_FILTERS[filter])}
+              </button>
+            ))}
+          </div>
+        )}
         {locale && (
           <SettingRow id="language" label={t("语言")} description={t("选择界面语言，保存后生效。")}>
             <Select<Language>
@@ -232,6 +273,11 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
             id={field.key}
             label={t(field.label)}
             description={t(field.description)}
+            tag={
+              field.pluginCategory && (search || pluginFilter === "all")
+                ? t(BUILTIN_PLUGIN_CATEGORIES[field.pluginCategory])
+                : undefined
+            }
           >
             {field.type === "boolean" ? (
               <input
@@ -383,7 +429,9 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
       >
         <header className="settings-header">
           <div>
-            <h2 id="settings-title">{t("设置")}</h2>
+            <h2 id="settings-title" ref={titleRef} tabIndex={-1}>
+              {t("设置")}
+            </h2>
             <p>{t("自定义你的阅读与编辑环境")}</p>
           </div>
           <button
@@ -458,6 +506,11 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
             {error}
           </p>
         )}
+        {endingTerminal && (
+          <p className="settings-error" id="settings-terminal-warning">
+            {t("保存后将结束所有终端会话，其中运行的任务可能中断。")}
+          </p>
+        )}
         <footer className="settings-actions">
           <button
             type="button"
@@ -481,9 +534,16 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
           <button type="button" className="button" onClick={onClose} disabled={busy}>
             {t("取消")}
           </button>
-          <button type="submit" className="button button-primary" disabled={busy}>
+          <button
+            type="submit"
+            className="button button-primary"
+            disabled={busy}
+            aria-describedby={endingTerminal ? "settings-terminal-warning" : undefined}
+          >
             {busy && <LoaderCircle size={13} className="spin" />}
-            {busy ? t("保存中…") : t("保存设置")}
+            {busy
+              ? t(disablingGit ? "正在停用 Git…" : "保存中…")
+              : t(endingTerminal ? "保存并结束终端会话" : "保存设置")}
           </button>
         </footer>
       </form>

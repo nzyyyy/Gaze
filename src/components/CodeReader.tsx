@@ -57,7 +57,8 @@ import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
 import { minimap } from "../lib/minimap";
 import { rainbowBrackets } from "../lib/rainbowBrackets";
 import type { EditorViewState } from "../lib/session";
-import { isMarkdownFile, matchLanguage } from "../lib/language";
+import { isMarkdownFile, isPythonFile, matchLanguage } from "../lib/language";
+import { markdownInsert } from "../plugins/markdown-insert";
 import type {
   EditorPane,
   EditorStatus,
@@ -370,7 +371,6 @@ function initialExtensions(
   themeCompartment: Compartment,
   highlightCompartment: Compartment,
   fileName: string,
-  onGitSelect: (block: ChangeBlock, element: HTMLElement) => void,
   onDocumentChanged: (view: EditorView) => void,
 ) {
   const keyBindings = [
@@ -382,7 +382,6 @@ function initialExtensions(
     ...historyKeymap,
   ];
   const extensions = [
-    gitChangeGutter(onGitSelect),
     highlightSpecialChars(),
     drawSelection(),
     rectangularSelection(),
@@ -479,6 +478,8 @@ export function CodeReader({
   const surfaceRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const diagnosticsCompartment = useRef(new Compartment());
+  const languageToolsCompartment = useRef(new Compartment());
+  const gitGutterCompartment = useRef(new Compartment());
   const previousPythonRevision = useRef(pythonRevision);
   const localeCompartment = useRef(new Compartment());
   const themeCompartment = useRef(new Compartment());
@@ -518,7 +519,7 @@ export function CodeReader({
     status: "clean",
   }));
   const scheduleAutoSaveRef = useRef<() => void>(() => undefined);
-  const gitBase = useFileBase(tab.projectId, tab.path, active);
+  const gitBase = useFileBase(tab.projectId, tab.path, active, preferences.gitEnabled);
   const gitBaseRef = useRef<string | null>(null);
   const gitDiffTimerRef = useRef<number | null>(null);
   const gitDiffRequestRef = useRef(0);
@@ -541,6 +542,8 @@ export function CodeReader({
   const previewTimerRef = useRef<number | null>(null);
   const [previewNotice, setPreviewNotice] = useState<string | null>(null);
   const markdown = isMarkdownFile(tab.name);
+  const quickInsertEnabled = markdown && preferences.markdownInsertEnabled;
+  const semanticEnabled = !isPythonFile(tab.name) || preferences.pythonEnabled;
   const previewVisible =
     preview && markdown && loaded?.content.kind === "text" && loaded.content.mode === "normal";
   const previewRef = useRef(false);
@@ -699,6 +702,7 @@ export function CodeReader({
 
   const scheduleGitDiff = useCallback(
     (view: EditorView) => {
+      if (gitBaseRef.current === null) return;
       if (gitDiffTimerRef.current !== null) window.clearTimeout(gitDiffTimerRef.current);
       gitDiffTimerRef.current = window.setTimeout(() => {
         gitDiffTimerRef.current = null;
@@ -1052,6 +1056,7 @@ export function CodeReader({
       extensions: [
         localeCompartment.current.of([]),
         diagnosticsCompartment.current.of([]),
+        gitGutterCompartment.current.of([]),
         initialExtensions(
           theme,
           content.editable,
@@ -1059,7 +1064,6 @@ export function CodeReader({
           themeCompartment.current,
           highlightCompartment.current,
           tab.name,
-          (block, element) => gitSelectRef.current(block, element),
           (view) => {
             const baseline = baselineRef.current;
             const doc = view.state.doc;
@@ -1100,10 +1104,7 @@ export function CodeReader({
               (path, fragment) => onOpenFileLinkRef.current?.(tab.projectId, path, fragment),
             )
           : [],
-        content.mode === "normal" ? codeHover(tab.projectId, tab.path) : [],
-        content.editable && content.mode === "normal"
-          ? codeCompletion(tab.projectId, tab.path, markdown)
-          : [],
+        languageToolsCompartment.current.of([]),
         preferencesCompartment.current.of(
           preferenceExtensions(
             preferencesRef.current,
@@ -1197,6 +1198,23 @@ export function CodeReader({
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
+    view.dispatch({
+      effects: gitGutterCompartment.current.reconfigure(
+        preferences.gitEnabled
+          ? gitChangeGutter((block, element) => gitSelectRef.current(block, element))
+          : [],
+      ),
+    });
+    if (!preferences.gitEnabled) {
+      gitDiffRequestRef.current += 1;
+      setGitBlocks([]);
+      setChangePopup(null);
+    }
+  }, [preferences.gitEnabled, loaded]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
     if (gitDiffTimerRef.current !== null) {
       window.clearTimeout(gitDiffTimerRef.current);
       gitDiffTimerRef.current = null;
@@ -1261,13 +1279,34 @@ export function CodeReader({
 
   useEffect(() => {
     const view = viewRef.current;
+    const document = documentRef.current;
+    if (!view || document?.mode !== "normal") return;
+    closeCompletion(view);
+    view.dispatch({
+      effects: languageToolsCompartment.current.reconfigure([
+        semanticEnabled ? codeHover(tab.projectId, tab.path) : [],
+        document.editable
+          ? codeCompletion(
+              tab.projectId,
+              tab.path,
+              quickInsertEnabled ? markdownInsert : undefined,
+              semanticEnabled,
+            )
+          : [],
+      ]),
+    });
+  }, [loaded, tab.projectId, tab.path, quickInsertEnabled, semanticEnabled]);
+
+  useEffect(() => {
+    const view = viewRef.current;
     if (!view) return;
-    if (previousPythonRevision.current !== pythonRevision) {
+    if (!semanticEnabled || previousPythonRevision.current !== pythonRevision) {
       previousPythonRevision.current = pythonRevision;
       closeCompletion(view);
       view.dispatch(setDiagnostics(view.state, []), { effects: closeHoverTooltips });
     }
     const enabled =
+      semanticEnabled &&
       active &&
       loaded?.content.kind === "text" &&
       loaded.content.mode === "normal" &&
@@ -1277,7 +1316,7 @@ export function CodeReader({
         enabled ? codeDiagnostics(tab.projectId, tab.path) : [],
       ),
     });
-  }, [active, loaded, tab.projectId, tab.path, pythonRevision]);
+  }, [active, loaded, tab.projectId, tab.path, pythonRevision, semanticEnabled]);
 
   useEffect(() => {
     clearAutoSaveTimer();
@@ -1530,6 +1569,8 @@ export function CodeReader({
             projectId={tab.projectId}
             documentPath={tab.path}
             active={active}
+            mermaidEnabled={preferences.mermaidEnabled}
+            markdownMathEnabled={preferences.markdownMathEnabled}
             request={previewRequest}
             onOpenFile={onOpenMarkdownFile}
             onNotice={previewMessage}
@@ -1541,7 +1582,7 @@ export function CodeReader({
         hidden={previewVisible}
       >
         <div className="editor-surface" ref={surfaceRef} />
-        {gitBlocks.length > 0 && lineCount > 1 && (
+        {preferences.gitEnabled && gitBlocks.length > 0 && lineCount > 1 && (
           <div className="git-change-map" role="group" aria-label={t("变更位置")}>
             {gitBlocks.map((block, index) => {
               const lines = block.kind === "deleted" ? 1 : Math.max(1, block.to - block.from + 1);
@@ -1562,7 +1603,7 @@ export function CodeReader({
           </div>
         )}
       </div>
-      {changePopup && (
+      {preferences.gitEnabled && changePopup && (
         <div
           className="git-change-popover"
           role="dialog"

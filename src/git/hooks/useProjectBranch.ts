@@ -15,7 +15,10 @@ export function useProjectBranch(project: Project | null) {
   }>();
 
   useEffect(() => {
-    if (!projectId || !root) return;
+    if (!projectId || !root) {
+      setStatus(undefined);
+      return;
+    }
     let disposed = false;
     let version = 0;
     let repositoryId: number | undefined;

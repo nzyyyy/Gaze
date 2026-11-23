@@ -9,10 +9,9 @@ import {
   type Completion,
   type CompletionSource,
 } from "@codemirror/autocomplete";
-import { EditorState, Prec, Transaction } from "@codemirror/state";
+import { EditorState, Prec, Transaction, type Extension } from "@codemirror/state";
 import { keymap, type EditorView } from "@codemirror/view";
 import { api, type CodeCompletion, type CompletionEdit } from "./api";
-import { markdownInsert, markdownSlashQuery, markdownSlashSource } from "./markdownInsert";
 import { errorCode } from "./utils";
 
 interface RankedCompletion extends Completion {
@@ -232,8 +231,20 @@ function checkedEdits(main: CompletionEdit, extra: CompletionEdit[], length: num
   return edits;
 }
 
-export function codeCompletion(projectId: string, path: string, markdown = false) {
-  const source = lspCompletionSource(projectId, path);
+export interface CompletionContribution {
+  sources(state: EditorState, pos: number): { autocomplete: CompletionSource }[] | undefined;
+  extension: Extension;
+}
+
+export function codeCompletion(
+  projectId: string,
+  path: string,
+  contribution?: CompletionContribution,
+  semantic = true,
+) {
+  const sources = semantic
+    ? [{ autocomplete: lspCompletionSource(projectId, path) }, { autocomplete: completeAnyWord }]
+    : [{ autocomplete: completeAnyWord }];
   return [
     autocompletion({
       interactionDelay: 0,
@@ -256,14 +267,8 @@ export function codeCompletion(projectId: string, path: string, markdown = false
         },
       ],
     }),
-    EditorState.languageData.of((state, pos) => {
-      if (markdown) {
-        if (state.readOnly) return [];
-        if (markdownSlashQuery(state, pos)) return [{ autocomplete: markdownSlashSource }];
-      }
-      return [{ autocomplete: source }, { autocomplete: completeAnyWord }];
-    }),
+    EditorState.languageData.of((state, pos) => contribution?.sources(state, pos) ?? sources),
     Prec.high(keymap.of([...completionKeymap, { key: "Tab", run: acceptCompletion }])),
-    markdown ? markdownInsert : [],
+    contribution?.extension ?? [],
   ];
 }

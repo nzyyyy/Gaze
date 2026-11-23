@@ -1,16 +1,19 @@
-import "katex/dist/katex.min.css";
 import { t, useLanguage } from "../lib/i18n";
+import { DEFAULT_PREFERENCES } from "../lib/preferences";
 import {
   Children,
+  createContext,
   isValidElement,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useId,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type ComponentType,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -19,8 +22,6 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkCjkFriendly from "remark-cjk-friendly/parseOnly";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
@@ -45,7 +46,8 @@ import yaml from "refractor/lang/yaml";
 import { api } from "../lib/api";
 import { errorMessage } from "../lib/utils";
 import type { MarkdownPreviewRequest } from "./CodeReader";
-import { MermaidDiagram } from "./MermaidDiagram";
+import { MermaidDiagram } from "../plugins/mermaid/MermaidDiagram";
+import { markdownMath } from "../plugins/markdown-math";
 
 const HEADING_PREFIX = "gaze-markdown-";
 const MAX_MARKDOWN_IMAGES = 50;
@@ -58,13 +60,14 @@ const MIN_READER_WIDTH = 320;
 // Remembered across preview remounts (switching back from source view) without touching layout storage.
 let rememberedOutlineWidth = 220;
 const remoteImageTrust = new Set<string>();
-const remarkPlugins = [remarkGfm, remarkCjkFriendly, remarkMath];
+const remarkPlugins = [remarkGfm, remarkCjkFriendly];
 const rehypePlugins: NonNullable<React.ComponentProps<typeof Markdown>["rehypePlugins"]> = [
   rehypeRaw,
   rehypeSanitize,
   [rehypeSlug, { prefix: HEADING_PREFIX }],
-  rehypeKatex,
 ];
+const remarkWithMath = [...remarkPlugins, markdownMath.remark];
+const rehypeWithMath = [...rehypePlugins, markdownMath.rehype];
 
 for (const language of [
   bash,
@@ -112,23 +115,28 @@ function childText(node: ReactNode): string {
   return "";
 }
 
+type CodeBlockRenderer = ComponentType<{ code: string }>;
+const noCodeBlockRenderers = new Map<string, CodeBlockRenderer>();
+const mermaidCodeBlockRenderers = new Map<string, CodeBlockRenderer>([["mermaid", MermaidDiagram]]);
+const CodeBlockRenderers =
+  createContext<ReadonlyMap<string, CodeBlockRenderer>>(noCodeBlockRenderers);
+
 function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
+  const renderers = useContext(CodeBlockRenderers);
   const child = Children.toArray(children)[0];
   const code = isValidElement<{ className?: string; children?: ReactNode }>(child) ? child : null;
   const className = code?.props.className ?? "";
   const text = code ? childText(code.props.children) : childText(children);
   const language = /(?:^|\s)language-([^\s]+)/.exec(className)?.[1];
+  const Renderer = language ? renderers.get(language) : undefined;
   const highlighted = useMemo(
     () =>
-      language &&
-      language !== "mermaid" &&
-      text.length <= MAX_HIGHLIGHT_CHARS &&
-      refractor.registered(language)
+      language && !Renderer && text.length <= MAX_HIGHLIGHT_CHARS && refractor.registered(language)
         ? (refractor.highlight(text, language) as unknown as HighlightNode[])
         : null,
-    [language, text],
+    [language, Renderer, text],
   );
-  if (language === "mermaid") return <MermaidDiagram code={text.replace(/\n$/, "")} />;
+  if (Renderer) return <Renderer code={text.replace(/\n$/, "")} />;
   return (
     <pre>
       <code className={className}>{highlighted ? highlightNodes(highlighted) : text}</code>
@@ -223,6 +231,8 @@ interface MarkdownPreviewProps {
   projectId: string;
   documentPath: string;
   active: boolean;
+  mermaidEnabled?: boolean;
+  markdownMathEnabled?: boolean;
   request?: MarkdownPreviewRequest | null;
   onOpenFile?: (projectId: string, path: string, fragment: string | null) => void;
   onNotice: (message: string) => void;
@@ -420,6 +430,8 @@ export default function MarkdownPreview({
   projectId,
   documentPath,
   active,
+  mermaidEnabled = DEFAULT_PREFERENCES.mermaidEnabled,
+  markdownMathEnabled = DEFAULT_PREFERENCES.markdownMathEnabled,
   request,
   onOpenFile,
   onNotice,
@@ -464,16 +476,21 @@ export default function MarkdownPreview({
         aria-label={t("Markdown 预览")}
         tabIndex={0}
       >
-        <MarkdownBody
-          content={content}
-          projectId={projectId}
-          documentPath={documentPath}
-          onOpenFile={onOpenFile}
-          onNotice={onNotice}
-          scrollToFragment={scrollToFragment}
-          remoteTrusted={remoteTrusted}
-          onTrustRemote={trustRemoteImages}
-        />
+        <CodeBlockRenderers
+          value={mermaidEnabled ? mermaidCodeBlockRenderers : noCodeBlockRenderers}
+        >
+          <MarkdownBody
+            content={content}
+            projectId={projectId}
+            documentPath={documentPath}
+            markdownMathEnabled={markdownMathEnabled}
+            onOpenFile={onOpenFile}
+            onNotice={onNotice}
+            scrollToFragment={scrollToFragment}
+            remoteTrusted={remoteTrusted}
+            onTrustRemote={trustRemoteImages}
+          />
+        </CodeBlockRenderers>
       </div>
     </div>
   );
@@ -483,12 +500,13 @@ const MarkdownBody = memo(function MarkdownBody({
   content,
   projectId,
   documentPath,
+  markdownMathEnabled,
   onOpenFile,
   onNotice,
   scrollToFragment,
   remoteTrusted,
   onTrustRemote,
-}: Omit<MarkdownPreviewProps, "active" | "request"> & {
+}: Omit<MarkdownPreviewProps, "active" | "mermaidEnabled" | "request"> & {
   scrollToFragment: (fragment: string) => void;
   remoteTrusted: boolean;
   onTrustRemote: () => void;
@@ -545,8 +563,8 @@ const MarkdownBody = memo(function MarkdownBody({
   return (
     <article className="markdown-body">
       <Markdown
-        remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins}
+        remarkPlugins={markdownMathEnabled ? remarkWithMath : remarkPlugins}
+        rehypePlugins={markdownMathEnabled ? rehypeWithMath : rehypePlugins}
         components={components}
         urlTransform={safeUrl}
       >
