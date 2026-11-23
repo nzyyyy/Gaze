@@ -234,6 +234,9 @@ export function FileOperationDialog({
                 disabled={busy}
                 required
                 autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 onChange={(event) => setName(event.target.value)}
               />
             </>

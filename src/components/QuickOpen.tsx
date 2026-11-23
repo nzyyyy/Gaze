@@ -169,6 +169,8 @@ export function QuickOpen({ open, hasProjects, onClose, onOpen, onImport }: Quic
             }}
             placeholder={t("输入文件名或路径")}
             aria-label={t("输入文件名或路径")}
+            autoCapitalize="none"
+            autoCorrect="off"
             spellCheck={false}
             disabled={!hasProjects}
           />

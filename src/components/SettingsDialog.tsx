@@ -404,6 +404,9 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
                 type="search"
                 aria-label={t("搜索设置")}
                 placeholder={t("搜索设置…")}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") event.preventDefault();
                 }}
