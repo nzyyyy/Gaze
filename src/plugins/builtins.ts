@@ -32,6 +32,12 @@ export const BUILTIN_PLUGINS = [
     description: "启用 Python 解释器选择、语义补全、诊断和导航。",
   },
   {
+    key: "typescriptEnabled",
+    pluginCategory: "languages",
+    label: "JavaScript / TypeScript 语义支持",
+    description: "启用 JavaScript、TypeScript、JSX 和 TSX 的语义补全、诊断和导航。",
+  },
+  {
     key: "terminalEnabled",
     pluginCategory: "tools",
     label: "集成终端",

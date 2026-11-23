@@ -105,11 +105,17 @@ Gaze 会检查 `ctags --version` 是否包含 `Universal Ctags`。没有 ctags �
 
 ### TypeScript 语言服务器
 
-项目开发依赖中包含 `typescript-language-server` 和 `typescript@5.9.3`，用于开发与集成测试。打包后的 Gaze 不捆绑任何语言服务器。对于普通 TypeScript 项目，推荐在项目内安装 TypeScript（大多数项目已有），或全局安装并确保命令在 `PATH` 中：
+在「设置 → 插件 → 语言支持」可以独立启停「JavaScript / TypeScript 语义支持」，默认开启。停用后会关闭对应的语言服务器会话，编辑器仍提供语法高亮和文件内补全。
+
+Gaze 从本机启动语言服务器。macOS 上可将它安装到用户目录，和 Pyright 一样在[配置文件](#工具和-lsp)中指定启动路径。下面的命令使用仓库集成测试的服务端版本：
 
 ```bash
-npm install -g typescript typescript-language-server
+mkdir -p "$HOME/.gaze/lsp/typescript"
+npm install --prefix "$HOME/.gaze/lsp/typescript" \
+  typescript@5.9.3 typescript-language-server@6.0.2
 ```
+
+使用这个目录时，在 `lsp` 的 `typescript` 项中把 `command` 设为 Node.js 的绝对路径，把 `args` 设为 `typescript-language-server/lib/cli.mjs` 的绝对路径与 `--stdio`。`initializationOptions.tsserver.path` 指向同一安装目录下的 `typescript/lib/tsserver.js`。JSON 中各路径需写完整路径。Node.js 版本须满足所安装语言服务器的要求。
 
 Gaze 内置的 TypeScript 配置为：
 
@@ -121,7 +127,7 @@ typescript-language-server --stdio
 
 内置预设使用 TypeScript 的语义服务处理首次补全，避免项目加载时仅返回语法候选。
 
-如果 TypeScript 不在项目依赖中，可以在用户配置的 LSP 项中传入 `initializationOptions.tsserver.path`，指向本机 `typescript/lib/tsserver.js`。自定义预设也可以设置 `initializationOptions.tsserver.useSyntaxServer` 为 `"never"`。
+需要指定 TypeScript 版本时，可以在用户配置的 LSP 项中传入 `initializationOptions.tsserver.path`，指向本机 `typescript/lib/tsserver.js`。自定义预设也可以设置 `initializationOptions.tsserver.useSyntaxServer` 为 `"never"`。
 
 ### 多语言代码补全
 

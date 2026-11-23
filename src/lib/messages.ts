@@ -407,6 +407,9 @@ export const english: Record<string, string> = {
   "Python 语义支持": "Python language support",
   "启用 Python 解释器选择、语义补全、诊断和导航。":
     "Enable Python interpreter selection, semantic completion, diagnostics, and navigation.",
+  "JavaScript / TypeScript 语义支持": "JavaScript / TypeScript language support",
+  "启用 JavaScript、TypeScript、JSX 和 TSX 的语义补全、诊断和导航。":
+    "Enable semantic completion, diagnostics, and navigation for JavaScript, TypeScript, JSX, and TSX.",
   "Git 集成": "Git integration",
   "启用 Git 工作区、文件树状态和编辑器变更标记。":
     "Enable the Git workspace and Git indicators in the file tree and editor.",

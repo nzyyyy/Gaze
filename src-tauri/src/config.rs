@@ -71,6 +71,9 @@ impl AppConfig {
     }
 }
 
+pub(crate) const TYPESCRIPT_EXTENSIONS: [&str; 8] =
+    ["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"];
+
 fn builtin_typescript() -> LspServerConfig {
     LspServerConfig {
         id: "typescript".to_string(),
@@ -85,7 +88,7 @@ fn builtin_typescript() -> LspServerConfig {
         .collect(),
         command: "typescript-language-server".to_string(),
         args: vec!["--stdio".to_string()],
-        extensions: ["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"]
+        extensions: TYPESCRIPT_EXTENSIONS
             .into_iter()
             .map(str::to_string)
             .collect(),

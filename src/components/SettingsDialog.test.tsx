@@ -36,7 +36,7 @@ it("filters plugins by category and keeps pending switches available in global s
   await user.click(category("插件"));
   const filters = within(screen.getByRole("group", { name: "插件分类" }));
   expect(filters.getByRole("button", { name: "全部", pressed: true })).toBeInTheDocument();
-  expect(screen.getAllByRole("switch")).toHaveLength(7);
+  expect(screen.getAllByRole("switch")).toHaveLength(8);
 
   const markdown = filters.getByRole("button", { name: "Markdown" });
   markdown.focus();
@@ -49,7 +49,10 @@ it("filters plugins by category and keeps pending switches available in global s
 
   await user.click(filters.getByRole("button", { name: "语言支持" }));
   expect(screen.getByRole("switch", { name: "Python 语义支持" })).toBeInTheDocument();
-  expect(screen.getAllByRole("switch")).toHaveLength(1);
+  const typescript = screen.getByRole("switch", { name: "JavaScript / TypeScript 语义支持" });
+  expect(typescript).toBeChecked();
+  expect(screen.getAllByRole("switch")).toHaveLength(2);
+  await user.click(typescript);
 
   await user.click(filters.getByRole("button", { name: "开发工具" }));
   expect(screen.getByRole("switch", { name: "集成终端" })).toBeInTheDocument();
@@ -62,7 +65,9 @@ it("filters plugins by category and keeps pending switches available in global s
   expect(screen.getByRole("switch", { name: "集成终端" })).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "保存设置" }));
   expect(onSave).toHaveBeenCalledWith(
-    expect.objectContaining({ preferences: { ...DEFAULT_PREFERENCES, gitEnabled: false } }),
+    expect.objectContaining({
+      preferences: { ...DEFAULT_PREFERENCES, gitEnabled: false, typescriptEnabled: false },
+    }),
     expect.any(Object),
   );
 });

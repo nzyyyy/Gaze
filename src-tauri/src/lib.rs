@@ -128,6 +128,9 @@ impl AppState {
         self.lsp
             .set_python_enabled(preferences.python_enabled)
             .await;
+        self.lsp
+            .set_typescript_enabled(preferences.typescript_enabled)
+            .await;
         self.terminal.set_enabled(preferences.terminal_enabled);
         app.state::<git_workspace::AppState>()
             .set_enabled(preferences.git_enabled);

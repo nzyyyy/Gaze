@@ -21,6 +21,7 @@ pub use hover::HoverContent;
 pub use positions::{LspPosition, LspRange, PositionEncoding, TextIndex};
 
 use crate::cache::Cache;
+use crate::config::TYPESCRIPT_EXTENSIONS;
 use crate::error::{GazeError, GazeResult};
 use crate::files::{path_to_relative, read_file};
 use crate::models::{
@@ -512,6 +513,7 @@ pub struct LspManager {
     sessions: Arc<Mutex<HashMap<String, Arc<LspSession>>>>,
     start_lock: tokio::sync::Mutex<()>,
     python_enabled: AtomicBool,
+    typescript_enabled: AtomicBool,
 }
 
 impl LspManager {
@@ -522,6 +524,7 @@ impl LspManager {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             start_lock: tokio::sync::Mutex::new(()),
             python_enabled: AtomicBool::new(true),
+            typescript_enabled: AtomicBool::new(true),
         }
     }
 
@@ -531,28 +534,25 @@ impl LspManager {
         project: &Project,
         relative_path: &str,
     ) -> GazeResult<Arc<LspSession>> {
-        let server = self.server_for_path(relative_path).ok_or_else(|| {
-            GazeError::Unsupported(format!(
-                "没有为 {} 配置可用的 LSP 语言服务器。",
-                Path::new(relative_path)
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or(relative_path)
-            ))
-        })?;
+        let resolve_server = || {
+            self.server_for_path(relative_path).ok_or_else(|| {
+                GazeError::Unsupported(format!(
+                    "没有为 {} 配置可用的 LSP 语言服务器。",
+                    Path::new(relative_path)
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or(relative_path)
+                ))
+            })
+        };
+        let server = resolve_server()?;
         let key = format!("{}\u{0000}{}", project.id, server.config.id);
         if let Some(session) = self.open_session(&key) {
             return Ok(session);
         }
 
         let _start_guard = self.start_lock.lock().await;
-        if Path::new(relative_path)
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(is_python_extension)
-        {
-            self.ensure_python_enabled()?;
-        }
+        resolve_server()?;
         if let Some(session) = self.open_session(&key) {
             return Ok(session);
         }
@@ -686,7 +686,7 @@ impl LspManager {
                 status.selected.as_deref().unwrap_or_default(),
             )
             .await?;
-        shutdown_sessions(self.take_python_sessions(Some(&project.id))?).await;
+        shutdown_sessions(self.take_language_sessions(Some(&project.id), serves_python)?).await;
         Ok(status)
     }
 
@@ -698,21 +698,40 @@ impl LspManager {
     }
 
     pub async fn set_python_enabled(&self, enabled: bool) {
-        if self.python_enabled.load(Ordering::Acquire) == enabled {
+        self.set_language_enabled(&self.python_enabled, enabled, serves_python)
+            .await;
+    }
+
+    pub async fn set_typescript_enabled(&self, enabled: bool) {
+        self.set_language_enabled(&self.typescript_enabled, enabled, serves_typescript)
+            .await;
+    }
+
+    async fn set_language_enabled(
+        &self,
+        flag: &AtomicBool,
+        enabled: bool,
+        serves_language: fn(&ResolvedLspServer) -> bool,
+    ) {
+        if flag.load(Ordering::Acquire) == enabled {
             return;
         }
         let _start_guard = self.start_lock.lock().await;
-        if self.python_enabled.swap(enabled, Ordering::AcqRel) && !enabled {
-            match self.take_python_sessions(None) {
+        if flag.swap(enabled, Ordering::AcqRel) && !enabled {
+            match self.take_language_sessions(None, serves_language) {
                 Ok(sessions) => shutdown_sessions(sessions).await,
                 Err(error) => {
-                    tracing::warn!(message = %error.message(), "could not stop Python LSP sessions")
+                    tracing::warn!(message = %error.message(), "could not stop plugin LSP sessions")
                 }
             }
         }
     }
 
-    fn take_python_sessions(&self, project_id: Option<&str>) -> GazeResult<Vec<Arc<LspSession>>> {
+    fn take_language_sessions(
+        &self,
+        project_id: Option<&str>,
+        serves_language: fn(&ResolvedLspServer) -> bool,
+    ) -> GazeResult<Vec<Arc<LspSession>>> {
         let mut sessions = self
             .sessions
             .lock()
@@ -725,7 +744,7 @@ impl LspManager {
                         && self
                             .servers
                             .iter()
-                            .any(|server| server.config.id == id && serves_python(server))
+                            .any(|server| server.config.id == id && serves_language(server))
                 })
             })
             .cloned()
@@ -742,6 +761,9 @@ impl LspManager {
             .and_then(|extension| extension.to_str())
             .map(str::to_lowercase)?;
         if is_python_extension(&extension) && self.ensure_python_enabled().is_err() {
+            return None;
+        }
+        if is_typescript_extension(&extension) && !self.typescript_enabled.load(Ordering::Acquire) {
             return None;
         }
         self.servers.iter().find(|server| {
@@ -1170,6 +1192,20 @@ fn serves_python(server: &ResolvedLspServer) -> bool {
         .extensions
         .iter()
         .any(|ext| is_python_extension(ext.trim_start_matches('.')))
+}
+
+fn is_typescript_extension(extension: &str) -> bool {
+    TYPESCRIPT_EXTENSIONS
+        .iter()
+        .any(|item| extension.eq_ignore_ascii_case(item))
+}
+
+fn serves_typescript(server: &ResolvedLspServer) -> bool {
+    server
+        .config
+        .extensions
+        .iter()
+        .any(|ext| is_typescript_extension(ext.trim_start_matches('.')))
 }
 
 fn language_id_for_path(path: &Path, server_id: &str) -> String {
@@ -1737,6 +1773,13 @@ mod tests {
         assert!(reopened.python_environment(&project).await.is_err());
         reopened.set_python_enabled(true).await;
         assert!(reopened.has_server_for("main.py"));
+        reopened.set_typescript_enabled(false).await;
+        assert!(reopened.has_server_for("main.py"));
+        for extension in TYPESCRIPT_EXTENSIONS {
+            assert!(!reopened.has_server_for(&format!("main.{extension}")));
+        }
+        reopened.set_typescript_enabled(true).await;
+        assert!(reopened.has_server_for("main.tsx"));
         assert_eq!(
             reopened
                 .python_environment(&project)
@@ -2142,6 +2185,7 @@ mod tests {
             )]))),
             start_lock: tokio::sync::Mutex::new(()),
             python_enabled: AtomicBool::new(true),
+            typescript_enabled: AtomicBool::new(true),
         };
         let recorded = format!(
             "{edited}\nimport {{ exportedWidget }} from './dependency';\nconst widget = exportedWidget("
@@ -2202,6 +2246,14 @@ mod tests {
         manager.forget_documents(&root.join("moved/你好.ts")).await;
         assert_eq!(session.documents.lock().await.len(), 1);
 
-        session.shutdown().await;
+        manager.set_typescript_enabled(false).await;
+        assert!(manager.sessions.lock().unwrap().is_empty());
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !session.client.is_closed() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("disabled TypeScript language server should exit");
     }
 }

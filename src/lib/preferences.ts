@@ -83,6 +83,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   markdownMathEnabled: true,
   terminalEnabled: true,
   pythonEnabled: true,
+  typescriptEnabled: true,
   gitEnabled: true,
   aiCompletionEnabled: false,
   aiCompletion: { protocol: "responses", url: "", model: "", apiKey: "" },

@@ -57,7 +57,12 @@ import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
 import { minimap } from "../lib/minimap";
 import { rainbowBrackets } from "../lib/rainbowBrackets";
 import type { EditorViewState } from "../lib/session";
-import { isMarkdownFile, isPythonFile, matchLanguage } from "../lib/language";
+import {
+  isJavaScriptOrTypeScriptFile,
+  isMarkdownFile,
+  isPythonFile,
+  matchLanguage,
+} from "../lib/language";
 import { markdownInsert, markdownSlashQuery } from "../plugins/markdown-insert";
 import { aiInlineCompletion } from "../plugins/ai-completion";
 import type {
@@ -547,7 +552,9 @@ export function CodeReader({
   const [previewNotice, setPreviewNotice] = useState<string | null>(null);
   const markdown = isMarkdownFile(tab.name);
   const quickInsertEnabled = markdown && preferences.markdownInsertEnabled;
-  const semanticEnabled = !isPythonFile(tab.name) || preferences.pythonEnabled;
+  const semanticEnabled =
+    (!isPythonFile(tab.name) || preferences.pythonEnabled) &&
+    (!isJavaScriptOrTypeScriptFile(tab.name) || preferences.typescriptEnabled);
   const previewVisible =
     preview && markdown && loaded?.content.kind === "text" && loaded.content.mode === "normal";
   const previewRef = useRef(false);

@@ -42,6 +42,7 @@ pub struct Preferences {
     pub markdown_math_enabled: bool,
     pub terminal_enabled: bool,
     pub python_enabled: bool,
+    pub typescript_enabled: bool,
     pub git_enabled: bool,
     pub ai_completion_enabled: bool,
     pub ai_completion: crate::ai_completion::Config,
@@ -92,6 +93,7 @@ impl Default for Preferences {
             markdown_math_enabled: true,
             terminal_enabled: true,
             python_enabled: true,
+            typescript_enabled: true,
             git_enabled: true,
             ai_completion_enabled: false,
             ai_completion: Default::default(),
@@ -204,6 +206,7 @@ mod tests {
         assert!(legacy.mermaid_enabled);
         assert!(legacy.markdown_insert_enabled && legacy.markdown_math_enabled);
         assert!(legacy.terminal_enabled && legacy.python_enabled && legacy.git_enabled);
+        assert!(legacy.typescript_enabled);
         assert!(!legacy.word_wrap);
         assert!(defaults.show_minimap);
         assert!(defaults.window_glass_enabled);
@@ -228,6 +231,7 @@ mod tests {
                 markdown_math_enabled: false,
                 terminal_enabled: false,
                 python_enabled: false,
+                typescript_enabled: false,
                 git_enabled: false,
                 ..defaults.clone()
             },
@@ -242,6 +246,7 @@ mod tests {
             "markdownMathEnabled",
             "terminalEnabled",
             "pythonEnabled",
+            "typescriptEnabled",
             "gitEnabled",
         ] {
             assert_eq!(saved_json[key], false, "{key}");
