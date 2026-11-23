@@ -273,6 +273,7 @@ describe("FileTree operations", () => {
   it("offers root creation without root rename/delete, supports keyboard cancellation and focus restoration", async () => {
     const { user, onFileOperation } = setup();
     const trigger = screen.getByRole("button", { name: "Demo 的更多操作" });
+    expect(screen.queryByRole("button", { name: "从工作区移除 Demo" })).not.toBeInTheDocument();
     await user.click(trigger);
     const menu = screen.getByRole("menu");
     expect(within(menu).queryByRole("menuitem", { name: "重命名" })).not.toBeInTheDocument();

@@ -209,7 +209,12 @@
 }
 
 :root[data-overlay-glass]
-  :is(.quick-open, .location-picker, .dialog, .gaze-git-workspace .operation-toast) {
+  :is(
+    .quick-open,
+    .location-picker:not([data-anchor]),
+    .dialog,
+    .gaze-git-workspace .operation-toast
+  ) {
   position: relative;
 }
 
@@ -1269,11 +1274,6 @@ button:focus-visible,
 }
 
 .tree-action:hover {
-  color: var(--danger);
-  background: var(--danger-soft);
-}
-
-.tree-action[aria-haspopup="menu"]:hover {
   color: var(--text);
   background: var(--hover);
 }

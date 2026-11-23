@@ -98,7 +98,6 @@ export const english: Record<string, string> = {
   项目文件树: "Project file tree",
   "折叠 {0}": "Collapse {0}",
   "展开 {0}": "Expand {0}",
-  "从工作区移除 {0}": "Remove {0} from workspace",
   "读取目录…": "Reading directory…",
   折叠: "Collapse",
   展开: "Expand",

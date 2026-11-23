@@ -66,7 +66,8 @@ class Minimap {
       if (event.button !== 0 || !this.height) return;
       event.preventDefault();
       this.hidePreview();
-      this.dom.focus();
+      // Settle editor focus before scrolling so it can't shift the next click's coordinates.
+      if (event.pointerType !== "touch" && !view.hasFocus) view.focus();
       this.dom.setPointerCapture(event.pointerId);
       const y = event.clientY - this.dom.getBoundingClientRect().top - PADDING;
       if (y < this.thumbTop || y > this.thumbTop + this.thumbHeight)

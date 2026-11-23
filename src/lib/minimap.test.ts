@@ -146,14 +146,17 @@ it("navigates by keyboard, click, wheel and stable dragging without changing tex
   const { view, map, measure, pointer } = editor();
   const doc = view.state.doc;
   const scrollIntoView = vi.spyOn(EditorView, "scrollIntoView");
+  map.focus();
   map.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
   expect(scrollIntoView).toHaveBeenLastCalledWith(doc.line(2).from, { y: "start", yMargin: 0 });
   map.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
   expect(scrollIntoView).toHaveBeenLastCalledWith(doc.line(100).from, { y: "start", yMargin: 0 });
   map.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", bubbles: true }));
   expect(scrollIntoView).toHaveBeenLastCalledWith(doc.line(6).from, { y: "start", yMargin: 0 });
+  expect(map).toHaveFocus();
   pointer("pointerdown", 108);
   expect(view.scrollDOM.scrollTop).toBe(470);
+  expect(view.contentDOM).toHaveFocus();
   pointer("pointerup", 108);
   measure();
   const thumbY =
@@ -176,6 +179,30 @@ it("navigates by keyboard, click, wheel and stable dragging without changing tex
   expect(wheel.defaultPrevented).toBe(true);
   expect(view.state.doc).toBe(doc);
   expect(view.state.selection.main.anchor).toBe(0);
+});
+
+it("places a single caret on the first click after a minimap jump", () => {
+  const { view, pointer } = editor();
+  view.focus();
+  let focusScrollTop: number | undefined;
+  // Simulate a viewport shift when the editable regains focus during mousedown.
+  view.contentDOM.addEventListener("focus", () => {
+    focusScrollTop = 40;
+  });
+  vi.spyOn(view, "posAndSideAtCoords").mockImplementation(({ y }) => ({
+    pos: view.lineBlockAtHeight(y + (focusScrollTop ?? view.scrollDOM.scrollTop)).from,
+    assoc: 1,
+  }));
+  pointer("pointerdown", 108);
+  pointer("pointerup", 108);
+  const y = 40;
+  const target = view.lineBlockAtHeight(y + view.scrollDOM.scrollTop).from;
+  for (const type of ["mousedown", "mouseup"]) {
+    view.contentDOM.dispatchEvent(
+      new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, detail: 1, clientY: y }),
+    );
+  }
+  expect(view.state.selection.main).toMatchObject({ anchor: target, head: target });
 });
 
 it("shows a delayed hover preview and cancels it on leaving, editing or disabling", () => {
