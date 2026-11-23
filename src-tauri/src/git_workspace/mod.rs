@@ -79,7 +79,7 @@ impl AppState {
         Self {
             cache,
             registry: Mutex::new(Registry::default()),
-            git: Mutex::new(Git::discover(git_path)),
+            git: Mutex::new(Err("Git has not been initialized".into())),
             git_path: git_path.map(str::to_string),
             working_tree: Mutex::new(working_tree::Cache::default()),
             next_repository_id: AtomicU64::new(1),
@@ -439,6 +439,7 @@ mod tests {
         cache.insert_project(&a).await.unwrap();
         cache.insert_project(&b).await.unwrap();
         let state = AppState::new(cache.clone(), None);
+        assert!(state.git().is_ok());
         let inspection = git.inspect_repository(dir.path()).unwrap();
         let one = state.attach(&a, &inspection).unwrap();
         let two = state.attach(&b, &inspection).unwrap();

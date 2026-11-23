@@ -1,8 +1,8 @@
 import { Minus, Plus } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { t, useLanguage } from "../lib/i18n";
-import { renderMermaid } from "../lib/mermaid";
+import { t, useLanguage } from "../../lib/i18n";
+import { renderMermaid } from "./render";
 
 const ZOOM_MIN = 50;
 const ZOOM_MAX = 300;

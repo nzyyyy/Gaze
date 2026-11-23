@@ -236,6 +236,29 @@ impl Cache {
         .await
     }
 
+    pub async fn compare_setting(
+        &self,
+        key: &str,
+        previous: Option<String>,
+        value: String,
+    ) -> GazeResult<bool> {
+        let key = key.to_owned();
+        self.run(move |connection| {
+            let changed = match previous {
+                Some(previous) => connection.execute(
+                    "UPDATE settings SET value = ?2 WHERE key = ?1 AND value = ?3",
+                    params![key, value, previous],
+                )?,
+                None => connection.execute(
+                    "INSERT INTO settings(key, value) VALUES (?1, ?2) ON CONFLICT(key) DO NOTHING",
+                    params![key, value],
+                )?,
+            };
+            Ok(changed == 1)
+        })
+        .await
+    }
+
     pub async fn set_settings(&self, values: Vec<(String, String)>) -> GazeResult<()> {
         self.run(move |connection| {
             let transaction = connection.transaction()?;

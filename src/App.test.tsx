@@ -53,6 +53,12 @@ vi.mock("./lib/api", () => ({
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 vi.mock("./git/GitWorkspace", () => ({ default: () => null }));
+vi.mock("./plugins/api", () => ({
+  pluginApi: { list: vi.fn().mockResolvedValue([]) },
+}));
+vi.mock("./plugins/mermaid/render", () => ({
+  renderMermaid: async () => '<svg viewBox="0 0 800 400"></svg>',
+}));
 
 import App from "./App";
 import { gitApi } from "./lib/api";
@@ -537,6 +543,70 @@ describe("App", () => {
       expect.objectContaining({
         preferences: expect.objectContaining({ autoSave: false, showStatusBar: true }),
       }),
+    );
+  });
+
+  it("applies the Mermaid plugin setting to an open preview only after a successful save", async () => {
+    const user = userEvent.setup();
+    const code = "flowchart TB\n  A --> B";
+    const content = `\`\`\`mermaid\n${code}\n\`\`\`\n`;
+    apiMock.readFile.mockResolvedValue({
+      kind: "text",
+      projectId: "p1",
+      path: "README.md",
+      content,
+      encoding: "UTF-8",
+      encodingKind: "utf8",
+      lineEnding: "lf",
+      mode: "normal",
+      editable: true,
+      editBlockedReason: null,
+      fingerprint: { size: content.length, modifiedNs: "1" },
+      size: content.length,
+      warnings: [],
+    });
+    localStorage.setItem(
+      "gaze:session",
+      JSON.stringify({
+        version: 1,
+        tabs: [{ projectId: "p1", path: "README.md" }],
+        active: { projectId: "p1", path: "README.md" },
+      }),
+    );
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "预览" }));
+    const preview = await screen.findByRole("region", { name: "Markdown 预览" }, { timeout: 3000 });
+    const diagram = await within(preview).findByRole("figure", { name: "Mermaid 图表" });
+
+    const openSettings = () => user.click(screen.getByRole("button", { name: "设置" }));
+    const pluginPage = () => user.click(screen.getByRole("button", { name: "插件" }));
+    const toggle = () => screen.getByRole("switch", { name: "Mermaid" });
+    await openSettings();
+    await user.type(screen.getByRole("searchbox", { name: "搜索设置" }), "Mermaid");
+    expect(toggle()).toBeChecked();
+    await pluginPage();
+    expect(screen.getByRole("button", { name: "插件" })).toHaveAttribute("aria-current", "page");
+    expect(toggle()).toHaveAccessibleDescription("在 Markdown 预览中渲染 Mermaid 图表");
+    toggle().focus();
+    await user.keyboard(" ");
+    expect(toggle()).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(apiMock.saveSettings).not.toHaveBeenCalled();
+    expect(diagram).toBeInTheDocument();
+
+    await openSettings();
+    await pluginPage();
+    expect(toggle()).toBeChecked();
+    await user.click(toggle());
+    apiMock.saveSettings.mockRejectedValueOnce(new Error("磁盘不可写"));
+    await user.click(screen.getByRole("button", { name: "保存设置" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("磁盘不可写");
+    expect(diagram).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "保存设置" }));
+    await waitFor(() => expect(diagram).not.toBeInTheDocument());
+    expect(preview.querySelector("pre code")?.textContent).toBe(`${code}\n`);
+    expect(apiMock.saveSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ preferences: expect.objectContaining({ mermaidEnabled: false }) }),
     );
   });
 

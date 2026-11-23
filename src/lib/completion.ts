@@ -9,10 +9,10 @@ import {
   type Completion,
   type CompletionSource,
 } from "@codemirror/autocomplete";
-import { EditorState, Prec, Transaction } from "@codemirror/state";
-import { keymap, type EditorView } from "@codemirror/view";
+import { EditorState, Prec, Transaction, type Extension } from "@codemirror/state";
+import { keymap, ViewPlugin, type EditorView } from "@codemirror/view";
+import type { createPathCompletion } from "../plugins/path-completion";
 import { api, type CodeCompletion, type CompletionEdit } from "./api";
-import { markdownInsert, markdownSlashQuery, markdownSlashSource } from "./markdownInsert";
 import { errorCode } from "./utils";
 
 interface RankedCompletion extends Completion {
@@ -232,10 +232,42 @@ function checkedEdits(main: CompletionEdit, extra: CompletionEdit[], length: num
   return edits;
 }
 
-export function codeCompletion(projectId: string, path: string, markdown = false) {
-  const source = lspCompletionSource(projectId, path);
+export interface CompletionContribution {
+  sources(state: EditorState, pos: number): { autocomplete: CompletionSource }[] | undefined;
+  extension: Extension;
+}
+
+export const completionCompositionKeys = ViewPlugin.define((view) => {
+  const keepCompositionKeys = (event: KeyboardEvent) => {
+    // Leave native IME confirmation to the input method before CodeMirror records a change.
+    if (event.isComposing || event.keyCode === 229) event.stopPropagation();
+  };
+  view.dom.addEventListener("keydown", keepCompositionKeys, true);
+  return { destroy: () => view.dom.removeEventListener("keydown", keepCompositionKeys, true) };
+});
+
+export function codeCompletion(
+  projectId: string,
+  path: string,
+  contribution?: CompletionContribution,
+  semantic = true,
+  aboveCursor = false,
+  pathCompletion?: ReturnType<typeof createPathCompletion>,
+) {
+  const ordinarySources = semantic
+    ? [lspCompletionSource(projectId, path), completeAnyWord]
+    : [completeAnyWord];
+  const sources = ordinarySources.map((source) => ({
+    autocomplete: pathCompletion
+      ? (context: Parameters<CompletionSource>[0]) =>
+          pathCompletion.matches(context) ? null : source(context)
+      : source,
+  }));
+  if (pathCompletion) sources.push({ autocomplete: pathCompletion.source });
   return [
     autocompletion({
+      aboveCursor,
+      activateOnCompletion: (item) => !!pathCompletion && item.type === "folder",
       interactionDelay: 0,
       maxRenderedOptions: 32,
       compareCompletions(a: RankedCompletion, b: RankedCompletion) {
@@ -256,14 +288,9 @@ export function codeCompletion(projectId: string, path: string, markdown = false
         },
       ],
     }),
-    EditorState.languageData.of((state, pos) => {
-      if (markdown) {
-        if (state.readOnly) return [];
-        if (markdownSlashQuery(state, pos)) return [{ autocomplete: markdownSlashSource }];
-      }
-      return [{ autocomplete: source }, { autocomplete: completeAnyWord }];
-    }),
+    EditorState.languageData.of((state, pos) => contribution?.sources(state, pos) ?? sources),
     Prec.high(keymap.of([...completionKeymap, { key: "Tab", run: acceptCompletion }])),
-    markdown ? markdownInsert : [],
+    contribution?.extension ?? [],
+    pathCompletion?.extension ?? [],
   ];
 }

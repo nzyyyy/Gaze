@@ -8,8 +8,9 @@ import {
 import { isolateHistory } from "@codemirror/commands";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorSelection, Prec, type EditorState } from "@codemirror/state";
-import { EditorView, keymap, ViewPlugin, type Command } from "@codemirror/view";
-import { t } from "./i18n";
+import { EditorView, keymap, type Command } from "@codemirror/view";
+import { t } from "../lib/i18n";
+import { completionCompositionKeys, type CompletionContribution } from "../lib/completion";
 
 interface InsertItem {
   name: string;
@@ -188,7 +189,7 @@ function wrapMarkdown(before: string, after: string, link = false): Command {
   };
 }
 
-export const markdownInsert = [
+const extension = [
   Prec.high(
     keymap.of([
       { key: "Mod-b", run: wrapMarkdown("**", "**") },
@@ -196,23 +197,28 @@ export const markdownInsert = [
       { key: "Mod-k", run: wrapMarkdown("[", "]()", true) },
     ]),
   ),
-  ViewPlugin.define((view) => {
-    const keepCompositionKeys = (event: KeyboardEvent) => {
-      // Leave native IME confirmation to the input method even before CodeMirror records a change.
-      if (event.isComposing || event.keyCode === 229) event.stopPropagation();
-    };
-    view.dom.addEventListener("keydown", keepCompositionKeys, true);
-    return { destroy: () => view.dom.removeEventListener("keydown", keepCompositionKeys, true) };
-  }),
+  completionCompositionKeys,
   EditorView.domEventHandlers({
     compositionstart(_event, view) {
       if (markdownSlashQuery(view.state, view.state.selection.main.head)) closeCompletion(view);
     },
     compositionend(_event, view) {
       queueMicrotask(() => {
-        if (view.hasFocus && markdownSlashQuery(view.state, view.state.selection.main.head))
+        if (
+          view.hasFocus &&
+          view.plugin(completionCompositionKeys) &&
+          markdownSlashQuery(view.state, view.state.selection.main.head)
+        )
           startCompletion(view);
       });
     },
   }),
 ];
+
+export const markdownInsert: CompletionContribution = {
+  sources(state, pos) {
+    if (state.readOnly) return [];
+    if (markdownSlashQuery(state, pos)) return [{ autocomplete: markdownSlashSource }];
+  },
+  extension,
+};

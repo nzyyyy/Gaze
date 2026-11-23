@@ -1,8 +1,9 @@
 import { t, useLanguage, DEFAULT_LANGUAGE, type Language } from "../lib/i18n";
-import { LoaderCircle, Search, X } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ChevronLeft, ChevronRight, Eye, EyeOff, LoaderCircle, Search, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { Select } from "./Select";
+import { ExternalPlugins } from "./ExternalPlugins";
 
 import mapleLicense from "../assets/fonts/LICENSE.txt?raw";
 import {
@@ -23,6 +24,13 @@ import {
   type SettingsCategory,
 } from "../lib/preferences";
 import { DEFAULT_LAYOUT, LAYOUT_SIZE_LIMITS, readLayout, type Layout } from "../lib/layout";
+import { BUILTIN_PLUGIN_CATEGORIES, type BuiltinPluginCategory } from "../plugins/builtins";
+import { api } from "../lib/api";
+import {
+  aiCompletionError,
+  AI_PROTOCOLS,
+  type AiCompletionConfig,
+} from "../plugins/ai-completion-config";
 
 interface SettingsDialogProps {
   settings: AppSettings;
@@ -41,15 +49,20 @@ const AREAS = [
   { key: "terminal", label: "终端", sample: "❯ ~/项目/gaze   main\n pnpm dev  ✓ ready" },
 ] as const;
 
+const PLUGIN_FILTERS = { all: "全部", ...BUILTIN_PLUGIN_CATEGORIES };
+const pluginFilterIds = Object.keys(PLUGIN_FILTERS) as (keyof typeof PLUGIN_FILTERS)[];
+
 function SettingRow({
   id,
   label,
   description,
+  tag,
   children,
 }: {
   id: string;
   label: string;
   description: string;
+  tag?: string;
   children: ReactNode;
 }) {
   return (
@@ -58,6 +71,7 @@ function SettingRow({
         <label id={`${id}-label`} htmlFor={id}>
           {label}
         </label>
+        {tag && <span className="settings-plugin-tag">{tag}</span>}
         <p id={`${id}-description`}>{description}</p>
       </div>
       <div className="setting-control">{children}</div>
@@ -74,13 +88,24 @@ const LAYOUT_FIELDS = [
 export function SettingsDialog({ settings, isMac = false, onSave, onClose }: SettingsDialogProps) {
   useLanguage();
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const aiSettingsTitleRef = useRef<HTMLHeadingElement>(null);
+  const aiSettingsEntryRef = useRef<HTMLButtonElement>(null);
+  const pluginScrollTopRef = useRef<number | null>(null);
+  const [showAiSettings, setShowAiSettings] = useState(false);
   const [draft, setDraft] = useState(settings);
   const [layout, setLayout] = useState(readLayout);
   const [category, setCategory] = useState<SettingsCategory>("appearance");
+  const [pluginFilter, setPluginFilter] = useState<BuiltinPluginCategory | "all">("all");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aiApiKeyVisible, setAiApiKeyVisible] = useState(false);
+  const [testingAi, setTestingAi] = useState(false);
+  const [aiTest, setAiTest] = useState<{ ok: boolean; message: string } | null>(null);
+  const aiConfig = draft.preferences.aiCompletion;
+  const manualShortcut = isMac ? "⌘⇧↩" : "Ctrl+Shift+Enter";
   const search = query.trim().toLowerCase();
   const matches = (id: SettingsCategory, text: string) =>
     search
@@ -93,20 +118,52 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
     const previous = document.activeElement;
     const dialog = dialogRef.current;
     dialog?.showModal();
+    titleRef.current?.focus({ preventScroll: true });
     return () => {
       dialog?.close();
       if (previous instanceof HTMLElement) previous.focus();
     };
   }, []);
 
+  useLayoutEffect(() => {
+    if (showAiSettings) {
+      if (contentRef.current) contentRef.current.scrollTop = 0;
+      aiSettingsTitleRef.current?.focus({ preventScroll: true });
+    } else if (pluginScrollTopRef.current !== null) {
+      if (contentRef.current) contentRef.current.scrollTop = pluginScrollTopRef.current;
+      pluginScrollTopRef.current = null;
+      aiSettingsEntryRef.current?.focus({ preventScroll: true });
+    }
+  }, [showAiSettings]);
+
+  const resetContent = () => {
+    pluginScrollTopRef.current = null;
+    setShowAiSettings(false);
+    if (contentRef.current) contentRef.current.scrollTop = 0;
+  };
+
   const updatePreference = <K extends keyof Preferences>(key: K, value: Preferences[K]) => {
     setDraft({ ...draft, preferences: { ...draft.preferences, [key]: value } });
   };
+  const updateAiConfig = (patch: Partial<AiCompletionConfig>) => {
+    updatePreference("aiCompletion", { ...aiConfig, ...patch });
+    setAiTest(null);
+  };
 
   const sections = SETTINGS_CATEGORIES.map(({ id, label }) => {
-    const fields = PREFERENCE_FIELDS.filter(
-      (field) => field.category === id && matches(id, `${t(field.label)} ${t(field.description)}`),
-    );
+    if (showAiSettings) return null;
+    const fields = PREFERENCE_FIELDS.filter((field) => {
+      if (field.category !== id) return false;
+      if (!search && id === "plugins" && pluginFilter !== "all") {
+        return category === id && field.pluginCategory === pluginFilter;
+      }
+      const tag = field.pluginCategory ? t(BUILTIN_PLUGIN_CATEGORIES[field.pluginCategory]) : "";
+      const detailTerms =
+        field.key === "aiCompletionEnabled"
+          ? `${t("API 格式")} ${t("Base URL")} ${t("模型 ID")} API Key ${t("测试连接")} Responses Chat Completions Messages /v1/responses /v1/chat/completions /v1/messages`
+          : "";
+      return matches(id, `${t(field.label)} ${t(field.description)} ${tag} ${detailTerms}`);
+    });
     const fonts = AREAS.filter(
       (area) =>
         (area.key === "ui" ? "appearance" : area.key) === id &&
@@ -124,6 +181,21 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
     return (
       <section className="settings-section" key={id} aria-labelledby={`settings-${id}-title`}>
         <h3 id={`settings-${id}-title`}>{t(label)}</h3>
+        {id === "plugins" && !search && (
+          <div className="settings-plugin-filters" role="group" aria-label={t("插件分类")}>
+            {pluginFilterIds.map((filter) => (
+              <button
+                key={filter}
+                type="button"
+                aria-pressed={pluginFilter === filter}
+                onClick={() => setPluginFilter(filter)}
+              >
+                {t(PLUGIN_FILTERS[filter])}
+              </button>
+            ))}
+          </div>
+        )}
+        {id === "plugins" && !search && pluginFilter === "all" && <ExternalPlugins />}
         {locale && (
           <SettingRow id="language" label={t("语言")} description={t("选择界面语言，保存后生效。")}>
             <Select<Language>
@@ -232,7 +304,27 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
             id={field.key}
             label={t(field.label)}
             description={t(field.description)}
+            tag={
+              field.pluginCategory && (search || pluginFilter === "all")
+                ? t(BUILTIN_PLUGIN_CATEGORIES[field.pluginCategory])
+                : undefined
+            }
           >
+            {field.key === "aiCompletionEnabled" && (
+              <button
+                type="button"
+                ref={aiSettingsEntryRef}
+                className="button button-small settings-plugin-open"
+                aria-label={t("配置 AI 行内补全")}
+                onClick={() => {
+                  pluginScrollTopRef.current = contentRef.current?.scrollTop ?? 0;
+                  setShowAiSettings(true);
+                }}
+              >
+                {t("配置")}
+                <ChevronRight size={14} aria-hidden="true" />
+              </button>
+            )}
             {field.type === "boolean" ? (
               <input
                 id={field.key}
@@ -334,6 +426,126 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
     );
   }).filter(Boolean);
 
+  const aiSettings = showAiSettings && (
+    <section aria-labelledby="settings-ai-title">
+      <header className="settings-plugin-detail-header">
+        <button
+          type="button"
+          className="button button-small"
+          aria-label={t("返回插件列表")}
+          onClick={() => setShowAiSettings(false)}
+        >
+          <ChevronLeft size={14} aria-hidden="true" />
+          {t("插件")}
+        </button>
+        <h3 id="settings-ai-title" ref={aiSettingsTitleRef} tabIndex={-1}>
+          {t("AI 行内补全")}
+        </h3>
+      </header>
+      <SettingRow
+        id="ai-protocol"
+        label={t("API 格式")}
+        description={t("选择服务支持的请求协议；保存时按协议在 Base URL 后补全路径。")}
+      >
+        <Select<AiCompletionConfig["protocol"]>
+          id="ai-protocol"
+          describedBy="ai-protocol-description"
+          value={aiConfig.protocol}
+          options={AI_PROTOCOLS.map(({ value, label, path }) => ({
+            value,
+            label: `${label} (${path})`,
+          }))}
+          onChange={(protocol) => updateAiConfig({ protocol })}
+        />
+      </SettingRow>
+      <SettingRow
+        id="ai-url"
+        label={t("Base URL")}
+        description={t(
+          "只填基础地址。保存时按所选接口补全路径，已带的版本不会重复；补全会把光标附近的代码和少量相关声明发送到此接口。",
+        )}
+      >
+        <input
+          id="ai-url"
+          type="url"
+          value={aiConfig.url}
+          maxLength={2048}
+          spellCheck={false}
+          aria-describedby="ai-url-description"
+          onChange={(event) => updateAiConfig({ url: event.target.value })}
+        />
+      </SettingRow>
+      <SettingRow
+        id="ai-model"
+        label={t("模型 ID")}
+        description={t("填写接口要求的模型标识。按 {0} 手动触发补全。", manualShortcut)}
+      >
+        <input
+          id="ai-model"
+          type="text"
+          value={aiConfig.model}
+          maxLength={256}
+          spellCheck={false}
+          aria-describedby="ai-model-description"
+          onChange={(event) => updateAiConfig({ model: event.target.value })}
+        />
+      </SettingRow>
+      <SettingRow
+        id="ai-key"
+        label="API Key"
+        description={t("随设置保存在本机，只会发送给上面填写的接口。")}
+      >
+        <div className="settings-secret">
+          <input
+            id="ai-key"
+            type={aiApiKeyVisible ? "text" : "password"}
+            value={aiConfig.apiKey}
+            maxLength={4096}
+            autoComplete="off"
+            spellCheck={false}
+            aria-describedby="ai-key-description"
+            onChange={(event) => updateAiConfig({ apiKey: event.target.value })}
+          />
+          <button
+            type="button"
+            className="button button-small settings-secret-toggle"
+            aria-label={t(aiApiKeyVisible ? "隐藏 API Key" : "显示 API Key")}
+            aria-pressed={aiApiKeyVisible}
+            onClick={() => setAiApiKeyVisible((visible) => !visible)}
+          >
+            {aiApiKeyVisible ? (
+              <EyeOff size={14} aria-hidden="true" />
+            ) : (
+              <Eye size={14} aria-hidden="true" />
+            )}
+          </button>
+        </div>
+        <button
+          type="button"
+          className="button"
+          disabled={
+            testingAi || !aiConfig.url.trim() || !aiConfig.model.trim() || !aiConfig.apiKey.trim()
+          }
+          onClick={async () => {
+            setTestingAi(true);
+            setAiTest(null);
+            try {
+              await api.testAiCompletion(aiConfig);
+              setAiTest({ ok: true, message: t("模型连接成功。") });
+            } catch (error) {
+              setAiTest({ ok: false, message: aiCompletionError(error) });
+            } finally {
+              setTestingAi(false);
+            }
+          }}
+        >
+          {t(testingAi ? "正在测试连接…" : "测试连接")}
+        </button>
+        {aiTest && <span role={aiTest.ok ? "status" : "alert"}>{aiTest.message}</span>}
+      </SettingRow>
+    </section>
+  );
+
   return (
     <dialog
       ref={dialogRef}
@@ -341,14 +553,16 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
       aria-labelledby="settings-title"
       onCancel={(event) => {
         event.preventDefault();
-        if (!busy) onClose();
+        if (busy) return;
+        if (showAiSettings) setShowAiSettings(false);
+        else onClose();
       }}
     >
       <form
         noValidate
         onSubmit={async (event) => {
           event.preventDefault();
-          if (busy) return;
+          if (busy || testingAi) return;
           const invalidSize = LAYOUT_FIELDS.find(
             (field) =>
               !Number.isInteger(layout[field.key]) ||
@@ -372,7 +586,23 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
           setBusy(true);
           setError(null);
           try {
-            await onSave(draft, layout);
+            const config = {
+              ...aiConfig,
+              url: aiConfig.url.trim(),
+              model: aiConfig.model.trim(),
+              apiKey: aiConfig.apiKey.trim(),
+            };
+            const configured = !!config.url && !!config.model && !!config.apiKey;
+            const next = {
+              ...draft,
+              preferences: {
+                ...draft.preferences,
+                aiCompletion: config,
+                // An incomplete configuration cannot be enabled, so clearing a field disables it.
+                aiCompletionEnabled: configured && draft.preferences.aiCompletionEnabled,
+              },
+            };
+            await onSave(next, layout);
             onClose();
           } catch (error) {
             setError(t("保存失败：{0}", errorMessage(error)));
@@ -383,7 +613,9 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
       >
         <header className="settings-header">
           <div>
-            <h2 id="settings-title">{t("设置")}</h2>
+            <h2 id="settings-title" ref={titleRef} tabIndex={-1}>
+              {t("设置")}
+            </h2>
             <p>{t("自定义你的阅读与编辑环境")}</p>
           </div>
           <button
@@ -413,7 +645,7 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
                 value={query}
                 onChange={(event) => {
                   setQuery(event.target.value);
-                  if (contentRef.current) contentRef.current.scrollTop = 0;
+                  resetContent();
                 }}
               />
             </div>
@@ -426,7 +658,7 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
                   onClick={() => {
                     setCategory(item.id);
                     setQuery("");
-                    if (contentRef.current) contentRef.current.scrollTop = 0;
+                    resetContent();
                   }}
                 >
                   {t(item.label)}
@@ -436,14 +668,16 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
             <p className="settings-sidebar-note">{t("更改会在保存后生效")}</p>
           </aside>
           <div className="settings-content" ref={contentRef}>
-            {search && (
+            {!showAiSettings && search && (
               <p className="settings-search-summary" role="status">
                 {t("搜索“")}
                 {query.trim()}”
               </p>
             )}
-            <fieldset className="settings-controls" disabled={busy}>
-              {sections.length ? (
+            <fieldset className="settings-controls" disabled={busy || testingAi}>
+              {showAiSettings ? (
+                aiSettings
+              ) : sections.length ? (
                 sections
               ) : (
                 <p className="settings-empty" role="status">
@@ -462,7 +696,7 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
           <button
             type="button"
             className="button button-quiet"
-            disabled={busy}
+            disabled={busy || testingAi}
             onClick={() => {
               setDraft({
                 language: DEFAULT_LANGUAGE,
@@ -472,6 +706,8 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
                 preferences: { ...DEFAULT_PREFERENCES },
               });
               setLayout({ ...DEFAULT_LAYOUT });
+              setAiApiKeyVisible(false);
+              setAiTest(null);
               setError(null);
             }}
           >
@@ -481,9 +717,9 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
           <button type="button" className="button" onClick={onClose} disabled={busy}>
             {t("取消")}
           </button>
-          <button type="submit" className="button button-primary" disabled={busy}>
+          <button type="submit" className="button button-primary" disabled={busy || testingAi}>
             {busy && <LoaderCircle size={13} className="spin" />}
-            {busy ? t("保存中…") : t("保存设置")}
+            {t(busy ? "保存中…" : "保存设置")}
           </button>
         </footer>
       </form>

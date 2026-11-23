@@ -21,3 +21,7 @@ export function isMarkdownFile(filename: string): boolean {
 export function isPythonFile(filename: string): boolean {
   return /\.py(?:i|w)?$/i.test(filename);
 }
+
+export function isJavaScriptOrTypeScriptFile(filename: string): boolean {
+  return /\.(?:[cm]?[jt]s|[jt]sx)$/i.test(filename);
+}

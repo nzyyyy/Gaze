@@ -1,0 +1,12 @@
+{
+  "id": "example.text-tools",
+  "name": "Text and CSV",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "runtime": "javaScript",
+  "entry": "plugin.js",
+  "contributes": [
+    { "kind": "command", "id": "uppercase", "title": "Uppercase selection" },
+    { "kind": "markdown", "language": "csv" }
+  ]
+}

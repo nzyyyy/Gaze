@@ -1,15 +1,20 @@
 import { t } from "./i18n";
+import {
+  BUILTIN_PLUGINS,
+  type BuiltinPluginCategory,
+  type BuiltinPluginKey,
+} from "../plugins/builtins";
 import type { ColorSchemes } from "./colorSchemes";
 import type { FontSettings } from "./fonts";
 import type { ThemePreference } from "./types";
+import type { AiCompletionConfig } from "../plugins/ai-completion-config";
 
-export interface Preferences {
+export interface Preferences extends Record<BuiltinPluginKey, boolean> {
   editorFontSize: number;
   editorLineHeight: number;
   tabSize: number;
   wordWrap: boolean;
   lineNumbers: boolean;
-  showMinimap: boolean;
   highlightActiveLine: boolean;
   codeFolding: boolean;
   matchBrackets: boolean;
@@ -32,6 +37,7 @@ export interface Preferences {
   windowGlassEnabled: boolean;
   windowSurfaceOpacity: number;
   terminalCursorStyle: "block" | "underline" | "bar";
+  aiCompletion: AiCompletionConfig;
 }
 
 export interface AppSettings {
@@ -71,6 +77,14 @@ export const DEFAULT_PREFERENCES: Preferences = {
   windowGlassEnabled: true,
   windowSurfaceOpacity: 0.8,
   terminalCursorStyle: "block",
+  mermaidEnabled: true,
+  markdownInsertEnabled: true,
+  markdownMathEnabled: true,
+  pathCompletionEnabled: true,
+  pythonEnabled: true,
+  typescriptEnabled: true,
+  aiCompletionEnabled: false,
+  aiCompletion: { protocol: "responses", url: "", model: "", apiKey: "" },
 };
 
 export const SETTINGS_CATEGORIES = [
@@ -80,6 +94,7 @@ export const SETTINGS_CATEGORIES = [
   { id: "search", label: "搜索" },
   { id: "terminal", label: "终端" },
   { id: "layout", label: "窗口与布局" },
+  { id: "plugins", label: "插件" },
 ] as const;
 export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number]["id"];
 
@@ -90,6 +105,7 @@ interface FieldInfo {
   category: SettingsCategory;
   label: string;
   description: string;
+  pluginCategory?: BuiltinPluginCategory;
 }
 export type PreferenceField = FieldInfo &
   (
@@ -158,13 +174,6 @@ export const PREFERENCE_FIELDS: PreferenceField[] = [
     category: "editor",
     label: "显示行号",
     description: "在编辑器左侧显示行号。",
-  },
-  {
-    key: "showMinimap",
-    type: "boolean",
-    category: "editor",
-    label: "内容缩略图",
-    description: "在右侧显示语法配色缩略图，支持点击、拖动定位和悬停代码预览。",
   },
   {
     key: "highlightActiveLine",
@@ -311,6 +320,11 @@ export const PREFERENCE_FIELDS: PreferenceField[] = [
     label: "显示终端按钮",
     description: "在状态栏显示终端入口；快捷键仍可使用。",
   },
+  ...BUILTIN_PLUGINS.map<PreferenceField>((plugin) => ({
+    ...plugin,
+    type: "boolean",
+    category: "plugins",
+  })),
 ];
 
 export function preferencesError(preferences: Preferences): string | null {

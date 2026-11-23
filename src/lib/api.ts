@@ -1,6 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { DragDropEvent } from "@tauri-apps/api/webview";
+import type {
+  AiCompletionConfig,
+  AiCompletionReply,
+  AiCompletionRequest,
+} from "../plugins/ai-completion-config";
 
 import type {
   DirectoryListing,
@@ -13,6 +18,7 @@ import type {
   LspStatus,
   NavigationResult,
   OutlineResult,
+  PathCompletion,
   PathIndexStatus,
   PathSearchResponse,
   PythonEnvironment,
@@ -97,6 +103,10 @@ export const api = {
   setTheme: (theme: ThemePreference) => invoke<void>("set_theme", { theme }),
   saveSettings: (settings: import("./preferences").AppSettings) =>
     invoke<void>("save_settings", { settings }),
+  requestAiCompletion: (request: AiCompletionRequest) =>
+    invoke<AiCompletionReply>("request_ai_completion", { request }),
+  cancelAiCompletion: (id: number) => invoke<void>("cancel_ai_completion", { id }),
+  testAiCompletion: (config: AiCompletionConfig) => invoke<void>("test_ai_completion", { config }),
   listDirectory: (projectId: string, path: string) =>
     invoke<DirectoryListing>("list_directory", { projectId, path }),
   createEntry: (projectId: string, parentPath: string, name: string, isDir: boolean) =>
@@ -200,6 +210,20 @@ export const api = {
   ) => invoke<CodeCompletion | null>("resolve_completion", { projectId, path, content, resolve }),
   getCapabilities: () => invoke<ToolCapabilities>("get_capabilities"),
   searchPaths: (query: string) => invoke<PathSearchResponse>("search_paths", { query }),
+  completePaths: (
+    projectId: string,
+    documentPath: string,
+    directory: string,
+    prefix: string,
+    directoryOnly: boolean,
+  ) =>
+    invoke<PathCompletion[]>("complete_paths", {
+      projectId,
+      documentPath,
+      directory,
+      prefix,
+      directoryOnly,
+    }),
   pathIndexStatus: () => invoke<PathIndexStatus[]>("path_index_status"),
   startSearch: (requestId: string, query: string, options: SearchOptions) =>
     invoke<void>("start_search", { requestId, query, options }),

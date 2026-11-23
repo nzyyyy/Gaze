@@ -1,3 +1,4 @@
+mod ai_completion;
 mod cache;
 mod color_schemes;
 mod config;
@@ -12,6 +13,7 @@ mod models;
 mod native_files;
 mod native_menu;
 mod path_index;
+mod plugins;
 mod preferences;
 mod python;
 mod recovery;
@@ -55,6 +57,8 @@ pub struct AppState {
     lsp: Arc<LspManager>,
     watchers: WatcherService,
     terminal: TerminalManager,
+    settings_lock: tokio::sync::Mutex<()>,
+    ai_completion: ai_completion::Completion,
     background_started: AtomicBool,
     external_files: external_files::ExternalFiles,
     recovery: recovery::RecoveryStore,
@@ -79,6 +83,11 @@ impl AppState {
             .try_init();
 
         let cache = Cache::open(&data_dir.join("gaze.sqlite3"))?;
+        app.manage(plugins::Plugins::new(
+            data_dir.join("plugins"),
+            cache.clone(),
+            std::env::current_exe()?,
+        ));
         let config_path = config_dir.join("config.json");
         let (config, config_error) = match AppConfig::load(&config_path) {
             Ok(config) => (config, None),
@@ -111,6 +120,8 @@ impl AppState {
             lsp,
             watchers: WatcherService::new(),
             terminal: TerminalManager::default(),
+            settings_lock: tokio::sync::Mutex::new(()),
+            ai_completion: ai_completion::Completion::default(),
             background_started: AtomicBool::new(false),
             external_files: external_files::ExternalFiles::default(),
             recovery: recovery::RecoveryStore::new(data_dir.join("recovery")),
@@ -134,6 +145,16 @@ impl AppState {
         } else {
             self.project(project_id).await
         }
+    }
+
+    async fn read_preferences(&self) -> GazeResult<preferences::Preferences> {
+        Ok(self
+            .cache
+            .setting("preferences")
+            .await?
+            .and_then(|value| preferences::Preferences::from_stored(&value).ok())
+            .filter(|value| value.validate().is_ok())
+            .unwrap_or_default())
     }
 
     async fn snapshot(&self) -> GazeResult<WorkspaceSnapshot> {
@@ -163,13 +184,7 @@ impl AppState {
             projects,
             active_project_id,
             theme,
-            preferences: self
-                .cache
-                .setting("preferences")
-                .await?
-                .and_then(|value| serde_json::from_str::<preferences::Preferences>(&value).ok())
-                .filter(|value| value.validate().is_ok())
-                .unwrap_or_default(),
+            preferences: self.read_preferences().await?,
             color_schemes: self
                 .cache
                 .setting("color_schemes")
@@ -299,7 +314,12 @@ async fn bootstrap_workspace(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<WorkspaceSnapshot, CommandError> {
-    let snapshot = state.snapshot().await.map_err(CommandError::from)?;
+    let snapshot = {
+        let _settings = state.settings_lock.lock().await;
+        let snapshot = state.snapshot().await.map_err(CommandError::from)?;
+        plugins::apply_builtin_preferences(&state, None, &snapshot.preferences).await;
+        snapshot
+    };
     state
         .path_index
         .load_cached(&state.cache, &snapshot.projects)
@@ -484,10 +504,18 @@ async fn save_settings(
     settings: preferences::AppSettings,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
+    let _settings = state.settings_lock.lock().await;
+    let previous = state.read_preferences().await.map_err(CommandError::from)?;
+    let next = &settings.preferences;
+    if next.ai_completion_enabled {
+        next.ai_completion.validate().map_err(CommandError::from)?;
+    }
     settings
         .save(&state.cache)
         .await
-        .map_err(CommandError::from)
+        .map_err(CommandError::from)?;
+    plugins::apply_builtin_preferences(&state, Some(&previous), next).await;
+    Ok(())
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -1045,6 +1073,10 @@ async fn list_python_environments(
     project_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<python::PythonEnvironment>, CommandError> {
+    state
+        .lsp
+        .ensure_python_enabled()
+        .map_err(CommandError::from)?;
     let project = state
         .project(&project_id)
         .await
@@ -1077,6 +1109,34 @@ async fn search_paths(
     state
         .path_index
         .search(query)
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn complete_paths(
+    project_id: String,
+    document_path: String,
+    directory: String,
+    prefix: String,
+    directory_only: bool,
+    state: State<'_, AppState>,
+) -> Result<Vec<path_index::PathCompletion>, CommandError> {
+    if !state
+        .read_preferences()
+        .await
+        .map_err(CommandError::from)?
+        .path_completion_enabled
+    {
+        return Ok(Vec::new());
+    }
+    let project = state
+        .project(&project_id)
+        .await
+        .map_err(CommandError::from)?;
+    state
+        .path_index
+        .complete(project, document_path, directory, prefix, directory_only)
         .await
         .map_err(CommandError::from)
 }
@@ -1379,6 +1439,16 @@ fn get_capabilities(state: State<'_, AppState>) -> Result<ToolCapabilities, Comm
     Ok(state.tools.capabilities())
 }
 
+pub fn is_plugin_worker() -> bool {
+    std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == plugins::WORKER_FLAG)
+}
+
+pub fn run_plugin_worker() -> bool {
+    plugins::worker().is_ok()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -1406,6 +1476,15 @@ pub fn run() {
             set_active_project,
             set_theme,
             save_settings,
+            plugins::list_plugins,
+            plugins::install_plugin,
+            plugins::set_plugin_enabled,
+            plugins::uninstall_plugin,
+            plugins::invoke_plugin,
+            plugins::cancel_plugin,
+            ai_completion::request_ai_completion,
+            ai_completion::cancel_ai_completion,
+            ai_completion::test_ai_completion,
             list_directory,
             create_entry,
             move_entry,
@@ -1434,6 +1513,7 @@ pub fn run() {
             resolve_completion,
             hover_code,
             search_paths,
+            complete_paths,
             path_index_status,
             symbol_index_status,
             get_outline,
@@ -1510,6 +1590,7 @@ pub fn run() {
             state.terminal.close_all();
             let lsp = Arc::clone(&state.lsp);
             tauri::async_runtime::block_on(async move {
+                app_handle.state::<plugins::Plugins>().shutdown().await;
                 lsp.shutdown().await;
             });
         }

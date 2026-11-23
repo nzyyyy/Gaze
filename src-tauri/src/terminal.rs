@@ -465,6 +465,8 @@ mod tests {
             }
         }
         assert!(output.contains("ping"), "output = {output:?}");
-        manager.close("write-test").unwrap();
+        manager.close_all();
+        assert!(manager.sessions.lock().unwrap().is_empty());
+        assert!(manager.write("write-test", b"stale").is_err());
     }
 }

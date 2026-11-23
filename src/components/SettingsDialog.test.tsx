@@ -6,6 +6,7 @@ import { DEFAULT_COLOR_SCHEMES } from "../lib/colorSchemes";
 import { DEFAULT_PREFERENCES, type AppSettings } from "../lib/preferences";
 import { DEFAULT_LAYOUT } from "../lib/layout";
 import { SettingsDialog } from "./SettingsDialog";
+import { api } from "../lib/api";
 
 const settings: AppSettings = {
   language: "zh-CN",
@@ -17,6 +18,170 @@ const settings: AppSettings = {
 function category(name: string) {
   return within(screen.getByRole("navigation", { name: "设置分类" })).getByRole("button", { name });
 }
+
+it("focuses the heading on open and keeps the close button reachable with Tab", async () => {
+  const user = userEvent.setup();
+  const onClose = vi.fn();
+  render(<SettingsDialog settings={settings} onSave={vi.fn()} onClose={onClose} />);
+  expect(screen.getByRole("heading", { name: "设置" })).toHaveFocus();
+  await user.tab();
+  expect(screen.getByRole("button", { name: "关闭设置" })).toHaveFocus();
+  await user.keyboard("{Enter}");
+  expect(onClose).toHaveBeenCalledOnce();
+});
+
+it("filters plugins by category and keeps pending switches available in global search", async () => {
+  const user = userEvent.setup();
+  const onSave = vi.fn().mockResolvedValue(undefined);
+  render(<SettingsDialog settings={settings} onSave={onSave} onClose={vi.fn()} />);
+  await user.click(category("插件"));
+  const filters = within(screen.getByRole("group", { name: "插件分类" }));
+  expect(filters.getByRole("button", { name: "全部", pressed: true })).toBeInTheDocument();
+  expect(screen.getAllByRole("switch")).toHaveLength(8);
+
+  const markdown = filters.getByRole("button", { name: "Markdown" });
+  markdown.focus();
+  await user.keyboard("{Enter}");
+  expect(markdown).toHaveAttribute("aria-pressed", "true");
+  for (const name of ["Mermaid", "Markdown 快捷插入", "KaTeX 数学公式"]) {
+    expect(screen.getByRole("switch", { name })).toBeInTheDocument();
+  }
+  expect(screen.getAllByRole("switch")).toHaveLength(3);
+
+  await user.click(filters.getByRole("button", { name: "语言支持" }));
+  expect(screen.getByRole("switch", { name: "Python 语义支持" })).toBeInTheDocument();
+  const typescript = screen.getByRole("switch", { name: "JavaScript / TypeScript 语义支持" });
+  expect(typescript).toBeChecked();
+  expect(screen.getAllByRole("switch")).toHaveLength(2);
+  await user.click(typescript);
+
+  await user.click(filters.getByRole("button", { name: "开发工具" }));
+  expect(screen.getByRole("switch", { name: "AI 行内补全" })).toBeInTheDocument();
+  expect(screen.queryByRole("switch", { name: "集成终端" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("switch", { name: "Git 集成" })).not.toBeInTheDocument();
+  await user.click(filters.getByRole("button", { name: "编辑器" }));
+  const paths = screen.getByRole("switch", { name: "文件路径补全" });
+  expect(paths).toBeChecked();
+  await user.click(paths);
+  await user.click(screen.getByRole("switch", { name: "内容缩略图" }));
+  await user.click(markdown);
+  expect(screen.queryByRole("switch", { name: "内容缩略图" })).not.toBeInTheDocument();
+  expect(onSave).not.toHaveBeenCalled();
+  await user.type(screen.getByRole("searchbox", { name: "搜索设置" }), "内容缩略图");
+  expect(screen.getByRole("switch", { name: "内容缩略图" })).not.toBeChecked();
+  await user.click(screen.getByRole("button", { name: "保存设置" }));
+  expect(onSave).toHaveBeenCalledWith(
+    expect.objectContaining({
+      preferences: {
+        ...DEFAULT_PREFERENCES,
+        showMinimap: false,
+        typescriptEnabled: false,
+        pathCompletionEnabled: false,
+      },
+    }),
+    expect.any(Object),
+  );
+});
+
+it("keeps AI configuration on a detail page and preserves an explicit disabled choice", async () => {
+  const user = userEvent.setup();
+  const onSave = vi.fn().mockResolvedValue(undefined);
+  render(<SettingsDialog settings={settings} onSave={onSave} onClose={vi.fn()} />);
+  await user.click(category("插件"));
+  await user.click(screen.getByRole("button", { name: "开发工具" }));
+  expect(screen.getByRole("switch", { name: "AI 行内补全" })).not.toBeChecked();
+  expect(screen.queryByLabelText("Base URL")).not.toBeInTheDocument();
+  const openDetail = () => screen.getByRole("button", { name: "配置 AI 行内补全" });
+  openDetail().focus();
+  await user.keyboard("{Enter}");
+  expect(screen.getByRole("heading", { name: "AI 行内补全" })).toHaveFocus();
+  expect(screen.queryByRole("switch", { name: "Git 集成" })).not.toBeInTheDocument();
+  const endpoint = "https://model.example";
+  await user.type(screen.getByLabelText("Base URL"), endpoint);
+  await user.type(screen.getByLabelText("模型 ID"), "test-model");
+  await user.type(screen.getByLabelText("API Key", { exact: true }), "test-key");
+  await user.click(screen.getByRole("button", { name: "返回插件列表" }));
+  expect(screen.getByRole("button", { name: "开发工具", pressed: true })).toBeInTheDocument();
+  expect(openDetail()).toHaveFocus();
+  expect(screen.queryByLabelText("Base URL")).not.toBeInTheDocument();
+  expect(onSave).not.toHaveBeenCalled();
+  await user.click(openDetail());
+  expect(screen.getByLabelText("Base URL")).toHaveValue(endpoint);
+  expect(screen.getByLabelText("模型 ID")).toHaveValue("test-model");
+  expect(screen.getByLabelText("API Key", { exact: true })).toHaveValue("test-key");
+  await user.click(screen.getByRole("button", { name: "返回插件列表" }));
+  const enabled = screen.getByRole("switch", { name: "AI 行内补全" });
+  await user.click(enabled);
+  expect(enabled).toBeChecked();
+  await user.click(enabled);
+  expect(enabled).not.toBeChecked();
+  await user.click(screen.getByRole("button", { name: "保存设置" }));
+  expect(onSave).toHaveBeenCalledWith(
+    expect.objectContaining({
+      preferences: {
+        ...DEFAULT_PREFERENCES,
+        aiCompletionEnabled: false,
+        aiCompletion: {
+          protocol: "responses",
+          url: endpoint,
+          model: "test-model",
+          apiKey: "test-key",
+        },
+      },
+    }),
+    expect.any(Object),
+  );
+});
+
+it("disables reset while an AI connection test is pending", async () => {
+  const user = userEvent.setup();
+  let finish!: () => void;
+  const test = vi.spyOn(api, "testAiCompletion").mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  try {
+    const configured = {
+      ...settings,
+      preferences: {
+        ...DEFAULT_PREFERENCES,
+        aiCompletion: {
+          protocol: "responses" as const,
+          url: "https://model.example",
+          model: "test-model",
+          apiKey: "test-key",
+        },
+      },
+    };
+    render(<SettingsDialog settings={configured} onSave={vi.fn()} onClose={vi.fn()} />);
+    await user.click(category("插件"));
+    await user.click(screen.getByRole("button", { name: "配置 AI 行内补全" }));
+    await user.click(screen.getByRole("button", { name: "测试连接" }));
+    const reset = screen.getByRole("button", { name: "恢复默认" });
+    expect(reset).toBeDisabled();
+    await user.click(reset);
+    expect(screen.getByLabelText("Base URL")).toHaveValue("https://model.example");
+    await act(async () => finish());
+    expect(reset).toBeEnabled();
+  } finally {
+    test.mockRestore();
+  }
+});
+
+it("finds the AI plugin by its detail fields and restores search results on back", async () => {
+  const user = userEvent.setup();
+  render(<SettingsDialog settings={settings} onSave={vi.fn()} onClose={vi.fn()} />);
+  const search = screen.getByRole("searchbox", { name: "搜索设置" });
+  await user.type(search, "Base URL");
+  expect(screen.queryByLabelText("Base URL")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "配置 AI 行内补全" }));
+  expect(screen.getByLabelText("Base URL")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "返回插件列表" }));
+  expect(search).toHaveValue("Base URL");
+  expect(screen.getByRole("button", { name: "配置 AI 行内补全" })).toHaveFocus();
+});
 
 it("selects Codex by default and finds and saves both palettes", async () => {
   const user = userEvent.setup();
@@ -62,6 +227,7 @@ it("shows one category and preserves drafts across categories and searches", asy
   await user.clear(screen.getByRole("spinbutton", { name: "编辑器字号" }));
   await user.type(screen.getByRole("spinbutton", { name: "编辑器字号" }), "16");
   await user.click(screen.getByRole("switch", { name: "自动换行" }));
+  await user.click(category("插件"));
   expect(screen.getByRole("switch", { name: "内容缩略图" })).toBeChecked();
   await user.click(screen.getByRole("switch", { name: "内容缩略图" }));
   await user.click(category("终端"));
@@ -73,6 +239,7 @@ it("shows one category and preserves drafts across categories and searches", asy
   expect(screen.getByRole("spinbutton", { name: "编辑器字号" })).toHaveValue(16);
   await user.click(category("编辑器"));
   expect(screen.getByRole("switch", { name: "自动换行" })).not.toBeChecked();
+  await user.click(category("插件"));
   expect(screen.getByRole("switch", { name: "内容缩略图" })).not.toBeChecked();
   await user.click(screen.getByRole("button", { name: "保存设置" }));
   expect(onSave).toHaveBeenCalledWith(
@@ -259,6 +426,13 @@ it("saves the selected language and searches translated settings", async () => {
     await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "font size");
     expect(screen.getByRole("spinbutton", { name: "Editor font size" })).toBeInTheDocument();
     expect(screen.getByRole("spinbutton", { name: "Terminal font size" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Plugins" }));
+    const filters = within(screen.getByRole("group", { name: "Plugin categories" }));
+    expect(filters.getByRole("button", { name: "Language support" })).toBeInTheDocument();
+    expect(filters.getByRole("button", { name: "Developer tools" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Mermaid" })).toHaveAccessibleDescription(
+      "Render Mermaid diagrams in Markdown previews",
+    );
   } finally {
     view.unmount();
     act(() => setLanguage("zh-CN"));

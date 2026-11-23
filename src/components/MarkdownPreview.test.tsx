@@ -8,7 +8,7 @@ const apiMock = vi.hoisted(() => ({
   openExternalUrl: vi.fn(),
 }));
 vi.mock("../lib/api", () => ({ api: apiMock }));
-vi.mock("../lib/mermaid", () => ({
+vi.mock("../plugins/mermaid/render", () => ({
   renderMermaid: vi.fn(
     async (code: string) =>
       `<svg viewBox="0 0 800 400" data-code="${encodeURIComponent(code)}"></svg>`,
@@ -20,8 +20,12 @@ vi.mock("@tauri-apps/api/core", async (importOriginal) => ({
     `${protocol}://localhost/${encodeURIComponent(filePath)}`,
 }));
 
-import { renderMermaid } from "../lib/mermaid";
+import { renderMermaid } from "../plugins/mermaid/render";
 import MarkdownPreview from "./MarkdownPreview";
+import { pluginApi, type InstalledPlugin } from "../plugins/api";
+import { PluginProvider } from "../plugins/runtime";
+import { DEFAULT_PREFERENCES } from "../lib/preferences";
+import { ExternalPlugins } from "./ExternalPlugins";
 
 const props = {
   projectId: "p1",
@@ -186,12 +190,24 @@ describe("MarkdownPreview", () => {
     expect(container.querySelector("script, iframe")).toBeNull();
   });
 
-  it("renders math and highlights fenced code", () => {
-    const { container } = render(
-      <MarkdownPreview {...props} content={"$x^2$\n\n```ts\nconst x = 1;\n```"} />,
+  it("hot toggles the math plugin independently of code highlighting", async () => {
+    const content = "$x^2$\n\n```ts\nconst x = 1;\n```";
+    const list = vi.spyOn(pluginApi, "list").mockResolvedValue([]);
+    const preview = (markdownMathEnabled: boolean) => (
+      <PluginProvider preferences={{ ...DEFAULT_PREFERENCES, markdownMathEnabled }}>
+        <MarkdownPreview {...props} content={content} />
+      </PluginProvider>
     );
-    expect(container.querySelector(".katex")).not.toBeNull();
+    const { container, rerender } = render(preview(true));
+    await waitFor(() => expect(container.querySelector(".katex")).not.toBeNull());
     expect(container.querySelector("pre code .token.keyword")?.textContent).toBe("const");
+    rerender(preview(false));
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(screen.getByText("$x^2$")).toBeInTheDocument();
+    expect(container.querySelector("pre code .token.keyword")?.textContent).toBe("const");
+    rerender(preview(true));
+    expect(container.querySelector(".katex")).not.toBeNull();
+    list.mockRestore();
   });
 
   it("zooms Mermaid without rebuilding the SVG or rerendering the diagram", async () => {
@@ -222,6 +238,39 @@ describe("MarkdownPreview", () => {
     expect(canvas).toHaveStyle({ width: "100%" });
     expect(canvas?.firstElementChild).toBe(svg);
     expect(renderMermaid).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders Mermaid source while the plugin is off and renders a diagram when re-enabled", async () => {
+    const code = "flowchart TB\n  A --> B";
+    const content = `\`\`\`mermaid\n${code}\n\`\`\``;
+    const { container, rerender } = render(
+      <MarkdownPreview {...props} content={content} mermaidEnabled={false} />,
+    );
+    expect(container.querySelector("pre code.language-mermaid")?.textContent).toBe(`${code}\n`);
+    expect(renderMermaid).not.toHaveBeenCalled();
+
+    rerender(<MarkdownPreview {...props} content={content} mermaidEnabled />);
+    expect(await screen.findByRole("figure", { name: "Mermaid 图表" })).toBeInTheDocument();
+
+    rerender(<MarkdownPreview {...props} content={content} mermaidEnabled={false} />);
+    expect(screen.queryByRole("figure", { name: "Mermaid 图表" })).not.toBeInTheDocument();
+    expect(container.querySelector("pre code.language-mermaid")?.textContent).toBe(`${code}\n`);
+    expect(renderMermaid).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels pending Mermaid work when the plugin is disabled and drops a late result", async () => {
+    let finish!: (svg: string) => void;
+    const renderDiagram = vi.mocked(renderMermaid);
+    renderDiagram.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    const content = "```mermaid\nflowchart TB\n  A --> B\n```";
+    const { rerender } = render(<MarkdownPreview {...props} content={content} />);
+    expect(renderDiagram).toHaveBeenCalledOnce();
+    const signal = renderDiagram.mock.calls[0]![1];
+
+    rerender(<MarkdownPreview {...props} content={content} mermaidEnabled={false} />);
+    expect(signal.aborted).toBe(true);
+    await act(async () => finish('<svg viewBox="0 0 800 400"></svg>'));
+    expect(screen.queryByRole("figure", { name: "Mermaid 图表" })).not.toBeInTheDocument();
   });
 
   it("defers an offscreen Mermaid diagram and discards a result after leaving the viewport", async () => {
@@ -369,5 +418,85 @@ describe("MarkdownPreview", () => {
       />,
     );
     expect(scroll.mock.contexts[0]).toBe(screen.getByRole("heading", { name: "中文标题" }));
+  });
+});
+
+describe("external Markdown plugins", () => {
+  const plugin: InstalledPlugin = {
+    manifest: {
+      id: "example.csv",
+      name: "CSV",
+      version: "1",
+      apiVersion: 1,
+      runtime: "javaScript",
+      entry: "plugin.js",
+      contributes: [{ kind: "markdown", language: "csv" }],
+    },
+    revision: "csv-version",
+    enabled: true,
+  };
+
+  it("renders structured data and cancels pending work when disabled", async () => {
+    const list = vi.spyOn(pluginApi, "list").mockResolvedValue([plugin]);
+    const enable = vi.spyOn(pluginApi, "enable").mockResolvedValue([{ ...plugin, enabled: false }]);
+    let finish!: (value: { kind: "text"; text: string }) => void;
+    const run = vi
+      .spyOn(pluginApi, "run")
+      .mockResolvedValueOnce({ kind: "table", headers: ["Name"], rows: [["<img src=bad>"]] })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+    try {
+      const view = (code: string) => (
+        <PluginProvider preferences={DEFAULT_PREFERENCES}>
+          <ExternalPlugins />
+          <MarkdownPreview {...props} content={code} />
+        </PluginProvider>
+      );
+      const { rerender } = render(view("```csv\nName\nGaze\n```"));
+      expect(await screen.findByRole("cell", { name: "<img src=bad>" })).toBeInTheDocument();
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
+      rerender(view("```csv\nName\nChanged\n```"));
+      await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+      const signal = run.mock.calls[1]![2];
+      fireEvent.click(screen.getByRole("button", { name: "停用插件 CSV" }));
+      await screen.findByRole("button", { name: "启用插件 CSV" });
+      await waitFor(() => expect(signal.aborted).toBe(true));
+      await act(async () => finish({ kind: "text", text: "Late output" }));
+      expect(screen.queryByText("Late output")).not.toBeInTheDocument();
+      expect(screen.getByText("Name Changed")).toBeInTheDocument();
+    } finally {
+      list.mockRestore();
+      enable.mockRestore();
+      run.mockRestore();
+    }
+  });
+
+  it("requires an explicit second action to grant native authority", async () => {
+    const native = {
+      ...plugin,
+      enabled: false,
+      manifest: { ...plugin.manifest, name: "Native", runtime: "native" as const, contributes: [] },
+    };
+    const list = vi.spyOn(pluginApi, "list").mockResolvedValue([native]);
+    const enable = vi.spyOn(pluginApi, "enable").mockResolvedValue([{ ...native, enabled: true }]);
+    try {
+      render(
+        <PluginProvider preferences={DEFAULT_PREFERENCES}>
+          <ExternalPlugins />
+        </PluginProvider>,
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "启用插件 Native" }));
+      expect(enable).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "授权并启用" }));
+      expect(await screen.findByRole("button", { name: "停用插件 Native" })).toBeInTheDocument();
+      expect(enable).toHaveBeenCalledWith(native, true, true, expect.any(Array));
+    } finally {
+      list.mockRestore();
+      enable.mockRestore();
+    }
   });
 });

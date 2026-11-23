@@ -14,6 +14,9 @@ const apiMock = vi.hoisted(() => ({
   deleteRecovery: vi.fn(),
   writeFile: vi.fn(),
   completeCode: vi.fn(),
+  completePaths: vi.fn(),
+  requestAiCompletion: vi.fn(),
+  cancelAiCompletion: vi.fn(),
   syncDocument: vi.fn(),
   findDefinitions: vi.fn(),
   resolveMarkdownLink: vi.fn(),
@@ -33,6 +36,9 @@ beforeEach(() => {
   apiMock.writeRecovery.mockResolvedValue(null);
   apiMock.deleteRecovery.mockResolvedValue(undefined);
   apiMock.completeCode.mockResolvedValue({ items: [] });
+  apiMock.completePaths.mockReset().mockResolvedValue([]);
+  apiMock.requestAiCompletion.mockReset().mockResolvedValue({ type: "empty" });
+  apiMock.cancelAiCompletion.mockReset().mockResolvedValue(undefined);
   apiMock.syncDocument.mockResolvedValue(undefined);
   apiMock.findDefinitions.mockResolvedValue({
     source: "lsp",
@@ -50,6 +56,8 @@ import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
 import type { RecoveryRecord } from "../lib/api";
 import { setLanguage } from "../lib/i18n";
 import { EditorState, StateEffect } from "@codemirror/state";
+import { pluginApi } from "../plugins/api";
+import { PluginProvider } from "../plugins/runtime";
 
 const tab: EditorTab = {
   key: "p1\u0000src/a.ts",
@@ -90,6 +98,7 @@ function renderReader(
     initialView?: { line: number; character: number; scrollTop: number };
     recovery?: RecoveryRecord | null;
     preferences?: Preferences;
+    withPlugins?: boolean;
     onGoToDefinition?: (position: { line: number; character: number }) => void;
   } = {},
 ) {
@@ -128,7 +137,13 @@ function renderReader(
     onDirtyChange,
     onSaved,
   };
-  return { ...render(<CodeReader {...props} />), ref, onDirtyChange, onSaved, onStatus, props };
+  const reader = <CodeReader {...props} />;
+  const tree = overrides.withPlugins ? (
+    <PluginProvider preferences={DEFAULT_PREFERENCES}>{reader}</PluginProvider>
+  ) : (
+    reader
+  );
+  return { ...render(tree), ref, onDirtyChange, onSaved, onStatus, props };
 }
 
 async function editorContent(): Promise<HTMLElement> {
@@ -516,6 +531,43 @@ describe("CodeReader editing", () => {
     await waitFor(() => expect(gitApiMock.getFileBase).toHaveBeenCalledTimes(2));
   });
 
+  it("only requests AI from the active editor and cancels on tab changes", async () => {
+    const { props, rerender } = renderReader({
+      active: false,
+      content: "const value = ",
+      preferences: { ...DEFAULT_PREFERENCES, aiCompletionEnabled: true },
+    });
+    const content = await editorContent();
+    const view = EditorView.findFromDOM(content)!;
+    const manual = () =>
+      fireEvent.keyDown(content, { key: "Enter", code: "Enter", ctrlKey: true, shiftKey: true });
+    act(() => {
+      view.focus();
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+      manual();
+    });
+    expect(apiMock.requestAiCompletion).not.toHaveBeenCalled();
+
+    let respond!: (value: { type: "suggestion"; text: string }) => void;
+    apiMock.requestAiCompletion.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          respond = resolve;
+        }),
+    );
+    rerender(<CodeReader {...props} active />);
+    act(() => manual());
+    // The request waits briefly for the document to reach the language server.
+    await waitFor(() => expect(apiMock.requestAiCompletion).toHaveBeenCalledTimes(1));
+    const request = apiMock.requestAiCompletion.mock.calls[0]![0];
+    expect(request).toMatchObject({ manual: true, prefix: "const value = " });
+    rerender(<CodeReader {...props} active={false} />);
+    expect(apiMock.cancelAiCompletion).toHaveBeenCalledWith(request.id);
+    await act(async () => respond({ type: "suggestion", text: "42" }));
+    expect(view.dom.querySelector(".cm-gaze-ai-suggestion")).toBeNull();
+    expect(view.state.doc.toString()).toBe("const value = ");
+  });
+
   it("previews unsaved Markdown without rebuilding the editor or losing undo and selection", async () => {
     const user = userEvent.setup();
     const { ref } = renderReader({
@@ -565,6 +617,171 @@ describe("CodeReader editing", () => {
     expect(ref.current!.isDirty()).toBe(true);
     act(() => expect(undo(view)).toBe(true));
     expect(ref.current!.getText()).toBe("/");
+  });
+
+  it("completes Markdown directories in sequence and preserves the link fragment", async () => {
+    apiMock.completePaths
+      .mockResolvedValueOnce([{ name: "config", isDirectory: true }])
+      .mockResolvedValueOnce([{ name: "配置 #1(草稿).md", isDirectory: false }]);
+    const { ref } = renderReader({
+      filename: "docs/guide.md",
+      content: "[配置](../#details)",
+      preferences: { ...DEFAULT_PREFERENCES, autoSave: false },
+      withPlugins: true,
+    });
+    const view = await markdownEditor("[配置](../".length);
+    typeInEditor(view, "conf");
+    await screen.findByRole("option", { name: "config/" });
+    expect(apiMock.completePaths).toHaveBeenNthCalledWith(
+      1,
+      "p1",
+      "docs/guide.md",
+      "../",
+      "conf",
+      false,
+    );
+    expect(apiMock.completeCode).not.toHaveBeenCalled();
+    fireEvent.keyDown(view.contentDOM, { key: "Enter", isComposing: true, keyCode: 229 });
+    expect(ref.current!.getText()).toBe("[配置](../conf#details)");
+    fireEvent.keyDown(view.contentDOM, { key: "Enter" });
+    await screen.findByRole("option", { name: "配置 #1(草稿).md" });
+    expect(apiMock.completePaths).toHaveBeenNthCalledWith(
+      2,
+      "p1",
+      "docs/guide.md",
+      "../config/",
+      "",
+      false,
+    );
+    fireEvent.keyDown(view.contentDOM, { key: "Tab" });
+    expect(ref.current!.getText()).toBe(
+      "[配置](../config/%E9%85%8D%E7%BD%AE%20%231%28%E8%8D%89%E7%A8%BF%29.md#details)",
+    );
+    act(() => expect(undo(view)).toBe(true));
+    expect(ref.current!.getText()).toBe("[配置](../config/#details)");
+    act(() => expect(undo(view)).toBe(true));
+    expect(ref.current!.getText()).toBe("[配置](../conf#details)");
+  });
+
+  it.each([
+    ["notes.md", "![图](/ima", "Document", "/", "ima"],
+    ["notes.md", "[图](", "Document", "", ""],
+    ["notes.md", "[图](ima", "Document", "", "ima"],
+    ["a.ts", 'const file = "./ima', "Script", "./", "ima"],
+    ["config.json", '{"file": "./ima', "JsonText", "./", "ima"],
+    ["config.yaml", 'file: "./ima', "Stream", "./", "ima"],
+  ])(
+    "finds paths in incomplete %s input %s",
+    async (filename, content, syntax, directory, prefix) => {
+      apiMock.completePaths.mockResolvedValue([{ name: "image.png", isDirectory: false }]);
+      const { ref } = renderReader({ filename, content });
+      const view = EditorView.findFromDOM(await editorContent())!;
+      await waitFor(() => expect(syntaxTree(view.state).topNode.name).toBe(syntax));
+      act(() => {
+        view.dispatch({ selection: { anchor: content.length } });
+        view.focus();
+        startCompletion(view);
+      });
+      fireEvent.mouseDown(await screen.findByRole("option", { name: "image.png" }));
+      expect(apiMock.completePaths).toHaveBeenCalledWith("p1", filename, directory, prefix, false);
+      expect(ref.current!.getText()).toBe(
+        content.slice(0, content.length - prefix.length) + "image.png",
+      );
+    },
+  );
+
+  it("drops pending path matches on cursor movement and disables completion without rebuilding", async () => {
+    let respond!: (entries: { name: string; isDirectory: boolean }[]) => void;
+    apiMock.completePaths.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          respond = resolve;
+        }),
+    );
+    const content = "[配置](../conf)";
+    const { props, rerender } = renderReader({ filename: "guide.md", content });
+    const view = await markdownEditor(content.length - 1);
+    act(() => startCompletion(view));
+    await waitFor(() => expect(apiMock.completePaths).toHaveBeenCalledOnce());
+    act(() => view.dispatch({ selection: { anchor: 0 } }));
+    await act(async () => respond([{ name: "config", isDirectory: true }]));
+    expect(currentCompletions(view.state)).toHaveLength(0);
+
+    act(() => view.dispatch({ selection: { anchor: content.length - 1 } }));
+    apiMock.completePaths.mockResolvedValue([{ name: "config", isDirectory: true }]);
+    act(() => startCompletion(view));
+    await screen.findByRole("option", { name: "config/" });
+    rerender(
+      <CodeReader
+        {...props}
+        preferences={{ ...DEFAULT_PREFERENCES, pathCompletionEnabled: false }}
+      />,
+    );
+    expect(EditorView.findFromDOM(await editorContent())).toBe(view);
+    expect(currentCompletions(view.state)).toHaveLength(0);
+    act(() => startCompletion(view));
+    await waitFor(() => expect(apiMock.completeCode).toHaveBeenCalled());
+    expect(apiMock.completePaths).toHaveBeenCalledTimes(2);
+  });
+
+  it("only replaces the current directory segment in a quoted path", async () => {
+    const content = 'const file = "./ass-typo/old.png";';
+    apiMock.completePaths.mockResolvedValueOnce([{ name: "assets", isDirectory: true }]);
+    const { ref } = renderReader({ content });
+    const view = EditorView.findFromDOM(await editorContent())!;
+    await waitFor(() => expect(syntaxTree(view.state).topNode.name).toBe("Script"));
+    act(() => {
+      view.dispatch({ selection: { anchor: content.indexOf("-typo") } });
+      view.focus();
+      startCompletion(view);
+    });
+    await screen.findByRole("option", { name: "assets/" });
+    expect(apiMock.completePaths).toHaveBeenNthCalledWith(1, "p1", "src/a.ts", "./", "ass", true);
+    fireEvent.keyDown(view.contentDOM, { key: "Enter" });
+    expect(ref.current!.getText()).toBe('const file = "./assets/old.png";');
+    await waitFor(() => expect(apiMock.completePaths).toHaveBeenCalledTimes(2));
+  });
+
+  it.each([
+    ["a.ts", 'import "./assets|";', "Script"],
+    ["a.ts", 'const url = "https://site.example/a|";', "Script"],
+    ["notes.md", "`[text](./example|)`", "Document"],
+  ])("keeps ordinary completions in %s at %s", async (filename, marked, syntax) => {
+    renderReader({ filename, content: marked.replace("|", "") });
+    const view = EditorView.findFromDOM(await editorContent())!;
+    await waitFor(() => expect(syntaxTree(view.state).topNode.name).toBe(syntax));
+    act(() => {
+      view.dispatch({ selection: { anchor: marked.indexOf("|") } });
+      view.focus();
+      startCompletion(view);
+    });
+    await waitFor(() => expect(apiMock.completeCode).toHaveBeenCalled());
+    expect(apiMock.completePaths).not.toHaveBeenCalled();
+  });
+
+  it("hot toggles Markdown quick insert without recreating the editor or losing undo", async () => {
+    const { ref, props, rerender } = renderReader({ filename: "guide.md", content: "text" });
+    const view = await markdownEditor(0);
+    act(() => view.dispatch({ selection: { anchor: 0, head: 4 } }));
+    pressMarkdownShortcut(view, "b");
+    expect(ref.current!.getText()).toBe("**text**");
+
+    rerender(
+      <CodeReader
+        {...props}
+        preferences={{ ...DEFAULT_PREFERENCES, markdownInsertEnabled: false }}
+      />,
+    );
+    expect(EditorView.findFromDOM(await editorContent())).toBe(view);
+    pressMarkdownShortcut(view, "i");
+    expect(ref.current!.getText()).toBe("**text**");
+    act(() => expect(undo(view)).toBe(true));
+    expect(ref.current!.getText()).toBe("text");
+
+    rerender(<CodeReader {...props} />);
+    act(() => view.dispatch({ selection: { anchor: 0, head: 4 } }));
+    pressMarkdownShortcut(view, "i");
+    expect(ref.current!.getText()).toBe("*text*");
   });
 
   it("filters in either language and limits commands after prose to inline templates", async () => {
@@ -628,7 +845,7 @@ describe("CodeReader editing", () => {
     try {
       await user.click(screen.getByRole("button", { name: "预览" }));
       expect(await screen.findByRole("table")).toBeInTheDocument();
-      expect(container.querySelector(".katex")).not.toBeNull();
+      await waitFor(() => expect(container.querySelector(".katex")).not.toBeNull());
       const preview = screen.getByRole("region", { name: "Markdown 预览" });
       expect(within(preview).getByText("After")).toBeInTheDocument();
       const diagram = await within(preview).findByRole(
@@ -1245,4 +1462,71 @@ describe("CodeReader editing", () => {
     expect(ref.current!.isDirty()).toBe(false);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
+});
+
+describe("editor plugin commands", () => {
+  it.each(["unchanged", "edit", "selection", "tab switch"])(
+    "applies a single undoable transaction only when the editor snapshot stays unchanged (%s)",
+    async (scenario) => {
+      const installed = {
+        manifest: {
+          id: "example.text-tools",
+          name: "Text Tools",
+          version: "1",
+          apiVersion: 1,
+          runtime: "javaScript" as const,
+          entry: "plugin.js",
+          contributes: [{ kind: "command" as const, id: "upper", title: "Uppercase" }],
+        },
+        revision: "test-version",
+        enabled: true,
+      };
+      const list = vi.spyOn(pluginApi, "list").mockResolvedValue([installed]);
+      let finish!: (value: { kind: "replace"; text: string }) => void;
+      const run = vi.spyOn(pluginApi, "run").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      try {
+        const { rerender, props } = renderReader({ content: "abc def", withPlugins: true });
+        const view = EditorView.findFromDOM(await editorContent())!;
+        if (scenario === "unchanged") {
+          act(() => view.dispatch({ changes: { from: 3, insert: "!" }, userEvent: "input.type" }));
+        }
+        act(() => view.dispatch({ selection: { anchor: 0, head: 3 } }));
+        fireEvent.click(await screen.findByRole("combobox", { name: "插件命令" }));
+        fireEvent.click(screen.getByRole("option", { name: "Uppercase, Text Tools" }));
+        expect(run).toHaveBeenCalledOnce();
+        expect(run.mock.calls[0]?.[1]).toMatchObject({ kind: "command", id: "upper", text: "abc" });
+        const signal = run.mock.calls[0]![2];
+        if (scenario === "edit") {
+          act(() => view.dispatch({ changes: { from: 7, insert: "!" } }));
+        } else if (scenario === "selection") {
+          act(() => view.dispatch({ selection: { anchor: 4, head: 7 } }));
+        } else if (scenario === "tab switch") {
+          rerender(
+            <PluginProvider preferences={DEFAULT_PREFERENCES}>
+              <CodeReader {...props} active={false} />
+            </PluginProvider>,
+          );
+        }
+        await act(async () => finish({ kind: "replace", text: "ABC" }));
+        if (scenario === "unchanged") {
+          expect(view.state.doc.toString()).toBe("ABC! def");
+          act(() => {
+            undo(view);
+          });
+          expect(view.state.doc.toString()).toBe("abc! def");
+        } else {
+          expect(signal.aborted).toBe(true);
+          expect(view.state.doc.toString()).toBe(scenario === "edit" ? "abc def!" : "abc def");
+        }
+      } finally {
+        list.mockRestore();
+        run.mockRestore();
+      }
+    },
+  );
 });

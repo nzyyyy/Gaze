@@ -209,7 +209,12 @@
 }
 
 :root[data-overlay-glass]
-  :is(.quick-open, .location-picker, .dialog, .gaze-git-workspace .operation-toast) {
+  :is(
+    .quick-open,
+    .location-picker:not([data-anchor]),
+    .dialog,
+    .gaze-git-workspace .operation-toast
+  ) {
   position: relative;
 }
 
@@ -1269,11 +1274,6 @@ button:focus-visible,
 }
 
 .tree-action:hover {
-  color: var(--danger);
-  background: var(--danger-soft);
-}
-
-.tree-action[aria-haspopup="menu"]:hover {
   color: var(--text);
   background: var(--hover);
 }
@@ -2376,6 +2376,60 @@ button:focus-visible,
 .settings-section + .settings-section {
   margin-top: 32px;
 }
+.settings-plugin-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-plugin-filters button {
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.settings-plugin-filters button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.settings-plugin-filters button[aria-pressed="true"] {
+  background: var(--sidebar-active);
+  border-color: var(--border);
+  color: var(--text);
+}
+.settings-plugin-filters button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.settings-plugin-tag {
+  display: inline-block;
+  margin-inline-start: 8px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.settings-plugin-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.settings-content .settings-plugin-detail-header h3 {
+  margin: 0;
+}
+.setting-control:has(> .settings-plugin-open) {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+}
 .setting-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(140px, 220px);
@@ -2421,7 +2475,8 @@ button:focus-visible,
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
-.setting-control > input[type="number"] {
+.setting-control > input:is([type="number"], [type="url"], [type="text"], [type="password"]),
+.setting-control .settings-secret > input {
   width: 100%;
   padding: 7px 9px;
   border: 1px solid var(--border-strong);
@@ -2429,6 +2484,19 @@ button:focus-visible,
   color: var(--text);
   background: var(--input-bg);
   font: inherit;
+}
+.settings-secret {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+.settings-secret > input {
+  flex: 1;
+  min-width: 0;
+}
+.settings-secret-toggle {
+  flex: none;
 }
 .setting-control input:focus-visible {
   outline: 2px solid var(--accent);
@@ -2523,7 +2591,8 @@ button:focus-visible,
   .setting-control > .app-select {
     max-width: 260px;
   }
-  .setting-control > input[type="number"] {
+  .setting-control > input:is([type="number"], [type="url"], [type="text"], [type="password"]),
+  .setting-control .settings-secret > input {
     max-width: 220px;
   }
   .color-scheme-options {
@@ -2553,6 +2622,9 @@ button:focus-visible,
 .settings-header h2 {
   margin: 0;
   font-size: 16px;
+}
+.settings-header h2:focus {
+  outline: none;
 }
 
 .settings-content {
@@ -4299,4 +4371,26 @@ button:focus-visible,
 
 .file-operation-dialog .dialog-error {
   white-space: pre-wrap;
+}
+
+.settings-external-plugins .setting-copy h4 {
+  margin: 0;
+  font-size: inherit;
+  overflow-wrap: anywhere;
+}
+
+.editor-plugin-commands {
+  align-self: flex-start;
+  flex: 0 0 auto;
+  margin: 4px 12px;
+}
+
+.editor-plugin-commands .app-select-trigger {
+  min-height: 24px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.markdown-plugin-output {
+  overflow-x: auto;
 }

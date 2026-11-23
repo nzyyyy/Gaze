@@ -55,6 +55,29 @@ pub fn normalize_relative(relative: &str) -> GazeResult<PathBuf> {
     Ok(path)
 }
 
+pub fn document_relative_target(document_path: &str, target: &str) -> GazeResult<String> {
+    let base = if target.starts_with('/') {
+        ""
+    } else {
+        document_path
+            .rsplit_once('/')
+            .map_or("", |(parent, _)| parent)
+    };
+    let mut parts: Vec<&str> = base.split('/').filter(|part| !part.is_empty()).collect();
+    for part in target.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                if parts.pop().is_none() {
+                    return Err(GazeError::InvalidPath("路径指向项目目录之外。".into()));
+                }
+            }
+            part => parts.push(part),
+        }
+    }
+    Ok(parts.join("/"))
+}
+
 pub fn path_to_relative(root: &Path, path: &Path) -> GazeResult<String> {
     let relative = path.strip_prefix(root).map_err(|_| {
         GazeError::InvalidPath(format!("路径不在项目 {} 内。", root.to_string_lossy()))

@@ -6,11 +6,11 @@ Gaze 是一个精简、跨平台的桌面代码阅读与就地编辑工具。它
 
 ## 已实现功能
 
-- 多项目工作区：原生目录选择器导入、项目切换/折叠/移除、SQLite 恢复上次工作区。
+- 多项目工作区：原生目录选择器导入、项目切换和折叠、通过项目行的更多菜单移除项目、SQLite 恢复上次工作区。
 - 会话恢复：重新启动后恢复打开标签、活动标签、光标/滚动位置和文件树展开状态。
 - 崩溃恢复：未落盘缓冲区在应用数据目录独立记录；重新打开文件时可人工选择恢复或放弃，不会自动覆盖磁盘文件。
 - 懒加载文件树：只加载用户展开的目录，长列表虚拟化，目录优先排序，按类型显示图标。支持同一项目内多选、批量移动和移到废纸篓；父目录与子项合并处理，先保存全部受影响编辑器，部分失败逐项报告且重试仅处理失败项。
-- 代码阅读与编辑：CodeMirror 6、行号、括号匹配、代码折叠、多选、撤销/重做、文件内搜索、标签页。
+- 代码阅读与编辑：CodeMirror 6、行号、括号匹配、代码折叠、多选、撤销/重做、文件内搜索、标签页。右侧缩略图支持点击和拖动滚动，鼠标定位时焦点留在编辑器；也可用 Tab 聚焦缩略图后通过键盘滚动。
 - 双编辑区：最多两个并排编辑区，标签可移动到另一侧；同一文件始终只有一个编辑器实例，右侧最后一页关闭后自动合并。
 - 自动保存：编辑停顿约 800ms 后自动写盘，同一文件写入间隔至少约 1.5s；切换标签、窗口失焦、关闭前会立即刷盘。`Cmd/Ctrl+S` 可随时手动保存。
 - 保存安全：原子写入、保留原编码（UTF-8/BOM/UTF-16 LE/BE）与主要换行风格、保留文件权限、保存前检测磁盘冲突、外部修改时暂停自动保存。
@@ -23,7 +23,7 @@ Gaze 是一个精简、跨平台的桌面代码阅读与就地编辑工具。它
 - 代码补全：输入时自动弹出候选，支持语言包内置补全、当前文件单词和 LSP 语义补全；使用未保存缓冲区，拒绝过期响应及无效编辑。只在可编辑的普通大小文本中启用。
 - 实时诊断：当前活动编辑器防抖同步未保存的代码，接收语言服务器推送的错误和警告，并在编辑器显示波浪线、行标记和说明。
 - 悬停说明：鼠标停在代码标识符上约 400ms 后，通过 LSP 显示当前缓冲区对应的类型、函数签名与文档；支持 Markdown 和纯文本，提示内不加载图片或打开链接。需要语言服务器支持 hover，不可用时不显示提示。
-- 精确导航：通用 stdio LSP 客户端，内置常用语言配置，支持定义、引用、实现和文档符号；LSP 不可用时定义跳转回退到 ctags，引用不会用文本搜索结果伪造。项目外的本地定义先列为候选，选中后以临时文件打开。所有跳转支持会话内后退/前进。
+- 精确导航：通用 stdio LSP 客户端，内置常用语言配置，支持定义、引用、实现和文档符号；LSP 不可用时定义跳转回退到 ctags，引用不会用文本搜索结果伪造。导航候选框贴近编辑器中可见的触发位置。项目外的本地定义先列为候选，选中后以临时文件打开。所有跳转支持会话内后退/前进。
 - 文件变更：notify 监听、防抖合并、增量路径索引、符号缓存失效、已打开文件重新载入。
 - 集成终端：底部可拖拽面板、按项目隔离的多标签、真实 PTY + xterm.js，可运行交互式程序与 TUI。
 - Git 工作区：左侧 Git 入口或 `Cmd/Ctrl+Shift+G` 将文件树切换为 Git 管理列表，主区显示差异和详情，保留文件标签与终端；复用 GitDock 的状态、差异、文件/代码块暂存、提交、Fetch/Pull/Push、分支、历史图、Stash、文件历史/Blame 与三阶段文本冲突处理。
@@ -105,11 +105,17 @@ Gaze 会检查 `ctags --version` 是否包含 `Universal Ctags`。没有 ctags �
 
 ### TypeScript 语言服务器
 
-项目开发依赖中包含 `typescript-language-server` 和 `typescript@5.9.3`，用于开发与集成测试。打包后的 Gaze 不捆绑任何语言服务器。对于普通 TypeScript 项目，推荐在项目内安装 TypeScript（大多数项目已有），或全局安装并确保命令在 `PATH` 中：
+在「设置 → 插件 → 语言支持」可以独立启停「JavaScript / TypeScript 语义支持」，默认开启。停用后会关闭对应的语言服务器会话，编辑器仍提供语法高亮和文件内补全。
+
+Gaze 从本机启动语言服务器。macOS 上可将它安装到用户目录，和 Pyright 一样在[配置文件](#工具和-lsp)中指定启动路径。下面的命令使用仓库集成测试的服务端版本：
 
 ```bash
-npm install -g typescript typescript-language-server
+mkdir -p "$HOME/.gaze/lsp/typescript"
+npm install --prefix "$HOME/.gaze/lsp/typescript" \
+  typescript@5.9.3 typescript-language-server@6.0.2
 ```
+
+使用这个目录时，在 `lsp` 的 `typescript` 项中把 `command` 设为 Node.js 的绝对路径，把 `args` 设为 `typescript-language-server/lib/cli.mjs` 的绝对路径与 `--stdio`。`initializationOptions.tsserver.path` 指向同一安装目录下的 `typescript/lib/tsserver.js`。JSON 中各路径需写完整路径。Node.js 版本须满足所安装语言服务器的要求。
 
 Gaze 内置的 TypeScript 配置为：
 
@@ -121,7 +127,7 @@ typescript-language-server --stdio
 
 内置预设使用 TypeScript 的语义服务处理首次补全，避免项目加载时仅返回语法候选。
 
-如果 TypeScript 不在项目依赖中，可以在用户配置的 LSP 项中传入 `initializationOptions.tsserver.path`，指向本机 `typescript/lib/tsserver.js`。自定义预设也可以设置 `initializationOptions.tsserver.useSyntaxServer` 为 `"never"`。
+需要指定 TypeScript 版本时，可以在用户配置的 LSP 项中传入 `initializationOptions.tsserver.path`，指向本机 `typescript/lib/tsserver.js`。自定义预设也可以设置 `initializationOptions.tsserver.useSyntaxServer` 为 `"never"`。
 
 ### 多语言代码补全
 
@@ -158,6 +164,8 @@ typescript-language-server --stdio
 
 LSP 补全保留服务器排序，支持候选详情解析、同文件自动导入和带编号的参数占位，补全和导入可一起撤销。自动导入取决于服务器返回的同文件编辑。补全目前处理编号和默认值占位，不执行 LSP 命令，也不展开 snippet 的变量、选择列表和转换。
 
+**文件路径补全**默认开启，可在「设置 → 插件 → 编辑器」中关闭。Markdown 链接和图片目标支持 `./`、`../` 以及以 `/` 开头的项目根路径。JavaScript、TypeScript、Python、Rust、C/C++、Go、Java、JSON、YAML 和 TOML 的普通引号字符串支持相对路径，JavaScript / TypeScript 的 `import` 和 `export` 模块路径由语言服务处理。输入 `/` 后自动提示，尚未输入 `/` 时可用 `Ctrl+Space` 手动提示。选中目录后会继续提示下一级，选中文件后可单独撤销这次插入。候选来自当前项目的索引，可提示包含已索引文件的目录。
+
 Vue 新版服务器的脚本类型能力依赖 `@vue/typescript-plugin` 与自定义 `tsserver/request` 桥接，目前未实现该桥接，Vue 保留本地／模板补全；需要完整脚本补全时可自定义使用支持独立模式的服务器及其初始化选项。不能把预设等同于各语言服务器均已实机验证。
 
 包体只增加通用补全代码和少量配置；高亮包原本已按语言异步加载，新增语言预设不会打包对应工具链。外部服务器和 SDK 会单独占用本机磁盘，已启动的服务器也会占用内存。
@@ -178,6 +186,30 @@ pnpm tauri dev
 前端开发服务器固定使用 `http://localhost:1420`。Tauri 2 CLI 是项目内开发依赖，不需要全局安装 `cargo-tauri`。
 
 ## 用户配置
+
+### 插件
+
+在「设置 → 插件 → 全部」可导入包含 `gaze-plugin.json` 的本地目录。Gaze 将清单和入口复制到应用数据目录，初次导入默认停用。启停和卸载即时生效。重新导入同一 ID 会替换安装内容并停用该版本，本机插件需重新授权。Mermaid、Markdown 快捷插入、KaTeX 数学公式、AI 行内补全、Python 语义支持、JavaScript / TypeScript 语义支持、文件路径补全和内容缩略图随 Gaze 发布，在「设置 → 插件」中启停，保存设置后生效。缩略图沿用已有的显示偏好。终端和 Git 由 Gaze 直接提供，原有入口和快捷键始终可用。
+
+- [Text and CSV](examples/plugins/text-tools) 使用受限 JavaScript。启用后，选中文本，再从编辑器的「插件命令」选择 `Uppercase selection`。在 Markdown 预览中，可用 `csv` 围栏将第一行作为表头渲染成表格。
+- [Native Text Tools](examples/plugins/native-command) 是适用于 macOS / Linux 的本机插件示例，需要 `python3` 可从系统默认 `PATH` 找到。授权并启用后，选中多行并运行 `Sort selected lines`。Windows 本机插件使用 `.exe` 入口。
+
+#### 编写外部插件
+
+以示例清单为起点。`id` 使用 `publisher.name`，各部分以小写字母起始，后续可使用小写字母、数字或连字符。`gaze` 是保留的发布者。`name` 与 `version` 用于展示，`apiVersion` 填 `1`，`runtime` 填 `javaScript` 或 `native`。`entry` 是插件目录下的普通文件名。`contributes` 声明命令的 `id` 和 `title`，或 Markdown 渲染器的 `language`。内置渲染器的语言名保留，同一语言只能启用一个外部渲染器。
+
+受限 JS 将同步函数赋给 `globalThis.gazePlugin`。脚本可以预先打包为一个 UTF-8 `.js` 文件。它只通过函数参数和返回值与 Gaze 交换数据，在独立的 QuickJS 进程中按次执行，文件、网络、模块加载和 Tauri IPC 均不可用。本机插件由 Gaze 直接启动，读取标准输入直到 EOF，将一个 JSON 结果写到标准输出后正常退出。本机插件只声明命令，以当前系统用户权限运行，适合可信代码。
+
+| 贡献 | 请求 | 响应 |
+| --- | --- | --- |
+| 编辑器命令 | `{"kind":"command","id":"uppercase","text":"hello","language":"Plain Text"}` | `{"kind":"unchanged"}` 或 `{"kind":"replace","text":"HELLO"}` |
+| Markdown 渲染 | `{"kind":"markdown","language":"csv","code":"name\nGaze"}` | `{"kind":"text","text":"Gaze"}` 或 `{"kind":"table","headers":["name"],"rows":[["Gaze"]]}` |
+
+请求正文最大 64 KiB，响应 JSON 最大 256 KiB，表格最多 32 列和 256 行。Markdown 在代码块可见时执行，失败时展示源码。编辑器命令的替换由 Gaze 校验并写入撤销历史。
+
+#### 开发内置插件
+
+内置插件在 `src/plugins/builtins.ts` 声明启用设置，在 `src/plugins/runtime.tsx` 注册贡献。Markdown 渲染器可直接提供 React 组件，编辑器的内置补全可提供现有的 `CompletionContribution`。编辑器和预览从运行时取已启用的贡献，同类插件只需实现并注册贡献。
 
 ### 字体
 

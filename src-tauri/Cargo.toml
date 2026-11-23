@@ -17,6 +17,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 base64 = "0.22"
 encoding_rs = "0.8"
+httpdate = "1"
 ignore = "0.4"
 libc = "0.2"
 nucleo = "0.5"
@@ -24,6 +25,7 @@ notify = "8"
 percent-encoding = "2"
 portable-pty = "0.9"
 regex = "1"
+reqwest = { version = "0.13", default-features = false, features = ["json", "native-tls"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -42,6 +44,7 @@ tempfile = "3"
 url = "2"
 uuid = { version = "1", features = ["serde", "v4"] }
 which = "8"
+rquickjs = "0.11.0"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1.1", features = ["fs"] }

@@ -37,6 +37,14 @@ pub struct Preferences {
     pub window_glass_enabled: bool,
     pub window_surface_opacity: f64,
     pub terminal_cursor_style: CursorStyle,
+    pub mermaid_enabled: bool,
+    pub markdown_insert_enabled: bool,
+    pub markdown_math_enabled: bool,
+    pub path_completion_enabled: bool,
+    pub python_enabled: bool,
+    pub typescript_enabled: bool,
+    pub ai_completion_enabled: bool,
+    pub ai_completion: crate::ai_completion::Config,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
@@ -79,11 +87,28 @@ impl Default for Preferences {
             window_glass_enabled: true,
             window_surface_opacity: 0.80,
             terminal_cursor_style: CursorStyle::Block,
+            mermaid_enabled: true,
+            markdown_insert_enabled: true,
+            markdown_math_enabled: true,
+            path_completion_enabled: true,
+            python_enabled: true,
+            typescript_enabled: true,
+            ai_completion_enabled: false,
+            ai_completion: Default::default(),
         }
     }
 }
 
 impl Preferences {
+    pub fn from_stored(raw: &str) -> GazeResult<Self> {
+        let mut value: serde_json::Value = serde_json::from_str(raw)?;
+        if let Some(settings) = value.as_object_mut() {
+            settings.remove("gitEnabled");
+            settings.remove("terminalEnabled");
+        }
+        Ok(serde_json::from_value(value)?)
+    }
+
     pub fn validate(&self) -> GazeResult<()> {
         for (value, min, max, step, label) in [
             (self.editor_font_size, 10.0, 32.0, 0.5, "编辑器字号"),
@@ -184,6 +209,18 @@ mod tests {
         assert!(serde_json::from_str::<Language>("\"fr\"").is_err());
         let defaults = Preferences::default();
         assert_eq!(serde_json::from_str::<Preferences>("{}").unwrap(), defaults);
+        let legacy = Preferences::from_stored(
+            r#"{"wordWrap":false,"showMinimap":false,"editorFontSize":18,"gitEnabled":false,"terminalEnabled":false}"#,
+        ).unwrap();
+        assert!(legacy.mermaid_enabled);
+        assert!(legacy.markdown_insert_enabled && legacy.markdown_math_enabled);
+        assert!(legacy.path_completion_enabled);
+        assert!(legacy.python_enabled);
+        assert!(!legacy.show_minimap);
+        assert_eq!(legacy.editor_font_size, 18.0);
+        assert!(Preferences::from_stored(r#"{"unexpected":true}"#).is_err());
+        assert!(legacy.typescript_enabled);
+        assert!(!legacy.word_wrap);
         assert!(defaults.show_minimap);
         assert!(defaults.window_glass_enabled);
         assert_eq!(defaults.window_surface_opacity, 0.80);
@@ -202,20 +239,38 @@ mod tests {
                 word_wrap: false,
                 show_minimap: false,
                 terminal_font_size: 16.0,
+                mermaid_enabled: false,
+                markdown_insert_enabled: false,
+                markdown_math_enabled: false,
+                path_completion_enabled: false,
+                python_enabled: false,
+                typescript_enabled: false,
                 ..defaults.clone()
             },
         };
         let cache = Cache::open_in_memory().unwrap();
         settings.save(&cache).await.unwrap();
+        let saved_preferences = cache.setting("preferences").await.unwrap().unwrap();
+        let saved_json: serde_json::Value = serde_json::from_str(&saved_preferences).unwrap();
+        for key in [
+            "showMinimap",
+            "mermaidEnabled",
+            "markdownInsertEnabled",
+            "markdownMathEnabled",
+            "pathCompletionEnabled",
+            "pythonEnabled",
+            "typescriptEnabled",
+        ] {
+            assert_eq!(saved_json[key], false, "{key}");
+        }
+        assert!(saved_json.get("gitEnabled").is_none());
+        assert!(saved_json.get("terminalEnabled").is_none());
         assert_eq!(
             cache.setting("theme").await.unwrap().as_deref(),
             Some("dark")
         );
         assert_eq!(
-            serde_json::from_str::<Preferences>(
-                &cache.setting("preferences").await.unwrap().unwrap()
-            )
-            .unwrap(),
+            serde_json::from_str::<Preferences>(&saved_preferences).unwrap(),
             settings.preferences
         );
         assert_eq!(

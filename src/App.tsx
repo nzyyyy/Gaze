@@ -1,3 +1,4 @@
+import { PluginProvider, useBuiltinFeature } from "./plugins/runtime";
 import { t, useLanguage, setLanguage, DEFAULT_LANGUAGE } from "./lib/i18n";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -39,7 +40,6 @@ import {
   type BatchFileOperationResult,
 } from "./components/FileOperationDialog";
 import { LocationPicker } from "./components/LocationPicker";
-import { PythonEnvironmentSelect } from "./components/PythonEnvironmentSelect";
 import { QuickOpen } from "./components/QuickOpen";
 import { SearchPanel } from "./components/SearchPanel";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -47,7 +47,7 @@ import { SidebarLayout, type SidebarLayoutHandle } from "./components/SidebarLay
 import { EditorSplitResizer } from "./components/EditorSplitResizer";
 import { SymbolPanel } from "./components/SymbolPanel";
 import { TabBar } from "./components/TabBar";
-import { TerminalPanel } from "./components/TerminalPanel";
+import { TerminalPanel } from "./components/terminal/TerminalPanel";
 import { Tooltip } from "./components/Tooltip";
 import { UnsavedDialog } from "./components/UnsavedDialog";
 import { api } from "./lib/api";
@@ -145,6 +145,30 @@ function dialogCopy(action: PendingAction) {
     saveLabel: t("重试保存并退出"),
     discardLabel: t("放弃修改并退出"),
   };
+}
+
+function DocumentLanguageStatus({
+  tab,
+  label,
+  onChange,
+  onNotice,
+}: {
+  tab: EditorTab | null;
+  label: string;
+  onChange: (projectId: string) => void;
+  onNotice: (message: string) => void;
+}) {
+  const python = useBuiltinFeature("pythonEnabled", false);
+  return python && tab && python.matches(tab.name) && !tab.projectId.startsWith("external:") ? (
+    <python.Status
+      key={tab.projectId}
+      projectId={tab.projectId}
+      onChange={onChange}
+      onNotice={onNotice}
+    />
+  ) : (
+    <span>{label}</span>
+  );
 }
 
 export default function App() {
@@ -1852,6 +1876,7 @@ export default function App() {
   }, [changeTheme, notify, theme]);
 
   const openGit = useCallback(() => {
+    if (settingsBusyRef.current) return;
     sidebarLayoutRef.current?.open();
     setGitMounted(true);
     setSidebarView("git");
@@ -2287,7 +2312,7 @@ export default function App() {
     </Fragment>
   );
 
-  return (
+  const workspace = (
     <div className="app-shell">
       <Tooltip />
       {dropHint && (
@@ -2574,19 +2599,14 @@ export default function App() {
                 <span className="status-warning">{t("正在请求符号服务…")}</span>
               ) : editorStatus ? (
                 <>
-                  {preferences.showLanguage &&
-                    (activeTab &&
-                    isPythonFile(activeTab.name) &&
-                    !activeTab.projectId.startsWith("external:") ? (
-                      <PythonEnvironmentSelect
-                        key={activeTab.projectId}
-                        projectId={activeTab.projectId}
-                        onChange={refreshPython}
-                        onNotice={notify}
-                      />
-                    ) : (
-                      <span>{editorStatus.language}</span>
-                    ))}
+                  {preferences.showLanguage && (
+                    <DocumentLanguageStatus
+                      tab={activeTab}
+                      label={editorStatus.language}
+                      onChange={refreshPython}
+                      onNotice={notify}
+                    />
+                  )}
                   {preferences.showEncoding && <span>{editorStatus.encoding}</span>}
                   {editorStatus.mode !== "normal" && (
                     <span className="status-warning">{t("大文件纯文本模式")}</span>
@@ -2689,4 +2709,5 @@ export default function App() {
       )}
     </div>
   );
+  return <PluginProvider preferences={preferences}>{workspace}</PluginProvider>;
 }

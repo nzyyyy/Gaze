@@ -4,8 +4,9 @@ mod diagnostics;
 mod hover;
 mod positions;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -20,12 +21,14 @@ pub use hover::HoverContent;
 pub use positions::{LspPosition, LspRange, PositionEncoding, TextIndex};
 
 use crate::cache::Cache;
+use crate::config::TYPESCRIPT_EXTENSIONS;
 use crate::error::{GazeError, GazeResult};
 use crate::files::{path_to_relative, read_file};
 use crate::models::{
     DocumentSymbol, FileContent, FileFingerprint, NavigationResult, OutlineResult, Project,
     SymbolLocation, TextPosition,
 };
+use crate::path_index::IgnoreCache;
 use crate::python::{self, PythonEnvironmentStatus};
 use crate::symbols::word_at;
 use crate::tools::{ResolvedLspServer, Tools};
@@ -509,6 +512,8 @@ pub struct LspManager {
     servers: Vec<ResolvedLspServer>,
     sessions: Arc<Mutex<HashMap<String, Arc<LspSession>>>>,
     start_lock: tokio::sync::Mutex<()>,
+    python_enabled: AtomicBool,
+    typescript_enabled: AtomicBool,
 }
 
 impl LspManager {
@@ -518,6 +523,8 @@ impl LspManager {
             servers: tools.lsp.clone(),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             start_lock: tokio::sync::Mutex::new(()),
+            python_enabled: AtomicBool::new(true),
+            typescript_enabled: AtomicBool::new(true),
         }
     }
 
@@ -527,21 +534,25 @@ impl LspManager {
         project: &Project,
         relative_path: &str,
     ) -> GazeResult<Arc<LspSession>> {
-        let server = self.server_for_path(relative_path).ok_or_else(|| {
-            GazeError::Unsupported(format!(
-                "没有为 {} 配置可用的 LSP 语言服务器。",
-                Path::new(relative_path)
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or(relative_path)
-            ))
-        })?;
+        let resolve_server = || {
+            self.server_for_path(relative_path).ok_or_else(|| {
+                GazeError::Unsupported(format!(
+                    "没有为 {} 配置可用的 LSP 语言服务器。",
+                    Path::new(relative_path)
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or(relative_path)
+                ))
+            })
+        };
+        let server = resolve_server()?;
         let key = format!("{}\u{0000}{}", project.id, server.config.id);
         if let Some(session) = self.open_session(&key) {
             return Ok(session);
         }
 
         let _start_guard = self.start_lock.lock().await;
+        resolve_server()?;
         if let Some(session) = self.open_session(&key) {
             return Ok(session);
         }
@@ -553,7 +564,7 @@ impl LspManager {
         if let Some(previous) = previous {
             previous.client.kill().await;
         }
-        let python_path = if serves_python(server) {
+        let python_path = if self.python_enabled.load(Ordering::Acquire) && serves_python(server) {
             self.python_environment(project)
                 .await?
                 .environment
@@ -642,6 +653,7 @@ impl LspManager {
         &self,
         project: &Project,
     ) -> GazeResult<PythonEnvironmentStatus> {
+        self.ensure_python_enabled()?;
         let selected = self
             .cache
             .setting(&python::setting_key(&project.id))
@@ -659,6 +671,7 @@ impl LspManager {
         interpreter: Option<String>,
     ) -> GazeResult<PythonEnvironmentStatus> {
         let _start_guard = self.start_lock.lock().await;
+        self.ensure_python_enabled()?;
         let root = PathBuf::from(&project.root);
         let status = tokio::task::spawn_blocking(move || {
             if let Some(path) = &interpreter {
@@ -673,23 +686,73 @@ impl LspManager {
                 status.selected.as_deref().unwrap_or_default(),
             )
             .await?;
-        let sessions = {
-            let mut sessions = self
-                .sessions
-                .lock()
-                .map_err(|_| GazeError::Message("语言服务器会话锁已损坏。".into()))?;
-            self.servers
-                .iter()
-                .filter(|server| serves_python(server))
-                .filter_map(|server| {
-                    sessions.remove(&format!("{}\u{0000}{}", project.id, server.config.id))
-                })
-                .collect::<Vec<_>>()
-        };
-        for session in sessions {
-            session.shutdown().await;
-        }
+        shutdown_sessions(self.take_language_sessions(Some(&project.id), serves_python)?).await;
         Ok(status)
+    }
+
+    pub fn ensure_python_enabled(&self) -> GazeResult<()> {
+        if !self.python_enabled.load(Ordering::Acquire) {
+            return Err(GazeError::Unsupported("Python 语义支持已停用。".into()));
+        }
+        Ok(())
+    }
+
+    pub async fn set_python_enabled(&self, enabled: bool) {
+        self.set_language_enabled(&self.python_enabled, enabled, serves_python)
+            .await;
+    }
+
+    pub async fn set_typescript_enabled(&self, enabled: bool) {
+        self.set_language_enabled(&self.typescript_enabled, enabled, serves_typescript)
+            .await;
+    }
+
+    async fn set_language_enabled(
+        &self,
+        flag: &AtomicBool,
+        enabled: bool,
+        serves_language: fn(&ResolvedLspServer) -> bool,
+    ) {
+        if flag.load(Ordering::Acquire) == enabled {
+            return;
+        }
+        let _start_guard = self.start_lock.lock().await;
+        if flag.swap(enabled, Ordering::AcqRel) && !enabled {
+            match self.take_language_sessions(None, serves_language) {
+                Ok(sessions) => shutdown_sessions(sessions).await,
+                Err(error) => {
+                    tracing::warn!(message = %error.message(), "could not stop plugin LSP sessions")
+                }
+            }
+        }
+    }
+
+    fn take_language_sessions(
+        &self,
+        project_id: Option<&str>,
+        serves_language: fn(&ResolvedLspServer) -> bool,
+    ) -> GazeResult<Vec<Arc<LspSession>>> {
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| GazeError::Message("语言服务器会话锁已损坏。".into()))?;
+        let keys: Vec<_> = sessions
+            .keys()
+            .filter(|key| {
+                key.split_once('\0').is_some_and(|(project, id)| {
+                    project_id.is_none_or(|wanted| wanted == project)
+                        && self
+                            .servers
+                            .iter()
+                            .any(|server| server.config.id == id && serves_language(server))
+                })
+            })
+            .cloned()
+            .collect();
+        Ok(keys
+            .into_iter()
+            .filter_map(|key| sessions.remove(&key))
+            .collect())
     }
 
     fn server_for_path(&self, relative_path: &str) -> Option<&ResolvedLspServer> {
@@ -697,6 +760,12 @@ impl LspManager {
             .extension()
             .and_then(|extension| extension.to_str())
             .map(str::to_lowercase)?;
+        if is_python_extension(&extension) && self.ensure_python_enabled().is_err() {
+            return None;
+        }
+        if is_typescript_extension(&extension) && !self.typescript_enabled.load(Ordering::Acquire) {
+            return None;
+        }
         self.servers.iter().find(|server| {
             server.config.extensions.iter().any(|item| {
                 item.trim_start_matches('.')
@@ -735,6 +804,173 @@ impl LspManager {
             navigation.message = Some("LSP 未找到定义。".to_string());
         }
         Ok(navigation)
+    }
+
+    pub(crate) async fn inline_declarations(
+        &self,
+        project: &Project,
+        path: &str,
+        cursor: TextPosition,
+        context: (&str, &str),
+        snapshot: (&str, i64),
+    ) -> Vec<String> {
+        self.inline_declarations_inner(project, path, cursor, context, snapshot)
+            .await
+            .unwrap_or_default()
+    }
+
+    async fn inline_declarations_inner(
+        &self,
+        project: &Project,
+        path: &str,
+        cursor: TextPosition,
+        (prefix, suffix): (&str, &str),
+        (session_id, expected_version): (&str, i64),
+    ) -> Option<Vec<String>> {
+        static IDENTIFIER: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+            regex::Regex::new(r"[_\p{XID_Start}][_\p{XID_Continue}]*").expect("identifier pattern")
+        });
+        let server = self.server_for_path(path)?;
+        let session = self.open_session(&format!("{}\u{0000}{}", project.id, server.config.id))?;
+        if !session.capabilities.definition || session.id != session_id {
+            return None;
+        }
+        let uri = Url::from_file_path(Path::new(&project.root).join(path))
+            .ok()?
+            .to_string();
+        let (text, version) = {
+            let documents = session.documents.lock().await;
+            let doc = documents.get(&uri)?;
+            if doc.version != expected_version {
+                return None;
+            }
+            (Arc::clone(&doc.text), doc.version)
+        };
+        let index = TextIndex::new(&text);
+        let offset = index.utf16_to_byte(&text, cursor).ok()?;
+        if !text[..offset].ends_with(prefix) || !text[offset..].starts_with(suffix) {
+            return None;
+        }
+        let mut positions = Vec::with_capacity(2);
+        let mut seen = HashSet::new();
+        for (distance, line) in prefix.rsplit('\n').take(3).enumerate() {
+            let line_number = cursor.line.checked_sub(distance as u32)?;
+            let line_width = line.encode_utf16().count() as u32;
+            let column = if distance == 0 {
+                cursor.character.checked_sub(line_width)?
+            } else {
+                0
+            };
+            let targets = IDENTIFIER.find_iter(line).collect::<Vec<_>>();
+            for target in targets.into_iter().rev() {
+                let symbol = target.as_str();
+                if matches!(
+                    symbol,
+                    "return"
+                        | "const"
+                        | "let"
+                        | "var"
+                        | "await"
+                        | "async"
+                        | "new"
+                        | "if"
+                        | "else"
+                        | "fn"
+                        | "def"
+                        | "pub"
+                        | "function"
+                        | "export"
+                ) || !seen.insert(symbol)
+                {
+                    continue;
+                }
+                let character = column + line[..target.start()].encode_utf16().count() as u32;
+                if let Ok(position) = index.utf16_to_lsp(
+                    &text,
+                    TextPosition {
+                        line: line_number,
+                        character,
+                    },
+                    session.encoding,
+                ) {
+                    positions.push(position);
+                }
+                if positions.len() == 2 {
+                    break;
+                }
+            }
+            if positions.len() == 2 {
+                break;
+            }
+        }
+        let first = positions.first().copied()?;
+        let definition = |position| {
+            session.client.request(
+                "textDocument/definition",
+                json!({ "textDocument": { "uri": uri }, "position": position }),
+                Duration::from_millis(50),
+            )
+        };
+        let (first, second) = if let Some(second) = positions.get(1).copied() {
+            let (first, second) = tokio::join!(definition(first), definition(second));
+            (first.ok(), second.ok())
+        } else {
+            (definition(first).await.ok(), None)
+        };
+        let locations = first
+            .iter()
+            .chain(second.iter())
+            .flat_map(|value| extract_locations(value, true))
+            .collect::<Vec<_>>();
+        let project = project.clone();
+        let snippets = tokio::task::spawn_blocking(move || {
+            let root = Path::new(&project.root);
+            let mut ignores = IgnoreCache::new(root);
+            let mut visited = HashSet::new();
+            let mut found = Vec::new();
+            for location in locations {
+                if found.len() >= 2 {
+                    break;
+                }
+                let Some(path) = Url::parse(&location.uri)
+                    .ok()
+                    .and_then(|uri| uri.to_file_path().ok())
+                else {
+                    continue;
+                };
+                let Some(relative) = path.strip_prefix(root).ok().and_then(Path::to_str) else {
+                    continue;
+                };
+                let Some(path) =
+                    crate::ai_completion::eligible_path_with(&project, relative, &mut ignores)
+                else {
+                    continue;
+                };
+                // One declaration line per file keeps the context small and the reads distinct.
+                if !visited.insert(path.clone()) {
+                    continue;
+                }
+                let Some(line) = declaration_line(&path, location.range.start.line as usize) else {
+                    continue;
+                };
+                let line = line.trim();
+                if !line.is_empty()
+                    && line.chars().count() <= 500
+                    && !found.iter().any(|previous| previous == line)
+                {
+                    found.push(line.to_owned());
+                }
+            }
+            found
+        })
+        .await
+        .ok()?
+        .into_iter()
+        .filter(|snippet| !prefix.contains(snippet) && !suffix.contains(snippet))
+        .take(2)
+        .collect();
+        let documents = session.documents.lock().await;
+        (documents.get(&uri)?.version == version).then_some(snippets)
     }
 
     pub async fn references(
@@ -930,23 +1166,46 @@ impl LspManager {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        let mut tasks = tokio::task::JoinSet::new();
-        for session in sessions {
-            tasks.spawn(async move {
-                session.shutdown().await;
-            });
-        }
-        while tasks.join_next().await.is_some() {}
+        shutdown_sessions(sessions).await;
     }
 }
 
+async fn shutdown_sessions(sessions: Vec<Arc<LspSession>>) {
+    let mut tasks = tokio::task::JoinSet::new();
+    for session in sessions {
+        tasks.spawn(async move {
+            session.shutdown().await;
+        });
+    }
+    while tasks.join_next().await.is_some() {}
+}
+
+fn is_python_extension(extension: &str) -> bool {
+    ["py", "pyi", "pyw"]
+        .iter()
+        .any(|item| extension.eq_ignore_ascii_case(item))
+}
+
 fn serves_python(server: &ResolvedLspServer) -> bool {
-    server.config.extensions.iter().any(|ext| {
-        matches!(
-            ext.trim_start_matches('.').to_ascii_lowercase().as_str(),
-            "py" | "pyi" | "pyw"
-        )
-    })
+    server
+        .config
+        .extensions
+        .iter()
+        .any(|ext| is_python_extension(ext.trim_start_matches('.')))
+}
+
+fn is_typescript_extension(extension: &str) -> bool {
+    TYPESCRIPT_EXTENSIONS
+        .iter()
+        .any(|item| extension.eq_ignore_ascii_case(item))
+}
+
+fn serves_typescript(server: &ResolvedLspServer) -> bool {
+    server
+        .config
+        .extensions
+        .iter()
+        .any(|ext| is_typescript_extension(ext.trim_start_matches('.')))
 }
 
 fn language_id_for_path(path: &Path, server_id: &str) -> String {
@@ -998,6 +1257,23 @@ fn capability_enabled(capabilities: &Value, key: &str) -> bool {
         Some(Value::Object(_)) => true,
         _ => false,
     }
+}
+
+/// Reads a single declaration line without loading the whole file into memory.
+fn declaration_line(path: &Path, line: usize) -> Option<String> {
+    use std::io::Read as _;
+    const MAX_BYTES: u64 = 256 * 1024;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > MAX_BYTES {
+        return None;
+    }
+    let text = String::from_utf8(bytes).ok()?;
+    text.lines().nth(line).map(str::to_owned)
 }
 
 fn extract_locations(value: &Value, links: bool) -> Vec<RawLocation> {
@@ -1468,7 +1744,14 @@ mod tests {
         let tools = Tools {
             rg: None,
             ctags: None,
-            lsp: vec![],
+            lsp: crate::config::AppConfig::default()
+                .servers()
+                .into_iter()
+                .map(|config| ResolvedLspServer {
+                    config,
+                    executable: None,
+                })
+                .collect(),
             config_message: None,
         };
         let manager = LspManager::new(&tools, cache);
@@ -1483,6 +1766,20 @@ mod tests {
             .unwrap();
         let cache = Cache::open(&database).unwrap();
         let reopened = LspManager::new(&tools, cache.clone());
+        assert!(reopened.has_server_for("main.py"));
+        reopened.set_python_enabled(false).await;
+        assert!(!reopened.has_server_for("main.py"));
+        assert!(reopened.has_server_for("main.ts"));
+        assert!(reopened.python_environment(&project).await.is_err());
+        reopened.set_python_enabled(true).await;
+        assert!(reopened.has_server_for("main.py"));
+        reopened.set_typescript_enabled(false).await;
+        assert!(reopened.has_server_for("main.py"));
+        for extension in TYPESCRIPT_EXTENSIONS {
+            assert!(!reopened.has_server_for(&format!("main.{extension}")));
+        }
+        reopened.set_typescript_enabled(true).await;
+        assert!(reopened.has_server_for("main.tsx"));
         assert_eq!(
             reopened
                 .python_environment(&project)
@@ -1594,7 +1891,28 @@ mod tests {
                 .all(|item| item["severity"] != 1 || item["start"]["line"] != 0),
             "{diagnostics}"
         );
-        session.shutdown().await;
+        let tools = Tools {
+            rg: None,
+            ctags: None,
+            lsp: vec![server],
+            config_message: None,
+        };
+        let manager = LspManager::new(&tools, Cache::open_in_memory().unwrap());
+        let session = Arc::new(session);
+        manager
+            .sessions
+            .lock()
+            .unwrap()
+            .insert("test\0python".into(), Arc::clone(&session));
+        manager.set_python_enabled(false).await;
+        assert!(manager.sessions.lock().unwrap().is_empty());
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !session.client.is_closed() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("disabled Python language server should exit");
     }
 
     fn language_server_path() -> Option<PathBuf> {
@@ -1666,7 +1984,7 @@ mod tests {
         };
         let root_uri = Url::from_directory_path(&root).unwrap();
         let (diagnostics_tx, mut diagnostics_rx) = tokio::sync::mpsc::unbounded_channel();
-        let session = LspSession::start(project, &server, &root_uri, None, move |update| {
+        let session = LspSession::start(project.clone(), &server, &root_uri, None, move |update| {
             let _ = diagnostics_tx.send(serde_json::to_value(update).unwrap());
         })
         .await
@@ -1860,13 +2178,56 @@ mod tests {
         let session = Arc::new(session);
         let manager = LspManager {
             cache: Cache::open_in_memory().unwrap(),
-            servers: Vec::new(),
+            servers: vec![server],
             sessions: Arc::new(Mutex::new(HashMap::from([(
                 "lsp-test\0typescript".to_string(),
                 Arc::clone(&session),
             )]))),
             start_lock: tokio::sync::Mutex::new(()),
+            python_enabled: AtomicBool::new(true),
+            typescript_enabled: AtomicBool::new(true),
         };
+        let recorded = format!(
+            "{edited}\nimport {{ exportedWidget }} from './dependency';\nconst widget = exportedWidget("
+        );
+        let buffer = format!("{recorded});\n");
+        let cursor = TextPosition {
+            line: recorded.lines().count() as u32 - 1,
+            character: "const widget = exportedWidget(".len() as u32,
+        };
+        let sync = session.sync_buffer("src/你好.ts", &buffer).await.unwrap();
+        assert!(manager
+            .inline_declarations(
+                &project,
+                "src/你好.ts",
+                cursor,
+                (&recorded, ");"),
+                (&sync.session, sync.version - 1)
+            )
+            .await
+            .is_empty());
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let declarations = manager
+                    .inline_declarations(
+                        &project,
+                        "src/你好.ts",
+                        cursor,
+                        (&recorded, ");"),
+                        (&sync.session, sync.version),
+                    )
+                    .await;
+                if declarations
+                    .iter()
+                    .any(|declaration| declaration.contains("exportedWidget(name: string)"))
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("AI context should extract a declaration from the warmed language server");
         manager.forget_documents(&root.join("src")).await;
         let documents = session.documents.lock().await;
         assert_eq!(documents.len(), 1);
@@ -1885,6 +2246,14 @@ mod tests {
         manager.forget_documents(&root.join("moved/你好.ts")).await;
         assert_eq!(session.documents.lock().await.len(), 1);
 
-        session.shutdown().await;
+        manager.set_typescript_enabled(false).await;
+        assert!(manager.sessions.lock().unwrap().is_empty());
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !session.client.is_closed() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("disabled TypeScript language server should exit");
     }
 }

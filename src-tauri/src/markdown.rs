@@ -6,7 +6,9 @@ use percent_encoding::percent_decode_str;
 use serde::Serialize;
 
 use crate::error::{GazeError, GazeResult};
-use crate::files::{path_to_relative, resolve_within_root, MAX_FILE_BYTES};
+use crate::files::{
+    document_relative_target, path_to_relative, resolve_within_root, MAX_FILE_BYTES,
+};
 use crate::models::Project;
 
 #[derive(Debug, Serialize)]
@@ -88,28 +90,12 @@ pub fn resolve_link(
     {
         return Err(GazeError::InvalidPath("只接受项目内的文件链接。".into()));
     }
-    let base = if target.is_empty() {
-        document_path
-    } else if target.starts_with('/') {
-        ""
+    let relative = if target.is_empty() {
+        document_path.to_owned()
     } else {
-        document_path
-            .rsplit_once('/')
-            .map_or("", |(parent, _)| parent)
+        document_relative_target(document_path, &target)?
     };
-    let mut parts: Vec<&str> = base.split('/').filter(|part| !part.is_empty()).collect();
-    for part in target.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                if parts.pop().is_none() {
-                    return Err(GazeError::InvalidPath("链接指向项目目录之外。".into()));
-                }
-            }
-            part => parts.push(part),
-        }
-    }
-    let resolved = resolve_within_root(root, &parts.join("/"))?;
+    let resolved = resolve_within_root(root, &relative)?;
     if !resolved.is_file() {
         return Err(GazeError::InvalidPath("链接目标不是文件。".into()));
     }

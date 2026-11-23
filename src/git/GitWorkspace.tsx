@@ -38,7 +38,7 @@ interface Props {
   preload?: boolean;
   prepareOperation: PrepareGitOperation;
   onOpenFile: (root: string, path: string) => void;
-  onOpenTerminal: () => void;
+  onOpenTerminal?: () => void;
   onNotice?: (message: string) => void;
 }
 
@@ -374,7 +374,7 @@ export default function GitWorkspace({
             <p role="status">{error || context?.value.error || tr("该项目尚未初始化 Git。")}</p>
             <p>{tr("可在终端初始化仓库；找不到 Git 时，在配置中设置 tools.git 路径。")}</p>
             <div>
-              <button onClick={onOpenTerminal}>{tr("打开终端")}</button>
+              {onOpenTerminal && <button onClick={onOpenTerminal}>{tr("打开终端")}</button>}
               <button onClick={() => setRetry((value) => value + 1)}>{tr("重新检测")}</button>
             </div>
           </div>
@@ -457,7 +457,7 @@ export default function GitWorkspace({
                   <button onClick={() => void run({ type: "undoLastCommit" })}>
                     {tr("撤回上次提交（保留修改）")}
                   </button>
-                  <button onClick={onOpenTerminal}>{tr("打开终端")}</button>
+                  {onOpenTerminal && <button onClick={onOpenTerminal}>{tr("打开终端")}</button>}
                 </RowMenu>
               </div>
             </header>

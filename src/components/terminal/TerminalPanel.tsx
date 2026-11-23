@@ -1,4 +1,4 @@
-import { t, useLanguage } from "../lib/i18n";
+import { t, useLanguage } from "../../lib/i18n";
 import "@xterm/xterm/css/xterm.css";
 
 import type { FitAddon } from "@xterm/addon-fit";
@@ -7,10 +7,10 @@ import { ChevronDown, Plus, Terminal as TerminalIcon, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 
-import { api } from "../lib/api";
-import type { ColorScheme } from "../lib/colorSchemes";
-import { LAYOUT_CHANGE_EVENT, readLayout, saveLayout } from "../lib/layout";
-import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
+import { api } from "../../lib/api";
+import type { ColorScheme } from "../../lib/colorSchemes";
+import { LAYOUT_CHANGE_EVENT, readLayout, saveLayout } from "../../lib/layout";
+import { DEFAULT_PREFERENCES, type Preferences } from "../../lib/preferences";
 import {
   folderName,
   nextTerminalTitle,
@@ -19,9 +19,9 @@ import {
   removeTerminal,
   terminalTheme,
   type TerminalTab,
-} from "../lib/terminalTabs";
-import type { Project, ResolvedTheme, TerminalEvent, TerminalSessionInfo } from "../lib/types";
-import { errorMessage } from "../lib/utils";
+} from "./terminalTabs";
+import type { Project, ResolvedTheme, TerminalEvent, TerminalSessionInfo } from "../../lib/types";
+import { errorMessage } from "../../lib/utils";
 
 const MIN_HEIGHT = 120;
 

@@ -368,7 +368,8 @@ mod tests {
         serde_json::from_value(serde_json::json!({
             "ready": true, "blocked": false, "hasFile": false,
             "canSave": false, "canNavigate": false, "canGoBack": false, "canGoForward": false,
-            "splitOpen": false, "terminalOpen": false, "sidebarView": "files", "theme": "system", "autoSave": true,
+            "splitOpen": false, "terminalOpen": false,
+            "sidebarView": "files", "theme": "system", "autoSave": true,
             "wordWrap": true, "lineNumbers": true, "showStatusBar": true
         }))
         .unwrap()
@@ -387,6 +388,7 @@ mod tests {
         let mut state = state();
         assert!(state.enabled("open-file"));
         assert!(state.enabled("terminal"));
+        assert!(state.enabled("git"));
         for action in [
             "save",
             "find",

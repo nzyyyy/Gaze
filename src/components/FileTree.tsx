@@ -19,7 +19,6 @@ import {
   LoaderCircle,
   MoreHorizontal,
   Plus,
-  X,
 } from "lucide-react";
 
 import { api } from "../lib/api";
@@ -800,14 +799,6 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
                       <span className="tree-text">{node.project.name}</span>
                     </button>
                     {moreButton(node)}
-                    <button
-                      className="tree-action"
-                      onClick={() => onRemoveProject(node.project)}
-                      data-tooltip={t("从工作区移除 {0}", node.project.name)}
-                      aria-label={t("从工作区移除 {0}", node.project.name)}
-                    >
-                      <X size={13} />
-                    </button>
                   </div>
                 );
               }

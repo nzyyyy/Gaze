@@ -100,8 +100,11 @@ const gitApiMock = vi.hoisted(() => ({
 
 vi.mock("./lib/api", () => ({ api: apiMock, gitApi: gitApiMock }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
-vi.mock("./components/TerminalPanel", () => ({
+vi.mock("./components/terminal/TerminalPanel", () => ({
   TerminalPanel: ({ open }: { open: boolean }) => <section aria-label="终端面板" hidden={!open} />,
+}));
+vi.mock("./plugins/api", () => ({
+  pluginApi: { list: vi.fn().mockResolvedValue([]) },
 }));
 vi.mock("./git/GitWorkspace", async () => {
   const { useState } = await import("react");
@@ -1173,6 +1176,22 @@ describe("App editor panes", () => {
     expect(screen.queryByRole("dialog", { name: "设置" })).not.toBeInTheDocument();
   });
 
+  it("keeps the terminal mounted and open when plugin preferences change", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("button", { name: "设置" });
+    await menuAction("terminal");
+    const panel = screen.getByRole("region", { name: "终端面板" });
+    await menuAction("settings");
+    await user.click(screen.getByRole("button", { name: "插件" }));
+    expect(screen.queryByRole("switch", { name: "集成终端" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("switch", { name: "内容缩略图" }));
+    await user.click(screen.getByRole("button", { name: "保存设置" }));
+    await waitFor(() => expect(nativeMenu.state?.blocked).toBe(false));
+    expect(screen.getByRole("region", { name: "终端面板" })).toBe(panel);
+    expect(nativeMenu.state?.terminalOpen).toBe(true);
+  });
+
   it("opens selected files through the existing external-file flow and imports projects", async () => {
     vi.mocked(open).mockResolvedValueOnce(["/outside/test.md"]);
     apiMock.openExternalFiles.mockResolvedValueOnce({
@@ -1994,6 +2013,34 @@ describe("App editor panes", () => {
     expect(nativeMenu.state?.blocked).toBe(false);
     expect(saveSpy).not.toHaveBeenCalled();
     await act(async () => finish("succeeded"));
+  });
+
+  it("keeps Git and its editor locks active while saving plugin preferences", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByText("README.md"));
+    await user.click(screen.getByRole("button", { name: "Git 管理" }));
+    await screen.findByRole("region", { name: "Git 工作区" });
+    let finish!: Awaited<ReturnType<PrepareGitOperation>>;
+    await act(async () => {
+      finish = await gitPreparation.current!(project.root, {
+        type: "pull",
+        strategy: "fastForwardOnly",
+      });
+    });
+    await user.click(screen.getByRole("button", { name: "设置" }));
+    await user.click(screen.getByRole("button", { name: "插件" }));
+    expect(screen.queryByRole("switch", { name: "Git 集成" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("switch", { name: "内容缩略图" }));
+    await user.click(screen.getByRole("button", { name: "保存设置" }));
+    await waitFor(() => expect(apiMock.saveSettings).toHaveBeenCalledOnce());
+    const editor = screen.getByTestId("editor-p1\u0000README.md");
+    expect(editor).toHaveAttribute("data-locked", "true");
+
+    await act(async () => finish("succeeded"));
+    expect(editor).toHaveAttribute("data-locked", "false");
+    expect(screen.getByRole("button", { name: "Git 管理" })).toBeInTheDocument();
+    expect(nativeMenu.state?.sidebarView).toBe("git");
   });
 
   it.each(["succeeded", "failed", "cancelled"] as const)(
