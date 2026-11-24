@@ -194,6 +194,14 @@ pnpm tauri dev
 - [Text and CSV](examples/plugins/text-tools) 使用受限 JavaScript。启用后，选中文本，再从编辑器的「插件命令」选择 `Uppercase selection`。在 Markdown 预览中，可用 `csv` 围栏将第一行作为表头渲染成表格。
 - [Native Text Tools](examples/plugins/native-command) 是适用于 macOS / Linux 的本机插件示例，需要 `python3` 可从系统默认 `PATH` 找到。授权并启用后，选中多行并运行 `Sort selected lines`。Windows 本机插件使用 `.exe` 入口。
 
+#### AI 行内补全
+
+默认停用。启用后在「设置 → 插件」打开 AI 配置，选择 OpenAI Responses、OpenAI Chat Completions 或 Anthropic Messages 协议，填写 HTTPS Base URL、模型 ID 和 API Key。`Cmd/Ctrl+Shift+Enter` 可立即请求；AI 灰字用 `Tab` 接受，列表候选仍用 `Enter` 接受，`Escape` 取消。
+
+补全仅发送光标前后最多 3000/1000 个 Unicode 字符、少量近期编辑及经路径安全检查的相关声明。忽略文件、常见凭据文件和越界符号链接不会发送；这不能替代对普通源码中敏感信息的人工审查。API Key 当前随偏好设置明文存储在本机 SQLite，不使用系统钥匙串。与输入匹配的建议和短期相关声明缓存在当前编辑器内存中，缓存不会写入 SQLite，切换文件或修改配置后清空。
+
+模型质量评测是显式忽略的合成样本测试，需要开发者自行设置 `GAZE_AI_EVAL_PROTOCOL`、`GAZE_AI_EVAL_URL`、`GAZE_AI_EVAL_MODEL`、`GAZE_AI_EVAL_API_KEY` 后运行 `cargo test --manifest-path src-tauri/Cargo.toml model_accuracy_evaluation -- --ignored --nocapture`。该命令会把测试 fixture 发送到所配置的云端接口，常规测试不执行此步骤。
+
 #### 编写外部插件
 
 以示例清单为起点。`id` 使用 `publisher.name`，各部分以小写字母起始，后续可使用小写字母、数字或连字符。`gaze` 是保留的发布者。`name` 与 `version` 用于展示，`apiVersion` 填 `1`，`runtime` 填 `javaScript` 或 `native`。`entry` 是插件目录下的普通文件名。`contributes` 声明命令的 `id` 和 `title`，或 Markdown 渲染器的 `language`。内置渲染器的语言名保留，同一语言只能启用一个外部渲染器。

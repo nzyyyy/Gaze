@@ -462,7 +462,7 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
         id="ai-url"
         label={t("Base URL")}
         description={t(
-          "只填基础地址。保存时按所选接口补全路径，已带的版本不会重复；补全会把光标附近的代码和少量相关声明发送到此接口。",
+          "只填基础地址。保存时按所选接口补全路径，已带的版本不会重复；补全会把光标附近的代码、近期编辑和少量相关声明发送到此接口。",
         )}
       >
         <input

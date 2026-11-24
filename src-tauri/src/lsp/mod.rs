@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -514,7 +514,28 @@ pub struct LspManager {
     start_lock: tokio::sync::Mutex<()>,
     python_enabled: AtomicBool,
     typescript_enabled: AtomicBool,
+    declaration_cache: Mutex<Vec<DeclarationCacheEntry>>,
 }
+
+#[derive(Clone, PartialEq, Eq)]
+struct DeclarationCacheKey {
+    project: String,
+    session: String,
+    uri: String,
+    version: i64,
+    target_uri: String,
+    start: LspPosition,
+    end: LspPosition,
+}
+
+struct DeclarationCacheEntry {
+    key: DeclarationCacheKey,
+    snippet: String,
+    at: Instant,
+}
+
+const DECLARATION_CACHE_SIZE: usize = 32;
+const DECLARATION_CACHE_TTL: Duration = Duration::from_secs(30);
 
 impl LspManager {
     pub fn new(tools: &Tools, cache: Cache) -> Self {
@@ -525,6 +546,7 @@ impl LspManager {
             start_lock: tokio::sync::Mutex::new(()),
             python_enabled: AtomicBool::new(true),
             typescript_enabled: AtomicBool::new(true),
+            declaration_cache: Mutex::new(Vec::new()),
         }
     }
 
@@ -922,55 +944,105 @@ impl LspManager {
             .chain(second.iter())
             .flat_map(|value| extract_locations(value, true))
             .collect::<Vec<_>>();
-        let project = project.clone();
-        let snippets = tokio::task::spawn_blocking(move || {
-            let root = Path::new(&project.root);
-            let mut ignores = IgnoreCache::new(root);
-            let mut visited = HashSet::new();
-            let mut found = Vec::new();
-            for location in locations {
-                if found.len() >= 2 {
-                    break;
-                }
-                let Some(path) = Url::parse(&location.uri)
-                    .ok()
-                    .and_then(|uri| uri.to_file_path().ok())
-                else {
-                    continue;
-                };
-                let Some(relative) = path.strip_prefix(root).ok().and_then(Path::to_str) else {
-                    continue;
-                };
-                let Some(path) =
-                    crate::ai_completion::eligible_path_with(&project, relative, &mut ignores)
-                else {
-                    continue;
-                };
-                // One declaration line per file keeps the context small and the reads distinct.
-                if !visited.insert(path.clone()) {
-                    continue;
-                }
-                let Some(line) = declaration_line(&path, location.range.start.line as usize) else {
-                    continue;
-                };
-                let line = line.trim();
-                if !line.is_empty()
-                    && line.chars().count() <= 500
-                    && !found.iter().any(|previous| previous == line)
-                {
-                    found.push(line.to_owned());
-                }
-            }
-            found
-        })
-        .await
-        .ok()?
-        .into_iter()
-        .filter(|snippet| !prefix.contains(snippet) && !suffix.contains(snippet))
-        .take(2)
-        .collect();
+        let source_key = (
+            project.id.clone(),
+            session_id.to_owned(),
+            uri.clone(),
+            version,
+        );
+        let snippets = self
+            .declaration_snippets(project, source_key, locations)
+            .into_iter()
+            .filter(|snippet| !prefix.contains(snippet) && !suffix.contains(snippet))
+            .take(2)
+            .collect();
         let documents = session.documents.lock().await;
         (documents.get(&uri)?.version == version).then_some(snippets)
+    }
+
+    fn declaration_snippets(
+        &self,
+        project: &Project,
+        (project_id, session, uri, version): (String, String, String, i64),
+        locations: Vec<RawLocation>,
+    ) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut cached_hit = false;
+        for location in locations {
+            if found.len() >= 2 {
+                break;
+            }
+            let key = DeclarationCacheKey {
+                project: project_id.clone(),
+                session: session.clone(),
+                uri: uri.clone(),
+                version,
+                target_uri: location.uri.clone(),
+                start: location.range.start,
+                end: location.range.end,
+            };
+            if let Ok(mut cache) = self.declaration_cache.lock() {
+                cache.retain(|entry| entry.at.elapsed() < DECLARATION_CACHE_TTL);
+                if let Some(index) = cache.iter().position(|entry| entry.key == key) {
+                    cached_hit = true;
+                    let entry = cache.remove(index);
+                    let snippet = entry.snippet.clone();
+                    cache.push(entry);
+                    let eligible = Url::parse(&location.uri)
+                        .ok()
+                        .and_then(|uri| uri.to_file_path().ok())
+                        .and_then(|path| {
+                            path.strip_prefix(Path::new(&project.root))
+                                .ok()
+                                .and_then(Path::to_str)
+                                .and_then(|relative| {
+                                    crate::ai_completion::eligible_path(project, relative)
+                                })
+                        });
+                    if eligible.is_none() {
+                        continue;
+                    }
+                    if !found.contains(&snippet) {
+                        found.push(snippet);
+                    }
+                    continue;
+                }
+            }
+            let root = Path::new(&project.root);
+            let mut ignores = IgnoreCache::new(root);
+            let Some(path) = Url::parse(&location.uri)
+                .ok()
+                .and_then(|uri| uri.to_file_path().ok())
+            else {
+                continue;
+            };
+            let Some(relative) = path.strip_prefix(root).ok().and_then(Path::to_str) else {
+                continue;
+            };
+            let Some(path) =
+                crate::ai_completion::eligible_path_with(project, relative, &mut ignores)
+            else {
+                continue;
+            };
+            let Some(snippet) = declaration_excerpt(&path, location.range) else {
+                continue;
+            };
+            if let Ok(mut cache) = self.declaration_cache.lock() {
+                cache.retain(|entry| entry.key != key);
+                cache.push(DeclarationCacheEntry {
+                    key,
+                    snippet: snippet.clone(),
+                    at: Instant::now(),
+                });
+                let excess = cache.len().saturating_sub(DECLARATION_CACHE_SIZE);
+                cache.drain(..excess);
+            }
+            if !found.contains(&snippet) {
+                found.push(snippet);
+            }
+        }
+        tracing::debug!(cached_hit, count = found.len(), "AI related declarations");
+        found
     }
 
     pub async fn references(
@@ -1259,8 +1331,8 @@ fn capability_enabled(capabilities: &Value, key: &str) -> bool {
     }
 }
 
-/// Reads a single declaration line without loading the whole file into memory.
-fn declaration_line(path: &Path, line: usize) -> Option<String> {
+/// Reads a bounded declaration, using LSP's full range to exclude a body.
+fn declaration_excerpt(path: &Path, range: LspRange) -> Option<String> {
     use std::io::Read as _;
     const MAX_BYTES: u64 = 256 * 1024;
     let mut bytes = Vec::new();
@@ -1273,7 +1345,60 @@ fn declaration_line(path: &Path, line: usize) -> Option<String> {
         return None;
     }
     let text = String::from_utf8(bytes).ok()?;
-    text.lines().nth(line).map(str::to_owned)
+    let start = range.start.line as usize;
+    let end = range.end.line as usize;
+    if start > end {
+        return None;
+    }
+    let lines = text
+        .lines()
+        .skip(start)
+        .take(end - start + 1)
+        .collect::<Vec<_>>();
+    let excerpt = if start == end {
+        lines.first()?.trim().to_owned()
+    } else if range.end.character == 0 {
+        lines[..lines.len() - 1].join("\n")
+    } else {
+        let mut depth = 0_usize;
+        let mut braces = 0_usize;
+        let mut signature = Vec::new();
+        for line in lines {
+            let mut closes = false;
+            for ch in line.chars() {
+                match ch {
+                    '(' | '[' => depth += 1,
+                    ')' | ']' => depth = depth.saturating_sub(1),
+                    '{' => {
+                        if depth == 0 && braces == 0 && line.trim_end().ends_with('{') {
+                            closes = true;
+                        }
+                        braces += 1;
+                    }
+                    '}' => braces = braces.saturating_sub(1),
+                    ':' if depth == 0
+                        && braces == 0
+                        && !signature.is_empty()
+                        && line.trim_end().ends_with(':') =>
+                    {
+                        closes = true
+                    }
+                    _ => {}
+                }
+            }
+            if signature.len() >= 8 || closes {
+                signature.push(line);
+                break;
+            }
+            signature.push(line);
+            if signature.len() >= 8 {
+                break;
+            }
+        }
+        signature.join("\n")
+    };
+    let excerpt = excerpt.trim();
+    (!excerpt.is_empty() && excerpt.chars().count() <= 500).then(|| excerpt.to_owned())
 }
 
 fn extract_locations(value: &Value, links: bool) -> Vec<RawLocation> {
@@ -1288,8 +1413,8 @@ fn extract_locations(value: &Value, links: bool) -> Vec<RawLocation> {
                 return Vec::new();
             };
             let range = value
-                .get("targetSelectionRange")
-                .or_else(|| value.get("targetRange"));
+                .get("targetRange")
+                .or_else(|| value.get("targetSelectionRange"));
             let Some(range) = range.and_then(parse_range) else {
                 return Vec::new();
             };
@@ -1328,6 +1453,7 @@ fn parse_position(value: &Value) -> Option<LspPosition> {
     })
 }
 
+#[derive(Clone)]
 struct RawLocation {
     uri: String,
     range: LspRange,
@@ -1611,8 +1737,114 @@ mod tests {
         ]);
         let locations = extract_locations(&value, true);
         assert_eq!(locations.len(), 2);
-        assert_eq!(locations[0].range.start.line, 2);
+        assert_eq!(locations[0].range.start.line, 1);
         assert_eq!(locations[1].range.end.character, 2);
+    }
+
+    #[test]
+    fn extracts_bounded_multiline_declarations_without_bodies() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("declaration.ts");
+        std::fs::write(
+            &path,
+            "export function loadProfile(\n  options: {\n    accountId: string\n  }\n): Promise<Profile> {\n  return fetchProfile(options)\n}\n",
+        )
+        .unwrap();
+        let excerpt = declaration_excerpt(
+            &path,
+            LspRange {
+                start: LspPosition {
+                    line: 0,
+                    character: 0,
+                },
+                end: LspPosition {
+                    line: 6,
+                    character: 1,
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            excerpt,
+            "export function loadProfile(\n  options: {\n    accountId: string\n  }\n): Promise<Profile> {"
+        );
+        assert!(!excerpt.contains("return fetchProfile"));
+        let python = temp.path().join("declaration.py");
+        std::fs::write(&python, "def lookup(\n    *,\n    account_id: str,\n) -> Profile:\n    return Profile(account_id)\n")
+            .unwrap();
+        assert_eq!(
+            declaration_excerpt(
+                &python,
+                LspRange {
+                    start: LspPosition {
+                        line: 0,
+                        character: 0
+                    },
+                    end: LspPosition {
+                        line: 4,
+                        character: 33
+                    },
+                },
+            )
+            .as_deref(),
+            Some("def lookup(\n    *,\n    account_id: str,\n) -> Profile:")
+        );
+    }
+
+    #[test]
+    fn declaration_cache_is_bounded_and_rechecks_path_security() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let project = Project {
+            id: "p".into(),
+            name: "example".into(),
+            root: root.display().to_string(),
+        };
+        std::fs::write(root.join("target.ts"), "export const target = 1").unwrap();
+        let manager = LspManager::new(
+            &Tools {
+                rg: None,
+                ctags: None,
+                lsp: Vec::new(),
+                config_message: None,
+            },
+            Cache::open_in_memory().unwrap(),
+        );
+        let location = RawLocation {
+            uri: Url::from_file_path(root.join("target.ts"))
+                .unwrap()
+                .to_string(),
+            range: LspRange {
+                start: LspPosition {
+                    line: 0,
+                    character: 0,
+                },
+                end: LspPosition {
+                    line: 0,
+                    character: 23,
+                },
+            },
+        };
+        let source = ("p".into(), "session".into(), "file:///source.ts".into(), 1);
+        assert_eq!(
+            manager.declaration_snippets(&project, source.clone(), vec![location.clone()]),
+            vec!["export const target = 1"]
+        );
+        std::fs::write(root.join(".gitignore"), "target.ts\n").unwrap();
+        assert!(manager
+            .declaration_snippets(&project, source.clone(), vec![location.clone()])
+            .is_empty());
+        std::fs::remove_file(root.join(".gitignore")).unwrap();
+        std::fs::write(root.join("target.ts"), "export const changed = 2").unwrap();
+        assert_eq!(
+            manager.declaration_snippets(&project, source.clone(), vec![location.clone()]),
+            vec!["export const target = 1"]
+        );
+        std::fs::remove_file(root.join("target.ts")).unwrap();
+        assert!(manager
+            .declaration_snippets(&project, source, vec![location])
+            .is_empty());
+        assert!(manager.declaration_cache.lock().unwrap().len() <= 1);
     }
 
     #[test]
@@ -2186,6 +2418,7 @@ mod tests {
             start_lock: tokio::sync::Mutex::new(()),
             python_enabled: AtomicBool::new(true),
             typescript_enabled: AtomicBool::new(true),
+            declaration_cache: Mutex::new(Vec::new()),
         };
         let recorded = format!(
             "{edited}\nimport {{ exportedWidget }} from './dependency';\nconst widget = exportedWidget("

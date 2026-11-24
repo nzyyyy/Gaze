@@ -46,13 +46,15 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function open(reserved = () => false) {
+function open(reserved = () => false, suffix = "") {
   host = document.createElement("div");
   document.body.appendChild(host);
   const ai = new Compartment();
   view = new EditorView({
     parent: host,
     state: EditorState.create({
+      doc: suffix,
+      selection: { anchor: 0 },
       extensions: [
         history(),
         codeCompletion("p", "example.ts", undefined, true, true),
@@ -89,6 +91,27 @@ function key(key: string) {
 
 function ghost() {
   return host.querySelector(".cm-gaze-ai-suggestion")?.textContent;
+}
+
+function backspace() {
+  const from = view.state.selection.main.head;
+  view.dispatch({
+    changes: { from: from - 1, to: from },
+    selection: { anchor: from - 1 },
+    userEvent: "delete.backward",
+  });
+}
+
+function manual() {
+  view.contentDOM.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "Enter",
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
 }
 
 it.each(["Tab", "Enter"])(
@@ -164,20 +187,123 @@ it("requests a suggestion on demand with the platform modifier", () => {
   open();
   vi.mocked(api.requestAiCompletion).mockResolvedValue({ type: "suggestion", text: " = 1" });
   type("count");
-  view.contentDOM.dispatchEvent(
-    new KeyboardEvent("keydown", {
-      key: "Enter",
-      ctrlKey: true,
-      shiftKey: true,
-      bubbles: true,
-      cancelable: true,
-    }),
-  );
+  manual();
   expect(api.requestAiCompletion).toHaveBeenCalledOnce();
   expect(vi.mocked(api.requestAiCompletion).mock.calls[0]![0]).toMatchObject({
     manual: true,
     prefix: "count",
+    lspVersion: undefined,
   });
+});
+
+it("preserves a matching suggestion and only inserts its remainder", async () => {
+  open();
+  vi.mocked(api.requestAiCompletion).mockResolvedValue({ type: "suggestion", text: "o()" });
+  type("fo");
+  await vi.advanceTimersByTimeAsync(300);
+  expect(ghost()).toBe("o()");
+  type("o");
+  expect(ghost()).toBe("()");
+  type("(");
+  expect(ghost()).toBe(")");
+  key("Tab");
+  expect(view.state.doc.toString()).toBe("foo()");
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(api.requestAiCompletion).toHaveBeenCalledOnce();
+});
+
+it("reuses an exact context after backspacing and honors the cache lifetime", async () => {
+  open();
+  vi.mocked(api.requestAiCompletion).mockResolvedValue({ type: "suggestion", text: "o()" });
+  type("fo");
+  await vi.advanceTimersByTimeAsync(300);
+  expect(ghost()).toBe("o()");
+  type("x");
+  expect(ghost()).toBeUndefined();
+  await vi.advanceTimersByTimeAsync(300);
+  expect(api.requestAiCompletion).toHaveBeenCalledTimes(2);
+  backspace();
+  await vi.advanceTimersByTimeAsync(300);
+  expect(ghost()).toBe("o()");
+  expect(api.requestAiCompletion).toHaveBeenCalledTimes(2);
+  type("x");
+  backspace();
+  manual();
+  expect(ghost()).toBe("o()");
+  await vi.advanceTimersByTimeAsync(30_000);
+  manual();
+  expect(api.requestAiCompletion).toHaveBeenCalledTimes(3);
+});
+
+it("suppresses automatic retries during backoff but allows manual retries", async () => {
+  const onError = vi.fn();
+  host = document.createElement("div");
+  document.body.appendChild(host);
+  view = new EditorView({
+    parent: host,
+    state: EditorState.create({
+      extensions: [
+        aiInlineCompletion({
+          projectId: "p",
+          path: "example.ts",
+          language: "TypeScript",
+          reserved: () => false,
+          onError,
+        }),
+      ],
+    }),
+  });
+  view.focus();
+  vi.mocked(api.requestAiCompletion)
+    .mockResolvedValueOnce({ type: "error", kind: "rateLimited", retryAfterMs: 60_000 })
+    .mockResolvedValue({ type: "suggestion", text: " = 1" });
+  type("count");
+  await vi.advanceTimersByTimeAsync(300);
+  type("x");
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(api.requestAiCompletion).toHaveBeenCalledOnce();
+  expect(onError).toHaveBeenCalledOnce();
+  manual();
+  expect(api.requestAiCompletion).toHaveBeenCalledTimes(2);
+});
+
+it("evicts the least recently used suggestion after four contexts", async () => {
+  open(undefined, "\n".repeat(12));
+  vi.mocked(api.requestAiCompletion).mockImplementation(async ({ prefix }) => ({
+    type: "suggestion",
+    text: prefix.trim() + "()",
+  }));
+  for (const word of ["a", "b", "c", "d"]) {
+    type(word);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(ghost()).toBeTruthy();
+  }
+  backspace();
+  type("b");
+  view.dispatch({ selection: { anchor: view.state.doc.length } });
+  await vi.advanceTimersByTimeAsync(300);
+  expect(api.requestAiCompletion).toHaveBeenCalledTimes(4);
+  backspace();
+  backspace();
+  backspace();
+  backspace();
+  await vi.advanceTimersByTimeAsync(300);
+  expect(api.requestAiCompletion).toHaveBeenCalledTimes(5);
+});
+
+it("suppresses exact plain-text duplicates but retains distinct AI completions", async () => {
+  open();
+  vi.mocked(api.requestAiCompletion).mockResolvedValue({ type: "suggestion", text: "at" });
+  type("form");
+  startCompletion(view);
+  await vi.advanceTimersByTimeAsync(300);
+  expect(completionStatus(view.state)).toBe("active");
+  expect(ghost()).toBeUndefined();
+  key("Escape");
+  vi.mocked(api.requestAiCompletion).mockResolvedValue({ type: "suggestion", text: "at()" });
+  type("x");
+  await vi.advanceTimersByTimeAsync(300);
+  expect(ghost()).toBe("at()");
 });
 
 it("waits for IME commit and suppresses the reserved editor context", async () => {

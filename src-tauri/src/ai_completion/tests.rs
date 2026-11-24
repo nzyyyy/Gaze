@@ -240,6 +240,54 @@ async fn drops_reasoning_hints_when_the_provider_rejects_them() {
     assert!(bodies[1].get("reasoning").is_none());
 }
 
+#[tokio::test]
+async fn retries_legacy_chat_token_limit_without_dropping_reasoning_hints() {
+    let (endpoint, server) = mock_http_many(vec![
+        (
+            "400 Bad Request".into(),
+            String::new(),
+            json!({"error": {"param": "max_completion_tokens", "message": "unsupported"}})
+                .to_string(),
+        ),
+        (
+            "200 OK".into(),
+            String::new(),
+            json!({"choices": [{"message": {"content": "value"}, "finish_reason": "stop"}]})
+                .to_string(),
+        ),
+    ]);
+    let config = Config {
+        protocol: Protocol::ChatCompletions,
+        url: endpoint.to_string(),
+        model: "test-model".into(),
+        api_key: "synthetic-key".into(),
+    };
+    let hints = AtomicBool::new(true);
+    let result = complete_http(
+        Completion::default().http_client().unwrap(),
+        &config,
+        &endpoint,
+        &json!({"prefix": "const answer = ", "suffix": ";"}),
+        ";",
+        &hints,
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.as_deref(), Some("value"));
+    assert!(hints.load(Ordering::Relaxed));
+    let requests = server.join().unwrap();
+    let bodies = requests
+        .iter()
+        .map(|request| {
+            serde_json::from_str::<Value>(request.split_once("\r\n\r\n").unwrap().1).unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(bodies[0]["max_completion_tokens"], 256);
+    assert_eq!(bodies[1]["max_tokens"], 256);
+    assert!(bodies[1].get("max_completion_tokens").is_none());
+    assert_eq!(bodies[1]["reasoning_effort"], "minimal");
+}
+
 #[test]
 fn treats_a_truncated_answer_as_unusable() {
     assert_eq!(
@@ -458,14 +506,29 @@ fn appends_the_protocol_path_and_redacts_the_api_key() {
 #[test]
 fn validates_and_normalizes_insertion_whitespace() {
     assert_eq!(
-        normalize("    value\n}", "\n}").as_deref(),
+        normalize("    value\n}", "fn example() {", "\n}").as_deref(),
         Some("    value")
     );
-    assert_eq!(normalize("call()", ")").as_deref(), Some("call()"));
-    assert_eq!(normalize("value)", ")").as_deref(), Some("value"));
-    assert_eq!(normalize("```rust\n  x\n```", "").as_deref(), Some("  x"));
-    assert!(normalize("Here is the code:\n  x", "").is_none());
-    assert!(normalize("\n   ", "").is_none());
+    assert_eq!(normalize("call()", "call", ")").as_deref(), Some("call()"));
+    assert_eq!(
+        normalize("value)", "return ", ")").as_deref(),
+        Some("value")
+    );
+    assert_eq!(
+        normalize("```rust\n  x\n```", "", "").as_deref(),
+        Some("  x")
+    );
+    assert!(normalize("Here is the code:\n  x", "", "").is_none());
+    assert!(normalize("\n   ", "", "").is_none());
+    assert_eq!(normalize("log()", "console.log", "").as_deref(), Some("()"));
+    assert_eq!(normalize("界 = 1", "变量", "").as_deref(), Some("界 = 1"));
+    assert_eq!(
+        normalize("值\r\n下一段\r缩进", "变量", "").as_deref(),
+        Some("值\n下一段\n缩进")
+    );
+    assert_eq!(normalize("call())", "", ")").as_deref(), Some("call()"));
+    assert!(normalize(")", "value", ")").is_none());
+    assert!(normalize("return 变量\n  继续", "", "").is_some());
     assert_eq!(
         reply_text(
             Protocol::ChatCompletions,
@@ -505,6 +568,7 @@ fn denies_ignored_credentials_symlink_targets_and_escapes() {
 }
 
 struct EvaluationCase {
+    id: &'static str,
     language: &'static str,
     prefix: &'static str,
     suffix: &'static str,
@@ -514,6 +578,7 @@ struct EvaluationCase {
 
 const EVALUATION: &[EvaluationCase] = &[
     EvaluationCase {
+        id: "typescript-member-call",
         language: "TypeScript",
         prefix: "function clamp(n: number, min: number, max: number) {\n  return Math.",
         suffix: "\n}\n",
@@ -522,6 +587,7 @@ const EVALUATION: &[EvaluationCase] = &[
     },
     EvaluationCase {
         language: "TypeScript",
+        id: "typescript-object-argument",
         prefix: "import { loadProfile } from './profiles'\nexport async function title(userId: string) {\n  const profile = await loadProfile(",
         suffix: ")\n  return profile.displayName\n}\n",
         related: &["export async function loadProfile(options: { accountId: string }): Promise<Profile> {"],
@@ -529,6 +595,7 @@ const EVALUATION: &[EvaluationCase] = &[
     },
     EvaluationCase {
         language: "Python",
+        id: "python-binary-expression",
         prefix: "def is_even(n: int) -> bool:\n    return n % 2 ",
         suffix: "\n\nassert is_even(4)",
         related: &[],
@@ -536,6 +603,7 @@ const EVALUATION: &[EvaluationCase] = &[
     },
     EvaluationCase {
         language: "Python",
+        id: "python-comment-guided-body",
         prefix: "def first_or_none(items):\n    # Return None when there are no items, otherwise return the first item.\n    ",
         suffix: "\n\nassert first_or_none([]) is None\nassert first_or_none([10, 20]) == 10\n",
         related: &[],
@@ -543,6 +611,7 @@ const EVALUATION: &[EvaluationCase] = &[
     },
     EvaluationCase {
         language: "Python",
+        id: "python-keyword-argument",
         prefix: "from records import find_record\n\ndef label(record_id: int):\n    record = find_record(",
         suffix: ")\n    return record.name\n",
         related: &["def find_record(*, lookup_id: int) -> Record:"],
@@ -550,6 +619,7 @@ const EVALUATION: &[EvaluationCase] = &[
     },
     EvaluationCase {
         language: "Rust",
+        id: "rust-iterator-closure",
         prefix: "fn double_first(values: &[i32]) -> Option<i32> {\n    values.first().map(",
         suffix: ")\n}\n",
         related: &[],
@@ -557,6 +627,7 @@ const EVALUATION: &[EvaluationCase] = &[
     },
     EvaluationCase {
         language: "Rust",
+        id: "rust-newtype-argument",
         prefix: "use crate::profiles::fetch_profile;\nfn show(id: u64) -> String {\n    let entry = fetch_profile(",
         suffix: ").unwrap();\n    entry.display_name\n}\n",
         related: &["pub fn fetch_profile(id: ProfileId) -> Result<Profile, DbError> {", "pub struct ProfileId(pub u64);"],
@@ -564,8 +635,41 @@ const EVALUATION: &[EvaluationCase] = &[
     },
     EvaluationCase {
         language: "Python",
+        id: "python-complete-statement",
         prefix: "def answer():\n    return 42",
         suffix: "\n\nassert answer() == 42\n",
+        related: &[],
+        expected: None,
+    },
+    EvaluationCase {
+        id: "typescript-multiline-signature",
+        language: "TypeScript",
+        prefix: "const result = createReport(",
+        suffix: ")\nconsole.log(result.summary)",
+        related: &["export function createReport(\n  input: {\n    accountId: string\n    detailed: boolean\n  }\n): Promise<Report> {"],
+        expected: Some(r"^\{\s*accountId\s*:\s*[\w$.]+\s*,\s*detailed\s*:\s*(?:true|false)\s*,?\s*\}$"),
+    },
+    EvaluationCase {
+        id: "python-unicode-identifier",
+        language: "Python",
+        prefix: "def 双倍(数值: int) -> int:\n    return 数值 * ",
+        suffix: "\n\nassert 双倍(3) == 6",
+        related: &[],
+        expected: Some(r"^2$"),
+    },
+    EvaluationCase {
+        id: "typescript-comment-no-rewrite",
+        language: "TypeScript",
+        prefix: "const completed = true\n// This function is already implemented.",
+        suffix: "\nexport { completed }\n",
+        related: &[],
+        expected: None,
+    },
+    EvaluationCase {
+        id: "python-ambiguous-insertion",
+        language: "Python",
+        prefix: "value = ",
+        suffix: "\n",
         related: &[],
         expected: None,
     },
@@ -573,7 +677,9 @@ const EVALUATION: &[EvaluationCase] = &[
 
 #[test]
 fn evaluation_rubric_is_valid() {
+    let mut ids = std::collections::HashSet::new();
     for case in EVALUATION {
+        assert!(ids.insert(case.id), "duplicate evaluation case {}", case.id);
         if let Some(expected) = case.expected {
             regex::Regex::new(expected).unwrap();
         }
@@ -602,8 +708,10 @@ async fn model_accuracy_evaluation() {
         let mut accepted = 0;
         let mut cross_file = 0;
         let mut regular = 0;
-        let mut empty = 0;
+        let mut empty_expected = 0;
+        let mut unexpected_empty = 0;
         let mut errors = 0;
+        let mut mismatches = 0;
         let mut elapsed = Vec::new();
         for case in EVALUATION {
             let input = json!({
@@ -618,18 +726,27 @@ async fn model_accuracy_evaluation() {
             .await;
             elapsed.push(start.elapsed().as_millis());
             let passed = match result {
-                Ok(Ok(Some(text))) => case.expected.is_some_and(|expected| {
+                Ok(Ok(Some(ref text))) => case.expected.is_some_and(|expected| {
                     regex::Regex::new(expected).unwrap().is_match(text.trim())
                 }),
                 Ok(Ok(None)) => {
-                    empty += 1;
-                    case.expected.is_none()
+                    if case.expected.is_none() {
+                        empty_expected += 1;
+                        true
+                    } else {
+                        unexpected_empty += 1;
+                        false
+                    }
                 }
                 _ => {
                     errors += 1;
                     false
                 }
             };
+            if matches!(result, Ok(Ok(Some(_)))) && !passed {
+                mismatches += 1;
+                println!("mismatch case={} augmented={augmented}", case.id);
+            }
             if passed {
                 accepted += 1;
                 if case.related.is_empty() {
@@ -642,8 +759,8 @@ async fn model_accuracy_evaluation() {
         elapsed.sort_unstable();
         let score = |q: usize| elapsed[(elapsed.len() * q).div_ceil(100) - 1];
         println!(
-            "augmented={augmented} accepted={accepted}/{} cross_file={cross_file} empty={empty} request_errors={errors} mismatches={} p50_ms={} p95_ms={}",
-            EVALUATION.len(), EVALUATION.len() - accepted - errors, score(50), score(95)
+            "augmented={augmented} passed={accepted}/{} cross_file_passed={cross_file} regular_passed={regular} expected_empty={empty_expected} unexpected_empty={unexpected_empty} request_errors={errors} mismatches={mismatches} p50_ms={} p95_ms={}",
+            EVALUATION.len(), score(50), score(95)
         );
         cross_file_scores.push(cross_file);
         regular_scores.push(regular);

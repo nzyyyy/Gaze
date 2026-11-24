@@ -18,6 +18,7 @@ import { errorCode } from "./utils";
 interface RankedCompletion extends Completion {
   serverSort?: string;
   description?: string | null;
+  insertion?: string;
 }
 
 const kinds: Record<number, string> = {
@@ -69,6 +70,10 @@ export function lspCompletionSource(projectId: string, path: string): Completion
       return {
         from,
         options: result.items.flatMap((item) => {
+          const plainText =
+            !item.snippet && !item.additionalEdits.length && !item.edit && !item.resolve
+              ? item.insertText
+              : undefined;
           const insertion = item.edit?.insert ?? item.insertText;
           if (item.snippet && snippetTemplate(insertion) === null) return [];
           let request: Promise<CodeCompletion | null> | undefined;
@@ -89,6 +94,7 @@ export function lspCompletionSource(projectId: string, path: string): Completion
             serverSort: item.sortText ?? undefined,
             info: item.documentation ?? undefined,
             type: kinds[item.kind ?? 0] ?? "text",
+            insertion: plainText,
             boost: 1,
             apply(view, completion, start, end) {
               const selection = view.state.selection;

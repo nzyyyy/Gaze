@@ -16,6 +16,7 @@ use crate::path_index::{is_ignored, IgnoreCache};
 use crate::AppState;
 
 const CONTEXT_BUDGET: Duration = Duration::from_millis(80);
+const MANUAL_CONTEXT_BUDGET: Duration = Duration::from_millis(400);
 const AUTO_DEADLINE: Duration = Duration::from_secs(4);
 const MANUAL_DEADLINE: Duration = Duration::from_secs(10);
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(60);
@@ -301,9 +302,14 @@ struct LspVersion {
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum Reply {
-    Suggestion { text: String },
+    Suggestion {
+        text: String,
+    },
     Empty,
-    Error { kind: Failure },
+    Error {
+        kind: Failure,
+        retry_after_ms: Option<u64>,
+    },
 }
 
 pub(crate) fn eligible_path(project: &Project, relative: &str) -> Option<std::path::PathBuf> {
@@ -458,7 +464,7 @@ fn reply_text(protocol: Protocol, value: &Value) -> Result<Option<String>, Failu
     Ok(Some(text))
 }
 
-fn normalize(text: &str, suffix: &str) -> Option<String> {
+fn normalize(text: &str, prefix: &str, suffix: &str) -> Option<String> {
     let raw = text.replace("\r\n", "\n").replace('\r', "\n");
     let fenced = raw.trim();
     let text = if fenced.starts_with("```") && fenced.ends_with("\n```") {
@@ -499,7 +505,30 @@ fn normalize(text: &str, suffix: &str) -> Option<String> {
         })
         .map_or(0, |(_, tail)| tail.len());
     let text = &text[..text.len() - overlap];
-    (!text.trim().is_empty()).then(|| text.to_owned())
+    let mut repeated = 0;
+    for (offset, _) in prefix.char_indices().rev() {
+        let candidate = &prefix[offset..];
+        let word = prefix
+            .rsplit(|ch: char| !ch.is_alphanumeric() && ch != '_')
+            .next()
+            .unwrap_or_default();
+        let plain_call = candidate == prefix
+            && !word.is_empty()
+            && text
+                .get(word.len()..)
+                .is_some_and(|tail| tail.starts_with(['(', '[']));
+        if !candidate.trim().is_empty()
+            && candidate.chars().any(char::is_alphanumeric)
+            && text.starts_with(candidate)
+            && !plain_call
+        {
+            repeated = candidate.len();
+            break;
+        }
+    }
+    let text = &text[repeated..];
+    (!text.trim().is_empty() && !text.chars().all(|ch| ")]};,".contains(ch)))
+        .then(|| text.to_owned())
 }
 
 fn closes_inserted_code(head: &str, tail: &str) -> bool {
@@ -596,11 +625,6 @@ async fn complete_http(
         }
         let parsed = serde_json::from_slice::<Value>(&bytes);
         if !status.is_success() {
-            // Not every compatible provider accepts the "do not think" hints; retry without them.
-            if hinted {
-                hints.store(false, Ordering::Relaxed);
-                continue;
-            }
             if config.protocol == Protocol::ChatCompletions
                 && !legacy_chat
                 && parsed
@@ -611,13 +635,24 @@ async fn complete_http(
                 legacy_chat = true;
                 continue;
             }
+            // Not every compatible provider accepts the "do not think" hints; retry without them.
+            if hinted {
+                hints.store(false, Ordering::Relaxed);
+                continue;
+            }
             return Err(Failure::Configuration.into());
         }
         let text = reply_text(
             config.protocol,
             &parsed.map_err(|_| Failure::InvalidResponse)?,
         )?;
-        return Ok(text.and_then(|text| normalize(&text, suffix)));
+        return Ok(text.and_then(|text| {
+            normalize(
+                &text,
+                context["prefix"].as_str().unwrap_or_default(),
+                suffix,
+            )
+        }));
     }
 }
 
@@ -656,6 +691,11 @@ async fn run_request(state: &AppState, request: &Request) -> Result<Option<Strin
     if !valid
         || request.prefix.chars().count() > 3000
         || request.suffix.chars().count() > 1000
+        || request.recent_edits.len() > 2
+        || request
+            .recent_edits
+            .iter()
+            .any(|text| text.chars().count() > 500)
         || request.language.len() > 80
     {
         return Ok(None);
@@ -668,7 +708,11 @@ async fn run_request(state: &AppState, request: &Request) -> Result<Option<Strin
         .filter(|_| !project.id.starts_with("external:"))
     {
         tokio::time::timeout(
-            CONTEXT_BUDGET,
+            if request.manual {
+                MANUAL_CONTEXT_BUDGET
+            } else {
+                CONTEXT_BUDGET
+            },
             state.lsp.inline_declarations(
                 &project,
                 &request.path,
@@ -752,7 +796,12 @@ async fn request_completion(state: &AppState, window: &str, request: Request) ->
     match result {
         Ok(Some(text)) => Reply::Suggestion { text },
         Ok(None) => Reply::Empty,
-        Err(error) => Reply::Error { kind: error.kind },
+        Err(error) => Reply::Error {
+            kind: error.kind,
+            retry_after_ms: error
+                .retry_after
+                .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64),
+        },
     }
 }
 

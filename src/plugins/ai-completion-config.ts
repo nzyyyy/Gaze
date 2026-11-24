@@ -39,7 +39,7 @@ export type AiCompletionFailure =
 export type AiCompletionReply =
   | { type: "suggestion"; text: string }
   | { type: "empty" }
-  | { type: "error"; kind: AiCompletionFailure };
+  | { type: "error"; kind: AiCompletionFailure; retryAfterMs?: number };
 
 export function aiCompletionError(error: unknown): string {
   switch (error) {
