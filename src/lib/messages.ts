@@ -451,6 +451,8 @@ export const english: Record<string, string> = {
   测试连接: "Test connection",
   "正在测试连接…": "Testing connection…",
   "模型连接成功。": "Model connection succeeded.",
+  "AI 行内补全尚未配置完整，请填写 Base URL、模型 ID 和 API Key，或关闭该开关。":
+    "AI inline completion is not fully configured. Fill in the Base URL, model ID and API key, or turn the switch off.",
   "请检查 AI 补全的 HTTPS 接口、模型 ID 和 API Key。":
     "Check the AI completion HTTPS endpoint, model ID, and API key.",
   "请填写有效的 HTTPS 接口、模型 ID 和 API Key。":

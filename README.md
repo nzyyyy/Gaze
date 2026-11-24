@@ -197,7 +197,7 @@ pnpm tauri dev
 
 #### AI 行内补全
 
-默认停用。启用后在「设置 → 插件」打开 AI 配置，选择 OpenAI Responses、OpenAI Chat Completions 或 Anthropic Messages 协议，填写 HTTPS Base URL、模型 ID 和 API Key。`Cmd/Ctrl+Shift+Enter` 可立即请求；AI 灰字用 `Tab` 接受，列表候选仍用 `Enter` 接受，`Escape` 取消。
+默认停用。启用后在「设置 → 插件」打开 AI 配置，选择 OpenAI Responses、OpenAI Chat Completions 或 Anthropic Messages 协议，填写 HTTPS Base URL、模型 ID 和 API Key。开关打开但接口、模型 ID 或 API Key 未填全时，保存会提示补全并跳到 AI 配置页，不会静默关闭开关。`Cmd/Ctrl+Shift+Enter` 可立即请求；AI 灰字用 `Tab` 接受，列表候选仍用 `Enter` 接受，`Escape` 取消。
 
 补全仅发送光标前后最多 3000/1000 个 Unicode 字符、少量近期编辑及经路径安全检查的相关声明。忽略文件、常见凭据文件和越界符号链接不会发送；这不能替代对普通源码中敏感信息的人工审查。API Key 当前随偏好设置明文存储在本机 SQLite，不使用系统钥匙串。与输入匹配的建议和短期相关声明缓存在当前编辑器内存中，缓存不会写入 SQLite，切换文件或修改配置后清空。
 

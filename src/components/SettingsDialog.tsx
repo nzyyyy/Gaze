@@ -569,8 +569,23 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
               layout[field.key] < field.min ||
               layout[field.key] > field.max,
           );
+          const config = {
+            ...aiConfig,
+            url: aiConfig.url.trim(),
+            model: aiConfig.model.trim(),
+            apiKey: aiConfig.apiKey.trim(),
+          };
+          const configured = !!config.url && !!config.model && !!config.apiKey;
+          // An incomplete configuration cannot be enabled. Ask for it instead of
+          // silently dropping an enabled switch, which is lost once the dialog closes.
+          const incompleteAi = draft.preferences.aiCompletionEnabled && !configured;
           const invalid =
             preferencesError(draft.preferences) ??
+            (incompleteAi
+              ? t(
+                  "AI 行内补全尚未配置完整，请填写 Base URL、模型 ID 和 API Key，或关闭该开关。",
+                )
+              : null) ??
             (invalidSize
               ? t(
                   "{0}：请输入 {1}–{2} 之间的整数。",
@@ -581,25 +596,21 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
               : null);
           if (invalid) {
             setError(invalid);
+            if (incompleteAi) {
+              pluginScrollTopRef.current = contentRef.current?.scrollTop ?? 0;
+              setShowAiSettings(true);
+            }
             return;
           }
           setBusy(true);
           setError(null);
           try {
-            const config = {
-              ...aiConfig,
-              url: aiConfig.url.trim(),
-              model: aiConfig.model.trim(),
-              apiKey: aiConfig.apiKey.trim(),
-            };
-            const configured = !!config.url && !!config.model && !!config.apiKey;
             const next = {
               ...draft,
               preferences: {
                 ...draft.preferences,
                 aiCompletion: config,
-                // An incomplete configuration cannot be enabled, so clearing a field disables it.
-                aiCompletionEnabled: configured && draft.preferences.aiCompletionEnabled,
+                aiCompletionEnabled: draft.preferences.aiCompletionEnabled,
               },
             };
             await onSave(next, layout);

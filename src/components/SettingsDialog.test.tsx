@@ -133,6 +133,35 @@ it("keeps AI configuration on a detail page and preserves an explicit disabled c
   );
 });
 
+it("asks for the AI configuration instead of dropping an enabled switch", async () => {
+  const user = userEvent.setup();
+  const onSave = vi.fn().mockResolvedValue(undefined);
+  const onClose = vi.fn();
+  render(<SettingsDialog settings={settings} onSave={onSave} onClose={onClose} />);
+  await user.click(category("插件"));
+  await user.click(screen.getByRole("switch", { name: "AI 行内补全" }));
+  await user.click(screen.getByRole("button", { name: "保存设置" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("Base URL");
+  expect(screen.getByRole("heading", { name: "AI 行内补全" })).toHaveFocus();
+  expect(onSave).not.toHaveBeenCalled();
+  expect(onClose).not.toHaveBeenCalled();
+
+  await user.type(screen.getByLabelText("Base URL"), "https://model.example");
+  await user.type(screen.getByLabelText("模型 ID"), "test-model");
+  await user.type(screen.getByLabelText("API Key", { exact: true }), "test-key");
+  await user.click(screen.getByRole("button", { name: "保存设置" }));
+  expect(onSave).toHaveBeenCalledWith(
+    expect.objectContaining({
+      preferences: expect.objectContaining({
+        aiCompletionEnabled: true,
+        aiCompletion: expect.objectContaining({ model: "test-model" }),
+      }),
+    }),
+    expect.any(Object),
+  );
+  expect(onClose).toHaveBeenCalledOnce();
+});
+
 it("disables reset while an AI connection test is pending", async () => {
   const user = userEvent.setup();
   let finish!: () => void;
