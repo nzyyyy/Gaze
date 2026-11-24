@@ -421,6 +421,14 @@ it("saves the selected language and searches translated settings", async () => {
     expect(screen.getByText("Project files Search workspace Settings Gaze")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Editor" }));
     expect(screen.getByText(/\/\/ Comment · 0O 1lI/)).toBeInTheDocument();
+    const indentGuides = screen.getByRole("switch", { name: "Show indent guides" });
+    expect(indentGuides).toBeChecked();
+    await user.click(indentGuides);
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(onSave).toHaveBeenLastCalledWith(
+      expect.objectContaining({ preferences: { ...DEFAULT_PREFERENCES, showIndentGuides: false } }),
+      expect.any(Object),
+    );
     await user.click(screen.getByRole("button", { name: "Terminal" }));
     expect(screen.getByText(/~\/projects\/gaze/)).toBeInTheDocument();
     await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "font size");

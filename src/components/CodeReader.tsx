@@ -61,6 +61,7 @@ import { codeCompletion } from "../lib/completion";
 import { codeHover } from "../lib/hover";
 import { definitionLink } from "../lib/definitionLink";
 import { detectIndentation } from "../lib/indentation";
+import { indentGuides } from "../lib/indentGuides";
 import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
 import { rainbowBrackets } from "../lib/rainbowBrackets";
 import type { EditorViewState } from "../lib/session";
@@ -446,6 +447,7 @@ function preferenceExtensions(
   if (preferences.indentWithTab && editable) extensions.push(keymap.of([indentWithTab]));
   if (mode === "normal") {
     extensions.push(rainbowBrackets);
+    if (preferences.showIndentGuides) extensions.push(indentGuides);
     if (preferences.wordWrap) extensions.push(EditorView.lineWrapping);
     if (preferences.matchBrackets) extensions.push(bracketMatching());
     if (preferences.codeFolding)

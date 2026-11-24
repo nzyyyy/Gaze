@@ -14,6 +14,7 @@ pub struct Preferences {
     pub tab_size: f64,
     pub word_wrap: bool,
     pub line_numbers: bool,
+    pub show_indent_guides: bool,
     pub show_minimap: bool,
     pub highlight_active_line: bool,
     pub code_folding: bool,
@@ -64,6 +65,7 @@ impl Default for Preferences {
             tab_size: 4.0,
             word_wrap: true,
             line_numbers: true,
+            show_indent_guides: true,
             show_minimap: true,
             highlight_active_line: true,
             code_folding: true,
@@ -217,6 +219,7 @@ mod tests {
         assert!(legacy.path_completion_enabled);
         assert!(legacy.python_enabled);
         assert!(!legacy.show_minimap);
+        assert!(legacy.show_indent_guides);
         assert_eq!(legacy.editor_font_size, 18.0);
         assert!(Preferences::from_stored(r#"{"unexpected":true}"#).is_err());
         assert!(legacy.typescript_enabled);
@@ -238,6 +241,7 @@ mod tests {
             preferences: Preferences {
                 word_wrap: false,
                 show_minimap: false,
+                show_indent_guides: false,
                 terminal_font_size: 16.0,
                 mermaid_enabled: false,
                 markdown_insert_enabled: false,
@@ -254,6 +258,7 @@ mod tests {
         let saved_json: serde_json::Value = serde_json::from_str(&saved_preferences).unwrap();
         for key in [
             "showMinimap",
+            "showIndentGuides",
             "mermaidEnabled",
             "markdownInsertEnabled",
             "markdownMathEnabled",

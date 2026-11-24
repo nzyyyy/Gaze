@@ -182,6 +182,28 @@ describe("CodeReader editing", () => {
     });
   });
 
+  it("updates indent guide visibility on the existing normal editor", async () => {
+    const { props, rerender } = renderReader({ content: "root\n    body\n        child" });
+    const content = await editorContent();
+    const view = EditorView.findFromDOM(content)!;
+    expect(view.dom.querySelector(".cm-indent-guides")).toBeInTheDocument();
+
+    rerender(
+      <CodeReader {...props} preferences={{ ...DEFAULT_PREFERENCES, showIndentGuides: false }} />,
+    );
+    expect(view.dom.querySelector(".cm-indent-guides")).not.toBeInTheDocument();
+    expect(await editorContent()).toBe(content);
+
+    rerender(<CodeReader {...props} preferences={DEFAULT_PREFERENCES} />);
+    expect(view.dom.querySelector(".cm-indent-guides")).toBeInTheDocument();
+  });
+
+  it.each(["large", "longLine"] as const)("keeps indent guides out of %s mode", async (mode) => {
+    renderReader({ mode, editable: false });
+    const view = EditorView.findFromDOM(await editorContent())!;
+    expect(view.dom.querySelector(".cm-indent-guides")).not.toBeInTheDocument();
+  });
+
   it.each([
     ["a.ts", "(", ")"],
     ["a.ts", "{", "}"],

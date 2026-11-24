@@ -15,6 +15,7 @@ export interface Preferences extends Record<BuiltinPluginKey, boolean> {
   tabSize: number;
   wordWrap: boolean;
   lineNumbers: boolean;
+  showIndentGuides: boolean;
   highlightActiveLine: boolean;
   codeFolding: boolean;
   matchBrackets: boolean;
@@ -54,6 +55,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   tabSize: 4,
   wordWrap: true,
   lineNumbers: true,
+  showIndentGuides: true,
   showMinimap: true,
   highlightActiveLine: true,
   codeFolding: true,
@@ -174,6 +176,13 @@ export const PREFERENCE_FIELDS: PreferenceField[] = [
     category: "editor",
     label: "显示行号",
     description: "在编辑器左侧显示行号。",
+  },
+  {
+    key: "showIndentGuides",
+    type: "boolean",
+    category: "editor",
+    label: "显示缩进参考线",
+    description: "用竖线标记代码的缩进层级。",
   },
   {
     key: "highlightActiveLine",

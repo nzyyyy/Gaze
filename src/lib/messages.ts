@@ -473,6 +473,8 @@ export const english: Record<string, string> = {
     "Wrap long lines at the editor edge. Large file protection still applies.",
   显示行号: "Show line numbers",
   "在编辑器左侧显示行号。": "Show line numbers on the left of the editor.",
+  显示缩进参考线: "Show indent guides",
+  "用竖线标记代码的缩进层级。": "Show vertical lines at code indentation levels.",
   "在右侧显示语法配色缩略图，支持点击、拖动定位和悬停代码预览。":
     "Show a syntax-colored minimap with click, drag, and hover previews.",
   高亮当前行: "Highlight active line",
