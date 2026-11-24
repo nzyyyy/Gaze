@@ -1,6 +1,12 @@
 import { syntaxTree } from "@codemirror/language";
 import { api } from "./api";
-import { Decoration, EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
+import {
+  closeHoverTooltips,
+  Decoration,
+  EditorView,
+  ViewPlugin,
+  type ViewUpdate,
+} from "@codemirror/view";
 import type { NavigationResult, TextPosition } from "./types";
 
 function modifier(event: MouseEvent | KeyboardEvent) {
@@ -255,7 +261,7 @@ export function definitionLink(
             const result = this.lookup(word);
             const line = doc.lineAt(word.pos);
             event.preventDefault();
-            this.view.dispatch({ selection: { anchor: word.pos } });
+            this.view.dispatch({ selection: { anchor: word.pos }, effects: closeHoverTooltips });
             this.view.focus();
             void result.then((target) => {
               if (!target || this.destroyed || this.view.state.doc !== doc || !enabled()) return;

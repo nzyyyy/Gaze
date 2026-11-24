@@ -74,40 +74,44 @@ impl AppConfig {
 pub(crate) const TYPESCRIPT_EXTENSIONS: [&str; 8] =
     ["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"];
 
-fn builtin_typescript() -> LspServerConfig {
+/// Loads a built-in language server definition from its TOML manifest.
+/// The TOML is embedded at compile time via `include_str!`.
+fn load_language_config(toml_str: &str) -> LspServerConfig {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "kebab-case")]
+    struct Manifest {
+        id: String,
+        languages: Vec<String>,
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default)]
+        extensions: Vec<String>,
+        #[serde(default)]
+        initialization_options: Option<serde_json::Value>,
+    }
+    let manifest: Manifest = toml::from_str(toml_str).expect("invalid built-in language TOML");
     LspServerConfig {
-        id: "typescript".to_string(),
-        languages: [
-            "typescript",
-            "typescriptreact",
-            "javascript",
-            "javascriptreact",
-        ]
-        .into_iter()
-        .map(str::to_string)
-        .collect(),
-        command: "typescript-language-server".to_string(),
-        args: vec!["--stdio".to_string()],
-        extensions: TYPESCRIPT_EXTENSIONS
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
-        initialization_options: Some(serde_json::json!({
-            "tsserver": { "useSyntaxServer": "never" }
-        })),
+        id: manifest.id,
+        languages: manifest.languages,
+        command: manifest.command,
+        args: manifest.args,
+        extensions: manifest.extensions,
+        initialization_options: manifest.initialization_options,
     }
 }
 
+fn builtin_typescript() -> LspServerConfig {
+    load_language_config(include_str!("../languages/typescript.toml"))
+}
+
+fn builtin_python() -> LspServerConfig {
+    load_language_config(include_str!("../languages/python.toml"))
+}
+
 fn builtin_servers() -> Vec<LspServerConfig> {
-    let mut servers = vec![builtin_typescript()];
+    let mut servers = vec![builtin_typescript(), builtin_python()];
     for (id, languages, command, args, extensions) in [
-        (
-            "python",
-            "python",
-            "pyright-langserver",
-            "--stdio",
-            "py pyi pyw",
-        ),
         ("rust", "rust", "rust-analyzer", "", "rs"),
         ("go", "go", "gopls", "", "go"),
         (

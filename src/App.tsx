@@ -1416,13 +1416,39 @@ export default function App() {
       setNavigationBusy(true);
       try {
         if (!target?.result) await syncActiveDocument(tab.key);
-        const result =
+        let result =
           target?.result ??
           (kind === "definition"
             ? await api.findDefinitions(tab.projectId, tab.path, position)
             : kind === "references"
               ? await api.findReferences(tab.projectId, tab.path, position)
               : await api.findImplementations(tab.projectId, tab.path, position));
+        // ⌘B / ⌘Click on a declaration's own name shows its usages instead of
+        // jumping to the declaration itself (IDEA behavior). The definition
+        // points at the same file and line as the cursor when the symbol is
+        // declared here.
+        if (
+          kind === "definition" &&
+          result.source === "lsp" &&
+          result.locations.length === 1
+        ) {
+          const loc = result.locations[0]!;
+          if (
+            loc.path === tab.path &&
+            loc.line === position.line &&
+            Math.abs(loc.character - position.character) <= (loc.name?.length || 1)
+          ) {
+            // The cursor is on the declaration itself: show usages (excluding
+            // the declaration, matching IDEA's Show Usages behavior).
+            result = await api.findReferences(tab.projectId, tab.path, position, false);
+            if (result.locations.length > 0) {
+              setNavigationDialog({ title: t("引用"), result, anchor });
+            } else {
+              notify(t("没有找到引用。"));
+            }
+            return;
+          }
+        }
         const title =
           kind === "definition" ? t("定义") : kind === "references" ? t("引用") : t("实现");
         if (

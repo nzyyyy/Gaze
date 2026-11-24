@@ -297,6 +297,46 @@ export type FsChangeEvent = { projectId: string } & (
   | { rescan?: boolean; changedFiles: string[]; removedPaths: string[] }
 );
 
+export interface TextEdit {
+  from: number;
+  to: number;
+  insert: string;
+}
+
+export interface FileEdit {
+  path: string;
+  edits: TextEdit[];
+}
+
+export interface WorkspaceEdit {
+  files: FileEdit[];
+}
+
+export interface CodeActionResolve {
+  session: string;
+  action: unknown;
+}
+
+export interface CodeAction {
+  title: string;
+  kind: string | null;
+  disabledReason: string | null;
+  isPreferred: boolean;
+  edit: WorkspaceEdit | null;
+  resolve: CodeActionResolve | null;
+}
+
+export interface CodeActionResult {
+  actions: CodeAction[];
+  source: string;
+  message: string | null;
+}
+
+export interface LspRange {
+  start: { line: number; character: number };
+  end: { line: number; character: number };
+}
+
 export interface EditorStatus {
   path: string;
   language: string;

@@ -1,0 +1,5 @@
+id = "python"
+languages = ["python"]
+command = "pyright-langserver"
+args = ["--stdio"]
+extensions = ["py", "pyi", "pyw"]

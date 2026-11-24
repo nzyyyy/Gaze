@@ -57,6 +57,7 @@ import { computeChangeBlocksAsync } from "../git/lineDiffClient";
 import type { ChangeBlock } from "../git/lineDiff";
 import { api, type RecoveryRecord } from "../lib/api";
 import { codeDiagnostics } from "../lib/diagnostics";
+import { autoImportExtension } from "../lib/autoImport";
 import { codeCompletion } from "../lib/completion";
 import { codeHover } from "../lib/hover";
 import { definitionLink } from "../lib/definitionLink";
@@ -492,6 +493,7 @@ export function CodeReader({
   const surfaceRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const diagnosticsCompartment = useRef(new Compartment());
+  const autoImportCompartment = useRef(new Compartment());
   const languageToolsCompartment = useRef(new Compartment());
   const aiCompletionCompartment = useRef(new Compartment());
   const previousPythonRevision = useRef(pythonRevision);
@@ -1096,6 +1098,7 @@ export function CodeReader({
       extensions: [
         localeCompartment.current.of([]),
         diagnosticsCompartment.current.of([]),
+        autoImportCompartment.current.of([]),
         gitChangeGutter((block, element) => gitSelectRef.current(block, element)),
         initialExtensions(
           theme,
@@ -1396,6 +1399,23 @@ export function CodeReader({
       ),
     });
   }, [active, loaded, tab.projectId, tab.path, pythonRevision, semanticEnabled]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const enabled =
+      preferences.autoImportEnabled &&
+      semanticEnabled &&
+      active &&
+      loaded?.content.kind === "text" &&
+      loaded.content.mode === "normal" &&
+      !tab.projectId.startsWith("external:");
+    view.dispatch({
+      effects: autoImportCompartment.current.reconfigure(
+        enabled ? autoImportExtension(tab.projectId, tab.path) : [],
+      ),
+    });
+  }, [active, loaded, tab.projectId, tab.path, semanticEnabled, preferences.autoImportEnabled]);
 
   useEffect(() => {
     clearAutoSaveTimer();

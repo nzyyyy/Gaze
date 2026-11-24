@@ -10,11 +10,15 @@ import type {
 import type {
   DirectoryListing,
   DirEntry,
+  CodeAction,
+  CodeActionResolve,
+  CodeActionResult,
   FileContent,
   FileFingerprint,
   FsChangeEvent,
   ImportResult,
   LineEnding,
+  LspRange,
   LspStatus,
   NavigationResult,
   OutlineResult,
@@ -246,10 +250,28 @@ export const api = {
     invoke<SymbolSearchResult>("search_symbols", { projectId, query }),
   findDefinitions: (projectId: string, path: string, position: TextPosition) =>
     invoke<NavigationResult>("find_definitions", { projectId, path, position }),
-  findReferences: (projectId: string, path: string, position: TextPosition) =>
-    invoke<NavigationResult>("find_references", { projectId, path, position }),
+  findReferences: (
+    projectId: string,
+    path: string,
+    position: TextPosition,
+    includeDeclaration?: boolean,
+  ) =>
+    invoke<NavigationResult>("find_references", { projectId, path, position, includeDeclaration }),
   findImplementations: (projectId: string, path: string, position: TextPosition) =>
     invoke<NavigationResult>("find_implementations", { projectId, path, position }),
+  lspCodeActions: (
+    projectId: string,
+    path: string,
+    content: string,
+    range: LspRange,
+    kinds: string[],
+  ) => invoke<CodeActionResult>("lsp_code_actions", { projectId, path, content, range, kinds }),
+  lspResolveCodeAction: (
+    projectId: string,
+    path: string,
+    content: string,
+    resolve: CodeActionResolve,
+  ) => invoke<CodeAction | null>("lsp_resolve_code_action", { projectId, path, content, resolve }),
   onSearchEvent: (handler: (event: SearchEvent) => void): Promise<UnlistenFn> =>
     listen<SearchEvent>("gaze://search", (event) => handler(event.payload)),
   onFsChange: (handler: (event: FsChangeEvent) => void): Promise<UnlistenFn> =>

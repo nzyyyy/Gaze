@@ -1,0 +1,8 @@
+id = "typescript"
+languages = ["typescript", "typescriptreact", "javascript", "javascriptreact"]
+command = "typescript-language-server"
+args = ["--stdio"]
+extensions = ["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"]
+
+[initialization-options.tsserver]
+useSyntaxServer = "never"

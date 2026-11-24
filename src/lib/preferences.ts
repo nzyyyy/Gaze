@@ -20,6 +20,7 @@ export interface Preferences extends Record<BuiltinPluginKey, boolean> {
   codeFolding: boolean;
   matchBrackets: boolean;
   indentWithTab: boolean;
+  autoImportEnabled: boolean;
   autoSave: boolean;
   autoSaveDelay: number;
   searchCaseSensitive: boolean;
@@ -61,6 +62,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   codeFolding: true,
   matchBrackets: true,
   indentWithTab: true,
+  autoImportEnabled: false,
   autoSave: true,
   autoSaveDelay: 800,
   searchCaseSensitive: false,
@@ -211,6 +213,13 @@ export const PREFERENCE_FIELDS: PreferenceField[] = [
     category: "editor",
     label: "Tab 键缩进",
     description: "按 Tab 键缩进代码；关闭后可用 Tab 移动焦点。",
+  },
+  {
+    key: "autoImportEnabled",
+    type: "boolean",
+    category: "editor",
+    label: "自动导入",
+    description: "遇到未解析的符号时，若语言服务器提供唯一的导入修复，自动应用。",
   },
   {
     key: "autoSave",

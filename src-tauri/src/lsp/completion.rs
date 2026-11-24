@@ -30,12 +30,12 @@ pub struct CompletionResolve {
     item: Value,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CompletionEdit {
-    from: usize,
-    to: usize,
-    insert: String,
+pub(crate) struct CompletionEdit {
+    pub(crate) from: usize,
+    pub(crate) to: usize,
+    pub(crate) insert: String,
 }
 
 impl LspSession {
@@ -232,7 +232,7 @@ fn normalize_item(
     })
 }
 
-fn parse_edit(
+pub(crate) fn parse_edit(
     edit: &Value,
     text: &str,
     index: &TextIndex,

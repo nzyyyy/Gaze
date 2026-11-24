@@ -1,4 +1,5 @@
 mod client;
+mod code_action;
 mod completion;
 mod diagnostics;
 mod hover;
@@ -15,6 +16,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 use url::Url;
 
+pub use code_action::{CodeAction, CodeActionResolve, CodeActionResult, FileEdit, WorkspaceEdit};
 pub use completion::{CompletionItem, CompletionResolve, CompletionResult};
 pub use diagnostics::{DiagnosticSync, DiagnosticsUpdate};
 pub use hover::HoverContent;
@@ -34,6 +36,7 @@ use crate::symbols::word_at;
 use crate::tools::{ResolvedLspServer, Tools};
 
 use self::client::LspClient;
+use self::completion::CompletionEdit;
 
 const MAX_REFERENCES: usize = 1_000;
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -57,6 +60,8 @@ struct ServerCapabilities {
     completion: bool,
     completion_resolve: bool,
     hover: bool,
+    code_action: bool,
+    code_action_resolve: bool,
 }
 
 struct OpenDocument {
@@ -198,6 +203,11 @@ impl LspSession {
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             hover: capability_enabled(&server_capabilities, "hoverProvider"),
+            code_action: capability_enabled(&server_capabilities, "codeActionProvider"),
+            code_action_resolve: server_capabilities
+                .pointer("/codeActionProvider/resolveProvider")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         };
         let sync = &server_capabilities["textDocumentSync"];
         let incremental_sync = sync.as_u64().or_else(|| sync["change"].as_u64()) == Some(2);
@@ -424,7 +434,12 @@ impl LspSession {
             .await
     }
 
-    async fn references(&self, relative_path: &str, position: TextPosition) -> GazeResult<Value> {
+    async fn references(
+        &self,
+        relative_path: &str,
+        position: TextPosition,
+        include_declaration: bool,
+    ) -> GazeResult<Value> {
         if !self.capabilities.references {
             return Err(GazeError::Unsupported(
                 "当前语言服务器不支持查找引用。".to_string(),
@@ -440,7 +455,7 @@ impl LspSession {
                 json!({
                     "textDocument": { "uri": loaded.uri },
                     "position": lsp_position,
-                    "context": { "includeDeclaration": true }
+                    "context": { "includeDeclaration": include_declaration }
                 }),
                 REQUEST_TIMEOUT,
             )
@@ -1052,6 +1067,7 @@ impl LspManager {
         project: &Project,
         relative_path: &str,
         position: TextPosition,
+        include_declaration: bool,
     ) -> GazeResult<NavigationResult> {
         let session = self.session_for(app, project, relative_path).await?;
         let name = session
@@ -1060,7 +1076,9 @@ impl LspManager {
             .ok()
             .and_then(|loaded| word_at(&loaded.text, position))
             .unwrap_or_else(|| "引用".to_string());
-        let result = session.references(relative_path, position).await?;
+        let result = session
+            .references(relative_path, position, include_declaration)
+            .await?;
         let mut raw = extract_locations(&result, false);
         let total = raw.len();
         raw.truncate(MAX_REFERENCES);
@@ -1123,6 +1141,150 @@ impl LspManager {
     ) -> GazeResult<OutlineResult> {
         let session = self.session_for(app, project, relative_path).await?;
         session.document_symbols(relative_path).await
+    }
+
+    pub async fn code_actions(
+        &self,
+        app: &AppHandle,
+        project: &Project,
+        relative_path: &str,
+        content: &str,
+        range: LspRange,
+        kinds: &[String],
+    ) -> GazeResult<CodeActionResult> {
+        let session = self.session_for(app, project, relative_path).await?;
+        let mut actions = session
+            .code_action(relative_path, content, range, kinds)
+            .await?;
+        // Ruff fallback: pyright has no `source.organizeImports`; use Ruff's CLI
+        // to sort and remove unused imports when the server didn't offer one.
+        if is_python_extension(
+            Path::new(relative_path)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or(""),
+        ) && kinds.iter().any(|k| k == "source.organizeImports")
+            && !actions.iter().any(|a| {
+                a.kind
+                    .as_deref()
+                    .is_some_and(|k| k.starts_with("source.organizeImports"))
+            })
+        {
+            if let Some(action) = self
+                .ruff_organize_imports(project, relative_path, content)
+                .await
+            {
+                actions.push(action);
+            }
+        }
+        Ok(CodeActionResult {
+            actions,
+            source: "lsp".to_string(),
+            message: None,
+        })
+    }
+
+    pub async fn resolve_code_action(
+        &self,
+        app: &AppHandle,
+        project: &Project,
+        relative_path: &str,
+        content: &str,
+        resolve: CodeActionResolve,
+    ) -> GazeResult<Option<CodeAction>> {
+        let session = self.session_for(app, project, relative_path).await?;
+        session
+            .resolve_code_action(relative_path, content, resolve)
+            .await
+    }
+
+    /// Optimize Imports with Ruff's CLI for a Python file no language server
+    /// organizes. Returns `None` when Ruff is not installed or the file has no
+    /// import changes to make.
+    async fn ruff_organize_imports(
+        &self,
+        project: &Project,
+        relative_path: &str,
+        content: &str,
+    ) -> Option<CodeAction> {
+        let ruff = self.find_ruff(project).await?;
+        let full_path = Path::new(&project.root).join(relative_path);
+        let original = content.to_string();
+        let stdin_text = original.clone();
+        let output = tokio::task::spawn_blocking(move || {
+            let mut command = std::process::Command::new(&ruff);
+            command.args([
+                "check",
+                "--extend-select",
+                "I",
+                "--fixable",
+                "I,F401",
+                "--fix",
+                "--exit-zero",
+                "--quiet",
+                "--stdin-filename",
+            ]);
+            command.arg(&full_path);
+            command.arg("-");
+            command.stdin(std::process::Stdio::piped());
+            command.stdout(std::process::Stdio::piped());
+            command.stderr(std::process::Stdio::piped());
+            if let Some(dir) = full_path.parent() {
+                command.current_dir(dir);
+            }
+            let mut child = command.spawn().ok()?;
+            use std::io::Write;
+            child.stdin.take()?.write_all(stdin_text.as_bytes()).ok()?;
+            let output = child.wait_with_output().ok()?;
+            if output.status.success() {
+                Some(String::from_utf8_lossy(&output.stdout).into_owned())
+            } else {
+                None
+            }
+        })
+        .await
+        .ok()??;
+        let edits = diff_text_edits(&original, &output);
+        if edits.is_empty() {
+            return None;
+        }
+        Some(CodeAction {
+            title: "Optimize Imports (Ruff)".to_string(),
+            kind: Some("source.organizeImports.ruff".to_string()),
+            disabled_reason: None,
+            is_preferred: true,
+            edit: Some(WorkspaceEdit {
+                files: vec![FileEdit {
+                    path: relative_path.to_string(),
+                    edits,
+                }],
+            }),
+            resolve: None,
+        })
+    }
+
+    /// Finds the `ruff` binary: first in the project's Python environment,
+    /// then on `PATH`.
+    async fn find_ruff(&self, project: &Project) -> Option<PathBuf> {
+        // Try the project's Python environment first.
+        if let Ok(status) = self.python_environment(project).await {
+            if let Some(env) = status.environment {
+                let interpreter = PathBuf::from(&env.path);
+                if let Some(prefix) = python::prefix_of(&interpreter) {
+                    let ruff = prefix.join("bin").join("ruff");
+                    if ruff.is_file() {
+                        return Some(ruff);
+                    }
+                    // Windows: Scripts/ruff.exe
+                    let ruff = prefix.join("Scripts").join("ruff.exe");
+                    if ruff.is_file() {
+                        return Some(ruff);
+                    }
+                }
+            }
+        }
+        // Fall back to PATH.
+        which::which("ruff").ok()
     }
 
     pub async fn sync_document(
@@ -1256,6 +1418,50 @@ fn is_python_extension(extension: &str) -> bool {
     ["py", "pyi", "pyw"]
         .iter()
         .any(|item| extension.eq_ignore_ascii_case(item))
+}
+
+/// Computes the minimal text edits that transform `original` into `formatted`.
+/// Uses a simple line-based diff: finds the first and last differing lines and
+/// replaces that span. Suitable for import organization where changes are
+/// typically confined to the file's header.
+fn diff_text_edits(original: &str, formatted: &str) -> Vec<CompletionEdit> {
+    if original == formatted {
+        return Vec::new();
+    }
+    let old_lines: Vec<&str> = original.lines().collect();
+    let new_lines: Vec<&str> = formatted.lines().collect();
+    // Find the first differing line.
+    let mut start = 0;
+    while start < old_lines.len() && start < new_lines.len() && old_lines[start] == new_lines[start]
+    {
+        start += 1;
+    }
+    // Find the last differing line (from the end).
+    let mut old_end = old_lines.len();
+    let mut new_end = new_lines.len();
+    while old_end > start && new_end > start && old_lines[old_end - 1] == new_lines[new_end - 1] {
+        old_end -= 1;
+        new_end -= 1;
+    }
+    // Compute UTF-16 offsets for the edit range.
+    let from: usize = old_lines[..start]
+        .iter()
+        .map(|l| l.encode_utf16().count() + 1)
+        .sum();
+    let to: usize = old_lines[..old_end]
+        .iter()
+        .map(|l| l.encode_utf16().count() + 1)
+        .sum();
+    let insert = if new_end > start {
+        let mut text = new_lines[start..new_end].join("\n");
+        // The replaced span in the original always ends with a newline
+        // (each line in `lines()` is followed by `\n` in the source).
+        text.push('\n');
+        text
+    } else {
+        String::new()
+    };
+    vec![CompletionEdit { from, to, insert }]
 }
 
 fn serves_python(server: &ResolvedLspServer) -> bool {
@@ -2266,6 +2472,7 @@ mod tests {
                     line: 4,
                     character: 13,
                 },
+                true,
             )
             .await
             .unwrap();
@@ -2488,5 +2695,53 @@ mod tests {
         })
         .await
         .expect("disabled TypeScript language server should exit");
+    }
+
+    #[test]
+    fn diff_text_edits_identical() {
+        assert!(diff_text_edits("import os\n", "import os\n").is_empty());
+    }
+
+    #[test]
+    fn diff_text_edits_single_line_change() {
+        let old = "import os\nimport sys\n";
+        let new = "import sys\nimport os\n";
+        let edits = diff_text_edits(old, new);
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].from, 0);
+        assert_eq!(edits[0].insert, "import sys\nimport os\n");
+    }
+
+    #[test]
+    fn diff_text_edits_removes_unused_import() {
+        let old = "import os\nimport sys\nimport json\n\nprint(os)\n";
+        let new = "import os\nimport json\n\nprint(os)\n";
+        let edits = diff_text_edits(old, new);
+        assert_eq!(edits.len(), 1);
+        // The edit deletes the `import sys` line (replaces it with empty).
+        // `import os` is before the diff; `import json` is in the common suffix.
+        assert!(edits[0].insert.is_empty());
+        assert!(edits[0].from > 0);
+        assert!(edits[0].to > edits[0].from);
+    }
+
+    #[test]
+    fn diff_text_edits_appends_at_end() {
+        let old = "import os\n";
+        let new = "import os\nimport sys\n";
+        let edits = diff_text_edits(old, new);
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].insert, "import sys\n");
+    }
+
+    #[test]
+    fn diff_text_edits_utf16_offsets() {
+        // "你好" is 2 UTF-16 code units per character.
+        let old = "你好\nimport os\n";
+        let new = "你好\nimport sys\nimport os\n";
+        let edits = diff_text_edits(old, new);
+        assert_eq!(edits.len(), 1);
+        // "你好\n" = 2 UTF-16 units + 1 for newline = 3.
+        assert_eq!(edits[0].from, 3);
     }
 }

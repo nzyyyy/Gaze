@@ -165,7 +165,7 @@ fn environment(path: PathBuf, kind: &'static str) -> Option<PythonEnvironment> {
     })
 }
 
-fn prefix_of(path: &Path) -> Option<&Path> {
+pub(crate) fn prefix_of(path: &Path) -> Option<&Path> {
     let parent = path.parent()?;
     match parent.file_name().and_then(|name| name.to_str()) {
         Some("bin" | "Scripts") => parent.parent(),

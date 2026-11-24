@@ -1292,6 +1292,7 @@ async fn find_references(
     project_id: String,
     path: String,
     position: TextPosition,
+    include_declaration: Option<bool>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<NavigationResult, CommandError> {
@@ -1302,7 +1303,14 @@ async fn find_references(
     let projects = state.cache.projects().await.map_err(CommandError::from)?;
     match state
         .lsp
-        .references(&app, &projects, &project, &path, position)
+        .references(
+            &app,
+            &projects,
+            &project,
+            &path,
+            position,
+            include_declaration.unwrap_or(true),
+        )
         .await
     {
         Ok(result) => Ok(result),
@@ -1342,6 +1350,47 @@ async fn find_implementations(
             message: Some(format!("无法查找实现：{}。", error.message())),
         }),
     }
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn lsp_code_actions(
+    project_id: String,
+    path: String,
+    content: String,
+    range: lsp::LspRange,
+    kinds: Vec<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<lsp::CodeActionResult, CommandError> {
+    let project = state
+        .project(&project_id)
+        .await
+        .map_err(CommandError::from)?;
+    state
+        .lsp
+        .code_actions(&app, &project, &path, &content, range, &kinds)
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn lsp_resolve_code_action(
+    project_id: String,
+    path: String,
+    content: String,
+    resolve: lsp::CodeActionResolve,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<lsp::CodeAction>, CommandError> {
+    let project = state
+        .project(&project_id)
+        .await
+        .map_err(CommandError::from)?;
+    state
+        .lsp
+        .resolve_code_action(&app, &project, &path, &content, resolve)
+        .await
+        .map_err(CommandError::from)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -1521,6 +1570,8 @@ pub fn run() {
             find_definitions,
             find_references,
             find_implementations,
+            lsp_code_actions,
+            lsp_resolve_code_action,
             start_search,
             continue_search,
             cancel_search,

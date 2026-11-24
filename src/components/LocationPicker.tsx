@@ -145,12 +145,16 @@ export function LocationPicker({
                   const location = locations[row.index]!;
                   const active = row.index === selected;
                   const path = location.path.replaceAll("\\", "/");
-                  const name = basename(path);
+                  const fileName = basename(path);
                   const directory = parentPath(path);
                   const project = projectNames.get(location.projectId);
                   const context = project
                     ? [project, directory].filter(Boolean).join(" / ")
                     : directory;
+                  // When every row shares the same symbol name (e.g. references
+                  // to `foo`), the file name is the differentiator; otherwise
+                  // the symbol name leads and the file path is the context.
+                  const showSymbol = location.name && location.name !== fileName;
                   return (
                     <button
                       className="location-row"
@@ -164,17 +168,27 @@ export function LocationPicker({
                       onMouseEnter={() => setSelected(row.index)}
                       onClick={() => choose(row.index)}
                     >
-                      <FileIcon name={name} size={15} />
+                      <FileIcon name={fileName} size={15} />
                       <span className="location-main">
-                        <span className="location-file">{name}</span>
-                        <span className="location-path">{context}</span>
+                        {showSymbol ? (
+                          <>
+                            <span className="location-file">{location.name}</span>
+                            <span className="location-path">
+                              {fileName}
+                              {context ? ` — ${context}` : ""}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="location-file">{fileName}</span>
+                            <span className="location-path">{context}</span>
+                          </>
+                        )}
                       </span>
                       {location.externalEncoding && (
                         <span className="location-external">{t("外部文件")}</span>
                       )}
-                      <span className="location-line">
-                        {location.line + 1}:{location.character + 1}
-                      </span>
+                      <span className="location-line">{location.line + 1}</span>
                       <CornerDownLeft size={13} className="location-enter" aria-hidden="true" />
                     </button>
                   );
