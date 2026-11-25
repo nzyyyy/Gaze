@@ -6,10 +6,12 @@ import {
 } from "@codemirror/autocomplete";
 import { history, undo } from "@codemirror/commands";
 import { languages } from "@codemirror/language-data";
+import { EditorState } from "@codemirror/state";
 import { activateHover, EditorView, runScopeHandlers } from "@codemirror/view";
 import { fireEvent, screen } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { api } from "./api";
+import { defaultShortcut } from "./shortcuts";
 import { applyEditorEdits } from "./editorEdits";
 import {
   dismissEditorLanguageTooltip,
@@ -30,6 +32,12 @@ vi.mock("./api", () => ({
 }));
 
 const target = { projectId: "test", path: "main.ts", revision: { session: "s", version: 3 } };
+const context = {
+  ...target,
+  wanted: () => true,
+  notify: vi.fn(),
+  shortcut: (id: string) => defaultShortcut(id),
+};
 
 function press(view: EditorView, key: string) {
   return runScopeHandlers(view, new KeyboardEvent("keydown", { key }), "editor");
@@ -38,7 +46,7 @@ function press(view: EditorView, key: string) {
 it("keeps organize imports and manual parameter info reachable by keyboard", () => {
   const view = new EditorView({
     doc: "import { widget } from './utils';\nwidget()",
-    extensions: editorLanguageTools({ ...target, wanted: () => true, notify: vi.fn() }),
+    extensions: editorLanguageTools(context),
   });
   try {
     vi.mocked(api.lspCodeActions).mockResolvedValueOnce({
@@ -47,10 +55,9 @@ it("keeps organize imports and manual parameter info reachable by keyboard", () 
       message: null,
     });
     vi.mocked(api.lspSignatureHelp).mockResolvedValueOnce(null);
-    const mac = /Mac/.test(navigator.platform);
     const press = (init: KeyboardEventInit) =>
       runScopeHandlers(view, new KeyboardEvent("keydown", init), "editor");
-    expect(press({ key: "o", altKey: true, ctrlKey: !mac, metaKey: mac })).toBe(true);
+    expect(press({ key: "o", altKey: true, ctrlKey: true, metaKey: true })).toBe(true);
     expect(api.lspCodeActions).toHaveBeenLastCalledWith(
       "test",
       "main.ts",
@@ -58,7 +65,7 @@ it("keeps organize imports and manual parameter info reachable by keyboard", () 
       expect.any(Object),
       ["source.organizeImports"],
     );
-    expect(press({ key: " ", ctrlKey: true, shiftKey: true })).toBe(true);
+    expect(press({ key: "p", metaKey: true })).toBe(true);
     expect(api.lspSignatureHelp).toHaveBeenLastCalledWith(
       "test",
       "main.ts",
@@ -109,10 +116,7 @@ it("rejects overlap, split surrogate offsets and stale replies without partial e
 it("formats the selected unsaved text and undoes just that action in one step", async () => {
   const view = new EditorView({
     doc: "const a=1;",
-    extensions: [
-      history(),
-      editorLanguageTools({ ...target, wanted: () => true, notify: vi.fn() }),
-    ],
+    extensions: [history(), editorLanguageTools(context)],
   });
   try {
     view.dispatch({
@@ -175,7 +179,7 @@ it("delays the signature for a real call, hides it during completion and cancels
     selection: { anchor: 6 },
     extensions: [
       typescript,
-      editorLanguageTools({ ...target, wanted: () => true, notify: vi.fn() }),
+      editorLanguageTools(context),
       autocompletion({
         activateOnTyping: false,
         override: [(context) => ({ from: context.pos, options: [{ label: "argument" }] })],
@@ -241,7 +245,7 @@ it("starts from completion inside an argument list but skips declarations and st
   vi.useFakeTimers();
   const view = new EditorView({
     parent: document.body,
-    extensions: [python, editorLanguageTools({ ...target, wanted: () => true, notify: vi.fn() })],
+    extensions: [python, editorLanguageTools(context)],
   });
   try {
     view.focus();
@@ -282,13 +286,16 @@ it("only shows manual documentation for the current editor context", async () =>
     parent: document.body,
     doc: "widget",
     selection: { anchor: 6 },
-    extensions: editorLanguageTools({ ...target, wanted: () => true, notify: vi.fn() }),
+    extensions: editorLanguageTools(context),
   });
   try {
     view.focus();
     activateHover(view, 3, 1);
     expect(hover).not.toHaveBeenCalled();
-    expect(press(view, "F1")).toBe(true);
+    // F1 is the configured quick documentation key (see defaultShortcut).
+    expect(runScopeHandlers(view, new KeyboardEvent("keydown", { key: "F1" }), "editor")).toBe(
+      true,
+    );
     expect(hover).toHaveBeenCalledWith("test", "main.ts", "widget", { line: 0, character: 5 });
     dismissEditorLanguageTooltip(view);
     const contents = [{ value: "Widget docs", kind: "plaintext" as const, language: null }];
@@ -307,6 +314,31 @@ it("only shows manual documentation for the current editor context", async () =>
   }
 });
 
+it("keeps quick documentation available in read-only files", async () => {
+  const hover = vi.mocked(api.hoverCode).mockReset();
+  hover.mockResolvedValueOnce([{ value: "Widget docs", kind: "plaintext", language: null }]);
+  const view = new EditorView({
+    parent: document.body,
+    doc: "widget",
+    selection: { anchor: 6 },
+    extensions: [
+      EditorState.readOnly.of(true),
+      EditorView.editable.of(false),
+      editorLanguageTools(context),
+    ],
+  });
+  try {
+    view.focus();
+    expect(runScopeHandlers(view, new KeyboardEvent("keydown", { key: "F1" }), "editor")).toBe(
+      true,
+    );
+    expect(hover).toHaveBeenCalledWith("test", "main.ts", "widget", { line: 0, character: 5 });
+  } finally {
+    view.destroy();
+    view.dom.remove();
+  }
+});
+
 it("dismisses opt-in hover for navigation and drops its pending response", async () => {
   const hover = vi.mocked(api.hoverCode).mockReset();
   const contents = [{ value: "Widget docs", kind: "plaintext" as const, language: null }];
@@ -314,12 +346,7 @@ it("dismisses opt-in hover for navigation and drops its pending response", async
   const view = new EditorView({
     parent: document.body,
     doc: "widget",
-    extensions: editorLanguageTools({
-      ...target,
-      hoverEnabled: true,
-      wanted: () => true,
-      notify: vi.fn(),
-    }),
+    extensions: editorLanguageTools({ ...context, hoverEnabled: true }),
   });
   try {
     view.focus();
@@ -351,10 +378,7 @@ it("opens quick fixes at the caret and resolves the selected candidate before ap
   const view = new EditorView({
     parent: document.body,
     doc: "widget()",
-    extensions: [
-      history(),
-      editorLanguageTools({ ...target, wanted: () => true, notify: vi.fn() }),
-    ],
+    extensions: [history(), editorLanguageTools(context)],
   });
   try {
     const resolve = { path: target.path, revision: target.revision, action: { data: 1 } };

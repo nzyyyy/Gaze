@@ -13,6 +13,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type CodeCompletion } from "./api";
 import { codeCompletion, lspCompletionSource, snippetTemplate } from "./completion";
 import { editorLanguageTools } from "./editorLanguageTools";
+import { defaultShortcut } from "./shortcuts";
+
+const contextShortcut = (id: string) => defaultShortcut(id);
 
 vi.mock("./api", () => ({ api: { completeCode: vi.fn(), resolveCompletion: vi.fn() } }));
 
@@ -78,7 +81,13 @@ describe("code completion", () => {
       selection: { anchor: 2 },
       extensions: [
         codeCompletion("p", "a.ts"),
-        editorLanguageTools({ projectId: "p", path: "a.ts", wanted: () => true, notify: vi.fn() }),
+        editorLanguageTools({
+          projectId: "p",
+          path: "a.ts",
+          wanted: () => true,
+          notify: vi.fn(),
+          shortcut: contextShortcut,
+        }),
       ],
     });
     try {

@@ -15,6 +15,7 @@ import {
   hoverTooltip,
   keymap,
   showTooltip,
+  type KeyBinding,
   type Tooltip,
   type ViewUpdate,
 } from "@codemirror/view";
@@ -24,12 +25,15 @@ import { applyEditorEdits, codeActionEdits, editorRange } from "./editorEdits";
 import { documentationSource } from "./hover";
 import { t } from "./i18n";
 import type { CodeAction, CodeActionResult, SignatureHelp } from "./types";
+import { shortcutBinding } from "./shortcuts";
 import { errorCode, errorMessage } from "./utils";
 
 export type EditorLanguageAction =
   "quick-fix" | "organize-imports" | "format-code" | "parameter-info" | "quick-documentation";
 
 interface Context {
+  /** Configured key of an editor shortcut, `null` when unbound. */
+  shortcut: (id: string) => string | null;
   projectId: string;
   path: string;
   autoParameterInfo?: boolean;
@@ -526,46 +530,33 @@ export function editorLanguageTools(settings: Context) {
     settings.hoverEnabled ? hover : [],
     EditorView.focusChangeEffect.of((_state, focusing) => (focusing ? null : hideHints.of(null))),
     Prec.high(
-      keymap.of([
-        {
-          key: "Alt-Enter",
-          run: (view) => {
-            void runEditorLanguageAction(view, "quick-fix");
-            return !view.state.readOnly;
-          },
-        },
-        {
-          key: "Mod-Alt-l",
-          run: (view) => {
-            void runEditorLanguageAction(view, "format-code");
-            return !view.state.readOnly;
-          },
-        },
-        {
-          key: "Mod-Alt-o",
-          run: (view) => {
-            if (view.state.readOnly) return false;
-            void runEditorLanguageAction(view, "organize-imports");
-            return true;
-          },
-        },
-        {
-          key: "Ctrl-Shift-Space",
-          run: (view) => {
-            if (view.state.readOnly) return false;
-            void runEditorLanguageAction(view, "parameter-info");
-            return true;
-          },
-        },
-        {
-          key: "F1",
-          run: (view) => {
+      keymap.of(
+        [
+          ...(
+            [
+              // Quick fix and reformat still run on read-only buffers.
+              ["quick-fix", true],
+              ["format-code", true],
+              ["organize-imports", false],
+              ["parameter-info", false],
+            ] as const
+          ).flatMap(([action, whenReadOnly]) => {
+            const bound = shortcutBinding(settings.shortcut(action), (view) => {
+              if (!whenReadOnly && view.state.readOnly) return false;
+              void runEditorLanguageAction(view, action);
+              // Let other handlers use the key when this action refused to run.
+              return whenReadOnly || !view.state.readOnly;
+            });
+            return bound ? [bound] : [];
+          }),
+          // Documentation is read-only-safe, so it stays available in large or locked files.
+          shortcutBinding(settings.shortcut("quick-documentation"), (view) => {
             if (!settings.wanted() || view.compositionStarted) return false;
             void runEditorLanguageAction(view, "quick-documentation");
             return true;
-          },
-        },
-      ]),
+          }),
+        ].filter((binding): binding is KeyBinding => binding !== null),
+      ),
     ),
     Prec.highest(
       keymap.of([

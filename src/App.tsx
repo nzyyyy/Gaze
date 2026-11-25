@@ -21,7 +21,17 @@ import {
   X,
   Boxes,
 } from "lucide-react";
-import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { flushSync } from "react-dom";
 import type { DragDropEvent } from "@tauri-apps/api/webview";
 
@@ -43,7 +53,6 @@ import { LocationPicker } from "./components/LocationPicker";
 import { QuickOpen } from "./components/QuickOpen";
 import { SearchPanel } from "./components/SearchPanel";
 import { SettingsDialog } from "./components/SettingsDialog";
-import type { EditorLanguageAction } from "./lib/editorLanguageTools";
 import { SidebarLayout, type SidebarLayoutHandle } from "./components/SidebarLayout";
 import { EditorSplitResizer } from "./components/EditorSplitResizer";
 import { SymbolPanel } from "./components/SymbolPanel";
@@ -54,6 +63,13 @@ import { UnsavedDialog } from "./components/UnsavedDialog";
 import { api } from "./lib/api";
 import { DEFAULT_PREFERENCES, type AppSettings, type Preferences } from "./lib/preferences";
 import { useNativeMenu, type NativeMenuAction, type NativeMenuState } from "./lib/nativeMenu";
+import {
+  matchShortcut,
+  resolveShortcuts,
+  shortcutFromEvent,
+  shortcutLabel,
+  type NavigationTarget,
+} from "./lib/shortcuts";
 import { saveLayout } from "./lib/layout";
 import { readSession, saveSession, type WorkspaceSession } from "./lib/session";
 import { colorSchemeVariables, DEFAULT_COLOR_SCHEMES, type ColorSchemes } from "./lib/colorSchemes";
@@ -93,6 +109,15 @@ import {
   prepareEditors,
   type PrepareGitOperation,
 } from "./git/editorOperations";
+
+type WorkspaceCommand =
+  | NativeMenuAction
+  | "copy-file"
+  | "paste-file"
+  | "delete-file"
+  | "new-file"
+  | "new-folder"
+  | "rename";
 
 type SidebarView = "files" | "search" | "symbols" | "git";
 
@@ -260,9 +285,10 @@ export default function App() {
   paneActiveRef.current = paneActive;
   loadStateRef.current = loadState;
   const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent);
-  const shortcut = (key: string) => (isMac ? `⌘${key}` : `Ctrl+${key}`);
-  // macOS 的 Cmd+` 被系统窗口切换占用，终端快捷键在所有平台都用 Ctrl。
-  const terminalShortcut = isMac ? "⌃`" : "Ctrl+`";
+  const shortcutBindings = useMemo(
+    () => resolveShortcuts(preferences.shortcuts),
+    [preferences.shortcuts],
+  );
   const activeTab = tabs.find((tab) => tab.key === activeKey) ?? null;
 
   const resolvedTheme: ResolvedTheme = theme === "system" ? systemTheme : theme;
@@ -278,27 +304,6 @@ export default function App() {
   const toggleTerminal = useCallback(() => {
     setTerminalOpen((current) => !current);
   }, []);
-
-  useEffect(() => {
-    const handleTerminalKeyDown = (event: KeyboardEvent) => {
-      if (
-        !event.ctrlKey ||
-        event.metaKey ||
-        event.shiftKey ||
-        event.altKey ||
-        event.code !== "Backquote" ||
-        fileOperationBusyRef.current ||
-        settingsOpen
-      )
-        return;
-      event.preventDefault();
-      event.stopPropagation();
-      toggleTerminal();
-    };
-    // Capture before editor and terminal keymaps consume the shortcut.
-    window.addEventListener("keydown", handleTerminalKeyDown, true);
-    return () => window.removeEventListener("keydown", handleTerminalKeyDown, true);
-  }, [settingsOpen, toggleTerminal]);
 
   const registerEditor = useCallback((key: string, handle: CodeReaderHandle | null) => {
     if (handle) editorsRef.current.set(key, handle);
@@ -1469,141 +1474,6 @@ export default function App() {
     [activeTab, navigationBusy, notify, openNavigationLocation, syncActiveDocument],
   );
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (fileOperationBusyRef.current) {
-        if (shouldBlockKeyboard()) event.preventDefault();
-        return;
-      }
-      const modifier = event.metaKey || event.ctrlKey;
-      if (modifier && !event.shiftKey && !event.altKey && event.code === "Comma") {
-        event.preventDefault();
-        if (!pendingAction && !quickOpen && !navigationDialog) setSettingsOpen(true);
-        return;
-      }
-      if (settingsOpen) return;
-      if (modifier && !event.shiftKey && !event.altKey && event.code === "Backslash") {
-        event.preventDefault();
-        if (!pendingAction && !quickOpen && !navigationDialog) toggleSplit();
-        return;
-      }
-      if (
-        modifier &&
-        event.altKey &&
-        !event.shiftKey &&
-        (event.code === "ArrowLeft" || event.code === "ArrowRight")
-      ) {
-        event.preventDefault();
-        if (!pendingAction && !quickOpen && !navigationDialog)
-          navigateHistory(event.code === "ArrowLeft" ? "back" : "forward");
-        return;
-      }
-      if (modifier && !event.shiftKey && !event.altKey && event.code === "KeyS") {
-        if (!activeTab || pendingAction) return;
-        event.preventDefault();
-        void saveActiveTab();
-        return;
-      }
-      if (modifier && !event.altKey && event.code === "KeyP") {
-        event.preventDefault();
-        setQuickOpen((value) => !value);
-        return;
-      }
-      if (modifier && event.shiftKey && event.code === "KeyF") {
-        event.preventDefault();
-        focusGlobalSearch();
-        return;
-      }
-      const inTextInput =
-        event.target instanceof HTMLInputElement ||
-        event.target instanceof HTMLTextAreaElement ||
-        (event.target instanceof HTMLElement && event.target.isContentEditable);
-      if (modifier && !event.shiftKey && event.code === "KeyF") {
-        if (event.defaultPrevented || inTextInput || !activeTab) return;
-        event.preventDefault();
-        editorsRef.current.get(activeTab.key)?.openFileSearch();
-        return;
-      }
-      // File shortcuts act on the open file (or the active project) unless text is edited or selected.
-      if (
-        isMac &&
-        modifier &&
-        !event.altKey &&
-        !inTextInput &&
-        !quickOpen &&
-        !navigationDialog &&
-        (window.getSelection()?.isCollapsed ?? true)
-      ) {
-        const current = loadStateRef.current;
-        const snapshot = current.status === "ready" ? current.snapshot : null;
-        const project = snapshot?.projects.find(
-          (item) => item.id === (activeTab?.projectId ?? snapshot.activeProjectId),
-        );
-        if (project && activeTab && !event.shiftKey && event.code === "KeyC") {
-          event.preventDefault();
-          void api
-            .copyEntry(project.id, activeTab.path)
-            .then(() => notify(t("已复制文件")))
-            .catch((error) => notify(errorMessage(error)));
-          return;
-        }
-        if (!event.shiftKey && event.code === "KeyV") {
-          event.preventDefault();
-          // The tree owns paste so it can refresh and report exactly like the row menu.
-          fileTreeRef.current?.pasteSelected(
-            project && activeTab ? { project, parent: parentPath(activeTab.path) } : null,
-          );
-          return;
-        }
-        if (project && activeTab && !event.shiftKey && event.code === "Backspace") {
-          event.preventDefault();
-          fileTreeRef.current?.trash(project, activeTab.path);
-          return;
-        }
-        if (project && event.code === "KeyN") {
-          event.preventDefault();
-          fileTreeRef.current?.create(
-            project,
-            activeTab ? parentPath(activeTab.path) : "",
-            event.shiftKey,
-          );
-          return;
-        }
-      }
-      if (event.code === "F2" && activeTab && !inTextInput && !quickOpen && !navigationDialog) {
-        const current = loadStateRef.current;
-        const project =
-          current.status === "ready"
-            ? current.snapshot.projects.find((item) => item.id === activeTab.projectId)
-            : undefined;
-        if (project) {
-          event.preventDefault();
-          fileTreeRef.current?.rename(project, activeTab.path);
-          return;
-        }
-      }
-      if (event.code === "F12" && !inTextInput && !quickOpen && !navigationDialog) {
-        event.preventDefault();
-        void runNavigation(event.shiftKey ? "references" : "definition");
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [
-    activeTab,
-    focusGlobalSearch,
-    navigationDialog,
-    navigateHistory,
-    notify,
-    pendingAction,
-    quickOpen,
-    settingsOpen,
-    runNavigation,
-    saveActiveTab,
-    shouldBlockKeyboard,
-    toggleSplit,
-  ]);
-
   const performRemoveProject = useCallback(
     async (project: Project) => {
       await discardTabRecovery(tabsRef.current.filter((tab) => tab.projectId === project.id));
@@ -2009,21 +1879,6 @@ export default function App() {
     [openLocation, notify],
   );
 
-  useEffect(() => {
-    const listener = (event: KeyboardEvent) => {
-      if (
-        (isMac ? event.metaKey : event.ctrlKey) &&
-        event.shiftKey &&
-        event.key.toLowerCase() === "g"
-      ) {
-        event.preventDefault();
-        openGit();
-      }
-    };
-    window.addEventListener("keydown", listener);
-    return () => window.removeEventListener("keydown", listener);
-  }, [isMac, openGit]);
-
   const snapshot = loadState.status === "ready" ? loadState.snapshot : null;
   const defaultGitProject = snapshot?.projects.find(({ id }) => id === snapshot.activeProjectId);
   useEffect(() => {
@@ -2076,6 +1931,13 @@ export default function App() {
     if (tabs.length === 0) setEditorStatus(null);
   }, [tabs.length]);
 
+  const commandsBlocked =
+    operationBusy ||
+    settingsBusy ||
+    menuBusy ||
+    settingsOpen ||
+    !!pendingAction ||
+    !!navigationDialog;
   const menuHasFile = activeTab !== null && !gitOpen;
   const menuCanSave =
     menuHasFile &&
@@ -2090,14 +1952,7 @@ export default function App() {
     () => ({
       language,
       ready: loadState.status === "ready",
-      blocked:
-        operationBusy ||
-        settingsBusy ||
-        menuBusy ||
-        settingsOpen ||
-        quickOpen ||
-        pendingAction !== null ||
-        navigationDialog !== null,
+      blocked: commandsBlocked || quickOpen,
       hasFile: menuHasFile,
       canSave: menuCanSave,
       canNavigate: menuCanNavigate,
@@ -2117,13 +1972,8 @@ export default function App() {
     [
       language,
       loadState.status,
-      operationBusy,
-      settingsBusy,
-      menuBusy,
-      settingsOpen,
+      commandsBlocked,
       quickOpen,
-      pendingAction,
-      navigationDialog,
       menuHasFile,
       menuCanSave,
       menuCanNavigate,
@@ -2142,33 +1992,24 @@ export default function App() {
     ],
   );
 
-  const runEditorAction = (action: EditorLanguageAction) => {
-    if (
-      !activeTab ||
-      !(action === "quick-documentation"
-        ? menuCanShowQuickDocumentation
-        : menuCanUseEditorActions) ||
-      fileOperationBusyRef.current ||
-      gitOperationBusyRef.current ||
-      closingTabsRef.current
-    )
-      return;
-    return editorsRef.current.get(activeTab.key)?.runEditorAction(action);
-  };
+  const canRunWorkspaceCommand = (canCloseQuickOpen = false) =>
+    menuState.ready &&
+    !commandsBlocked &&
+    (!quickOpen || canCloseQuickOpen) &&
+    !menuBusyRef.current &&
+    !settingsBusyRef.current &&
+    !fileOperationBusyRef.current &&
+    !gitOperationBusyRef.current &&
+    !closingTabsRef.current;
 
-  const handleMenuAction = async (action: NativeMenuAction) => {
-    if (
-      !menuState.ready ||
-      menuState.blocked ||
-      menuBusyRef.current ||
-      settingsBusyRef.current ||
-      fileOperationBusyRef.current ||
-      gitOperationBusyRef.current ||
-      closingTabsRef.current
-    )
-      return;
-    menuBusyRef.current = true;
-    setMenuBusy(true);
+  const runWorkspaceCommand = async (action: WorkspaceCommand, fromShortcut = false) => {
+    if (!canRunWorkspaceCommand(fromShortcut && action === "quick-open")) return;
+    const lock =
+      !fromShortcut || action === "open-file" || action === "import-project" || action === "quit";
+    if (lock) {
+      menuBusyRef.current = true;
+      setMenuBusy(true);
+    }
     try {
       switch (action) {
         case "settings":
@@ -2187,7 +2028,7 @@ export default function App() {
           await handleImport();
           break;
         case "save":
-          if (menuState.canSave) await saveActiveTab();
+          if (fromShortcut || menuState.canSave) await saveActiveTab();
           break;
         case "close-tab":
           if (menuState.hasFile && activeTab) await handleCloseTabs([activeTab]);
@@ -2197,8 +2038,11 @@ export default function App() {
             editorsRef.current.get(activeTab.key)?.openFileSearch();
           break;
         case "search-workspace":
-        case "search":
           focusGlobalSearch();
+          break;
+        case "search":
+          if (fromShortcut) await selectSidebarView("search");
+          else focusGlobalSearch();
           break;
         case "files":
         case "symbols":
@@ -2211,7 +2055,7 @@ export default function App() {
           toggleTerminal();
           break;
         case "quick-open":
-          setQuickOpen(true);
+          setQuickOpen((value) => !fromShortcut || !value);
           break;
         case "back":
         case "forward":
@@ -2224,15 +2068,56 @@ export default function App() {
         case "definition":
         case "references":
         case "implementation":
-          if (menuState.canNavigate) await runNavigation(action);
+          if (fromShortcut || menuState.canNavigate) await runNavigation(action);
           break;
         case "quick-fix":
         case "organize-imports":
         case "parameter-info":
         case "quick-documentation":
         case "format-code":
-          await runEditorAction(action);
+          if (
+            activeTab &&
+            (action === "quick-documentation"
+              ? menuCanShowQuickDocumentation
+              : menuCanUseEditorActions)
+          )
+            await editorsRef.current.get(activeTab.key)?.runEditorAction(action);
           break;
+        case "copy-file":
+        case "paste-file":
+        case "delete-file":
+        case "new-file":
+        case "new-folder":
+        case "rename": {
+          const project = snapshot?.projects.find(
+            (item) => item.id === (activeTab?.projectId ?? snapshot.activeProjectId),
+          );
+          if (action === "paste-file") {
+            fileTreeRef.current?.pasteSelected(
+              project && activeTab ? { project, parent: parentPath(activeTab.path) } : null,
+            );
+            break;
+          }
+          if (!project) break;
+          if (action === "new-file" || action === "new-folder") {
+            fileTreeRef.current?.create(
+              project,
+              activeTab ? parentPath(activeTab.path) : "",
+              action === "new-folder",
+            );
+            break;
+          }
+          if (!activeTab) break;
+          if (action === "copy-file") {
+            await api.copyEntry(project.id, activeTab.path);
+            notify(t("已复制文件"));
+          } else if (action === "delete-file") {
+            fileTreeRef.current?.trash(project, activeTab.path);
+          } else {
+            fileTreeRef.current?.rename(project, activeTab.path);
+          }
+          break;
+        }
         case "theme-system":
         case "theme-light":
         case "theme-dark":
@@ -2261,12 +2146,97 @@ export default function App() {
         }
       }
     } finally {
-      menuBusyRef.current = false;
-      setMenuBusy(false);
+      if (lock) {
+        menuBusyRef.current = false;
+        setMenuBusy(false);
+      }
     }
   };
 
-  useNativeMenu(menuState, handleMenuAction, (error) => notify(errorMessage(error)));
+  useNativeMenu(menuState, runWorkspaceCommand, (error) => notify(errorMessage(error)));
+
+  const handleShortcut = useEffectEvent((event: KeyboardEvent, capture: boolean) => {
+    if (fileOperationBusyRef.current) {
+      if (!capture && shouldBlockKeyboard()) event.preventDefault();
+      return;
+    }
+    if (event.defaultPrevented) return;
+    const command = capture
+      ? shortcutBindings.terminal && shortcutFromEvent(event) === shortcutBindings.terminal
+        ? "terminal"
+        : null
+      : matchShortcut(event, shortcutBindings);
+    if (!command || (command === "terminal") !== capture) return;
+    if (!canRunWorkspaceCommand(command === "quick-open")) return;
+
+    const inTextInput =
+      event.target instanceof HTMLInputElement ||
+      event.target instanceof HTMLTextAreaElement ||
+      (event.target instanceof HTMLElement && event.target.isContentEditable);
+    let action: WorkspaceCommand;
+    switch (command) {
+      case "quick-fix":
+      case "organize-imports":
+      case "parameter-info":
+      case "quick-documentation":
+      case "format-code":
+      case "next-problem":
+      case "prev-problem":
+      case "extend-selection":
+      case "shrink-selection":
+        return;
+      case "sidebar-files":
+        action = "files";
+        break;
+      case "sidebar-search":
+        action = "search";
+        break;
+      case "sidebar-symbols":
+        action = "symbols";
+        break;
+      default:
+        action = command;
+        break;
+    }
+    switch (action) {
+      case "save":
+      case "close-tab":
+        if (!activeTab) return;
+        break;
+      case "find":
+      case "definition":
+      case "references":
+      case "implementation":
+        if (!activeTab || inTextInput) return;
+        break;
+      case "rename":
+        if (!activeTab || (inTextInput && !event.target.closest(".cm-content"))) return;
+        break;
+      case "copy-file":
+      case "delete-file":
+      case "paste-file":
+      case "new-file":
+      case "new-folder":
+        if (inTextInput || !(window.getSelection()?.isCollapsed ?? true)) return;
+        if (!activeTab && (action === "copy-file" || action === "delete-file")) return;
+        break;
+    }
+    event.preventDefault();
+    if (capture) event.stopPropagation();
+    void runWorkspaceCommand(action, true).catch((error) => notify(errorMessage(error)));
+  });
+
+  useEffect(() => {
+    const capture = (event: KeyboardEvent) => handleShortcut(event, true);
+    const bubble = (event: KeyboardEvent) => handleShortcut(event, false);
+    // The terminal can consume its toggle key before it reaches the window.
+    window.addEventListener("keydown", capture, true);
+    window.addEventListener("keydown", bubble);
+    return () => {
+      window.removeEventListener("keydown", capture, true);
+      window.removeEventListener("keydown", bubble);
+    };
+  }, []);
 
   if (loadState.status === "loading") {
     return (
@@ -2398,12 +2368,22 @@ export default function App() {
         <button
           className="quick-open-trigger"
           onClick={() => setQuickOpen(true)}
-          aria-label={t("快速打开文件（{0}）", shortcut("P"))}
-          data-tooltip={t("快速打开文件（{0}）", shortcut("P"))}
+          aria-label={
+            shortcutBindings["quick-open"]
+              ? t("快速打开文件（{0}）", shortcutLabel(shortcutBindings["quick-open"]))
+              : t("快速打开")
+          }
+          data-tooltip={
+            shortcutBindings["quick-open"]
+              ? t("快速打开文件（{0}）", shortcutLabel(shortcutBindings["quick-open"]))
+              : t("快速打开")
+          }
         >
           <FileSearch size={14} />
           <span>{t("快速打开")}</span>
-          <kbd>{shortcut("P")}</kbd>
+          {shortcutBindings["quick-open"] && (
+            <kbd>{shortcutLabel(shortcutBindings["quick-open"])}</kbd>
+          )}
         </button>
         <div className="topbar-actions">
           {capabilities && !capabilities.ctagsAvailable && (
@@ -2440,7 +2420,11 @@ export default function App() {
                 if (sidebarView === "search") focusGlobalSearch();
                 else void selectSidebarView("search");
               }}
-              data-tooltip={t("全局搜索（{0}）", shortcut("Shift+F"))}
+              data-tooltip={
+                shortcutBindings["search-workspace"]
+                  ? t("全局搜索（{0}）", shortcutLabel(shortcutBindings["search-workspace"]))
+                  : t("全局搜索")
+              }
               aria-label={t("全局搜索")}
               aria-pressed={sidebarView === "search"}
             >
@@ -2460,7 +2444,11 @@ export default function App() {
               onClick={openGit}
               aria-label={t("Git 管理")}
               aria-pressed={gitOpen}
-              data-tooltip={t("Git 管理（{0}）", shortcut("Shift+G"))}
+              data-tooltip={
+                shortcutBindings.git
+                  ? t("Git 管理（{0}）", shortcutLabel(shortcutBindings["git"]))
+                  : t("Git 管理")
+              }
             >
               <GitBranch size={17} />
             </button>
@@ -2484,7 +2472,11 @@ export default function App() {
                 className="rail-button"
                 onClick={() => setSettingsOpen(true)}
                 disabled={settingsBusy}
-                data-tooltip={t("设置（{0}）", shortcut(","))}
+                data-tooltip={
+                  shortcutBindings.settings
+                    ? t("设置（{0}）", shortcutLabel(shortcutBindings["settings"]))
+                    : t("设置")
+                }
                 aria-label={t("设置")}
               >
                 <Settings size={16} />
@@ -2501,6 +2493,7 @@ export default function App() {
                 activeProjectId={snapshot?.activeProjectId ?? null}
                 activeFilePath={activeTab?.path ?? null}
                 active={sidebarView === "files"}
+                shortcutBindings={shortcutBindings}
                 refresh={treeRefresh}
                 initialOpenProjects={initialSession.tree.openProjects}
                 initialExpandedDirectories={initialSession.tree.expandedDirectories}
@@ -2590,6 +2583,13 @@ export default function App() {
                     onGoToDefinition={(position, result) =>
                       void runNavigation("definition", { key: tab.key, position, result })
                     }
+                    onNavigate={(target: NavigationTarget) => {
+                      if (!canRunWorkspaceCommand() || navigationBusy) return false;
+                      void runWorkspaceCommand(target, true).catch((error) =>
+                        notify(errorMessage(error)),
+                      );
+                      return true;
+                    }}
                     onOpenMarkdownFile={handleOpenMarkdownFile}
                     onNotice={notify}
                     onStatus={isActive ? setEditorStatus : noopStatus}
@@ -2674,8 +2674,16 @@ export default function App() {
                   className="status-terminal"
                   onClick={toggleTerminal}
                   aria-pressed={terminalOpen}
-                  data-tooltip={t("终端（{0}）", terminalShortcut)}
-                  aria-label={t("终端（{0}）", terminalShortcut)}
+                  data-tooltip={
+                    shortcutBindings.terminal
+                      ? t("终端（{0}）", shortcutLabel(shortcutBindings["terminal"]))
+                      : t("终端")
+                  }
+                  aria-label={
+                    shortcutBindings.terminal
+                      ? t("终端（{0}）", shortcutLabel(shortcutBindings["terminal"]))
+                      : t("终端")
+                  }
                 >
                   <Terminal size={12} />
                   <span>{t("终端")}</span>

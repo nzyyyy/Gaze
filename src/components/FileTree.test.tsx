@@ -2,8 +2,9 @@ import { createRef, type Ref } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DirEntry, Project } from "../lib/types";
+import type { DirectoryListing, DirEntry, Project } from "../lib/types";
 import type { FileChange } from "../git/models";
+import { resolveShortcuts } from "../lib/shortcuts";
 
 const apiMock = vi.hoisted(() => ({
   listDirectory: vi.fn(),
@@ -18,9 +19,15 @@ const gitApiMock = vi.hoisted(() => ({
   onRepositoryChange: vi.fn(),
 }));
 vi.mock("../lib/api", () => ({ api: apiMock, gitApi: gitApiMock }));
+const virtual = vi.hoisted(() => ({
+  visibleEnd: Number.POSITIVE_INFINITY,
+  scrollToIndex: vi.fn(),
+}));
 vi.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: ({ count }: { count: number }) => ({
     getTotalSize: () => count * 27,
+    range: { startIndex: 0, endIndex: Math.min(count - 1, virtual.visibleEnd) },
+    scrollToIndex: virtual.scrollToIndex,
     getVirtualItems: () =>
       Array.from({ length: count }, (_, index) => ({ index, start: index * 27 })),
   }),
@@ -39,6 +46,7 @@ const entry = (path: string, isDir = false, isSymlink = false, ignored = false):
   modifiedMs: null,
 });
 let listings: Record<string, DirEntry[]>;
+const defaultShortcuts = resolveShortcuts(undefined);
 afterEach(() => vi.restoreAllMocks());
 
 function setup(
@@ -57,13 +65,14 @@ function setup(
   const onPaste = vi.fn().mockResolvedValue({ entries: [], failures: [] });
   const onOpenFile = vi.fn();
   const onNotice = vi.fn();
-  const element = (next: Project[]) => (
+  const element = (next: Project[], shortcutBindings = defaultShortcuts) => (
     <FileTree
       ref={ref}
       projects={next}
       activeProjectId="p1"
       activeFilePath={null}
       active
+      shortcutBindings={shortcutBindings}
       refresh={{ token: 0, directories: new Map() }}
       initialOpenProjects={restored?.openProjects}
       initialExpandedDirectories={restored?.expandedDirectories}
@@ -84,7 +93,8 @@ function setup(
     onOpenFile,
     onPaste,
     onNotice,
-    rerender: (next: Project[]) => view.rerender(element(next)),
+    rerender: (next: Project[], shortcuts = defaultShortcuts) =>
+      view.rerender(element(next, shortcuts)),
   };
 }
 
@@ -124,7 +134,7 @@ describe("FileTree operations", () => {
     expect(onOpenFile).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "target" }), { metaKey: true });
     expect(screen.getAllByRole("treeitem", { selected: true })).toHaveLength(3);
-    fireEvent.keyDown(screen.getByRole("tree"), { key: "Delete" });
+    fireEvent.keyDown(screen.getByRole("tree"), { key: "Backspace", metaKey: true });
     const dialog = screen.getByRole("dialog", { name: "移到废纸篓" });
     expect(within(dialog).getByRole("list", { name: "操作项目" })).toHaveTextContent("readme.md");
     expect(onFileOperation).not.toHaveBeenCalled();
@@ -136,6 +146,75 @@ describe("FileTree operations", () => {
       }),
       "",
     );
+  });
+
+  it("keeps siblings visible and moves focus after trashing the focused file", async () => {
+    const ref = createRef<FileTreeHandle>();
+    const { user, onFileOperation } = setup(ref);
+    await screen.findByRole("button", { name: "readme.md" });
+    fireEvent.click(screen.getByRole("button", { name: "readme.md" }));
+    expect(
+      screen.getByRole("button", { name: "readme.md" }).closest('[role="treeitem"]'),
+    ).toHaveClass("is-focused");
+
+    onFileOperation.mockImplementationOnce(async () => {
+      listings[""] = listings[""]!.filter((item) => item.path !== "readme.md");
+    });
+    let finishRefresh!: (listing: DirectoryListing) => void;
+    apiMock.listDirectory.mockReturnValueOnce(
+      new Promise<DirectoryListing>((resolve) => {
+        finishRefresh = resolve;
+      }),
+    );
+    act(() => ref.current?.trash(project, "readme.md"));
+    await screen.findByRole("dialog", { name: "移到废纸篓" });
+    await user.keyboard("{Enter}");
+
+    expect(screen.queryByRole("button", { name: "readme.md" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "src" })).toBeInTheDocument();
+    await waitFor(() => {
+      const tree = screen.getByRole("tree");
+      const active = tree.getAttribute("aria-activedescendant");
+      expect(active).toBeTruthy();
+      expect(document.getElementById(active!)?.textContent).toContain("link");
+      expect(tree).toHaveClass("has-active-row");
+    });
+    expect(virtual.scrollToIndex).toHaveBeenCalled();
+    await act(async () =>
+      finishRefresh({ projectId: project.id, path: "", entries: listings[""]! }),
+    );
+    expect(screen.getByRole("button", { name: "src" })).toBeInTheDocument();
+  });
+
+  it("applies the configured trash shortcut to selected tree files", async () => {
+    const { rerender } = setup();
+    fireEvent.click(await screen.findByRole("button", { name: "readme.md" }), { metaKey: true });
+    const tree = screen.getByRole("tree");
+    const oldKey = { key: "Backspace", metaKey: true };
+    rerender([project], resolveShortcuts({ "delete-file": "" }));
+    fireEvent.keyDown(tree, oldKey);
+    expect(screen.queryByRole("dialog", { name: "移到废纸篓" })).not.toBeInTheDocument();
+
+    rerender([project], resolveShortcuts({ "delete-file": "Alt+F8" }));
+    fireEvent.keyDown(tree, { key: "F8", altKey: true });
+    expect(screen.getByRole("dialog", { name: "移到废纸篓" })).toHaveTextContent("readme.md");
+  });
+
+  it("keeps a container focus indicator when a rendered row is outside the viewport", async () => {
+    const { rerender } = setup();
+    fireEvent.click(await screen.findByRole("button", { name: "readme.md" }), { metaKey: true });
+    const tree = screen.getByRole("tree");
+    expect(tree).toHaveFocus();
+    expect(tree).toHaveClass("has-active-row");
+    virtual.visibleEnd = 0;
+    try {
+      rerender([project]);
+      expect(tree).toHaveFocus();
+      expect(tree).toHaveAttribute("aria-activedescendant");
+      expect(tree).not.toHaveClass("has-active-row");
+    } finally {
+      virtual.visibleEnd = Number.POSITIVE_INFINITY;
+    }
   });
 
   it.each(["editor", "tree", "heading"])(
@@ -350,6 +429,39 @@ describe("FileTree operations", () => {
     await user.click(screen.getByRole("button", { name: "target" }));
     act(() => ref.current?.pasteSelected({ project, parent: "src" }));
     await waitFor(() => expect(onPaste).toHaveBeenCalledWith(project, "target"));
+  });
+
+  it("leaves the existing rows and focus in place while refreshing a paste destination", async () => {
+    const ref = createRef<FileTreeHandle>();
+    listings.src = [entry("src/before.ts")];
+    const { user, onPaste } = setup(ref);
+    await user.click(await screen.findByRole("button", { name: "src" }));
+    const existing = await screen.findByRole("button", { name: "before.ts" });
+    fireEvent.click(existing, { metaKey: true });
+    const tree = screen.getByRole("tree");
+    expect(tree).toHaveClass("has-active-row");
+
+    let finishRefresh!: (listing: DirectoryListing) => void;
+    apiMock.listDirectory.mockClear();
+    apiMock.listDirectory.mockReturnValueOnce(
+      new Promise<DirectoryListing>((resolve) => {
+        finishRefresh = resolve;
+      }),
+    );
+    const copied = entry("src/pasted.ts");
+    onPaste.mockResolvedValueOnce({ entries: [copied], failures: [] });
+    await act(async () => ref.current?.paste(project, "src"));
+
+    expect(apiMock.listDirectory.mock.calls).toEqual([["p1", "src"]]);
+    expect(screen.getByRole("button", { name: "before.ts" })).toBe(existing);
+    expect(screen.getByRole("button", { name: "readme.md" })).toBeInTheDocument();
+    expect(tree).toHaveFocus();
+    expect(tree).toHaveClass("has-active-row");
+
+    await act(async () =>
+      finishRefresh({ projectId: project.id, path: "src", entries: [...listings.src!, copied] }),
+    );
+    expect(screen.getByRole("button", { name: "pasted.ts" })).toBeInTheDocument();
   });
 
   it("falls back to the open file's folder when the tree has no selection", async () => {
@@ -729,6 +841,7 @@ describe("FileTree refresh", () => {
     projects: [project],
     activeProjectId: "p1",
     activeFilePath: null,
+    shortcutBindings: defaultShortcuts,
     onOpenProject: vi.fn(),
     onOpenFile: vi.fn(),
     onRemoveProject: vi.fn(),

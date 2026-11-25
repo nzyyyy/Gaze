@@ -190,7 +190,8 @@ function wrapMarkdown(before: string, after: string, link = false): Command {
 }
 
 const extension = [
-  Prec.high(
+  // Formatting gets the first chance at its keys, including ⌘B in Markdown.
+  Prec.highest(
     keymap.of([
       { key: "Mod-b", run: wrapMarkdown("**", "**") },
       { key: "Mod-i", run: wrapMarkdown("*", "*") },

@@ -8,6 +8,7 @@ import type { ColorSchemes } from "./colorSchemes";
 import type { FontSettings } from "./fonts";
 import type { ThemePreference } from "./types";
 import type { AiCompletionConfig } from "../plugins/ai-completion-config";
+import type { ShortcutOverrides } from "./shortcuts";
 
 export interface Preferences extends Record<BuiltinPluginKey, boolean> {
   editorFontSize: number;
@@ -43,6 +44,7 @@ export interface Preferences extends Record<BuiltinPluginKey, boolean> {
   windowSurfaceOpacity: number;
   terminalCursorStyle: "block" | "underline" | "bar";
   aiCompletion: AiCompletionConfig;
+  shortcuts: ShortcutOverrides;
 }
 
 export interface AppSettings {
@@ -95,6 +97,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   typescriptEnabled: true,
   aiCompletionEnabled: false,
   aiCompletion: { protocol: "responses", url: "", model: "", apiKey: "" },
+  shortcuts: {},
 };
 
 export const SETTINGS_CATEGORIES = [
@@ -104,6 +107,7 @@ export const SETTINGS_CATEGORIES = [
   { id: "search", label: "搜索" },
   { id: "terminal", label: "终端" },
   { id: "layout", label: "窗口与布局" },
+  { id: "keymap", label: "快捷键" },
   { id: "plugins", label: "插件" },
 ] as const;
 export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number]["id"];
@@ -232,14 +236,14 @@ export const PREFERENCE_FIELDS: PreferenceField[] = [
     type: "boolean",
     category: "editor",
     label: "悬停显示快速文档",
-    description: "鼠标停在符号上时显示说明。也可以按 F1 查看文档。",
+    description: "鼠标停在符号上时显示说明。也可以按 {0} 查看文档。",
   },
   {
     key: "autoParameterInfo",
     type: "boolean",
     category: "editor",
     label: "自动显示参数提示",
-    description: "进入函数调用后约 1 秒显示。也可以按 Ctrl+Shift+Space 查看。",
+    description: "进入函数调用后约 1 秒显示。也可以按 {0} 查看。",
   },
   {
     key: "autoImportEnabled",

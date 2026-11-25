@@ -48,6 +48,7 @@ const finishSpy = vi.hoisted(() => vi.fn());
 const trashSpy = vi.hoisted(() => vi.fn());
 const renameSpy = vi.hoisted(() => vi.fn());
 const createSpy = vi.hoisted(() => vi.fn());
+const pasteSelectedSpy = vi.hoisted(() => vi.fn());
 
 const apiMock = vi.hoisted(() => ({
   bootstrapWorkspace: vi.fn(),
@@ -179,6 +180,7 @@ vi.mock("./components/FileTree", async () => {
     React.useImperativeHandle(props.ref, () => ({
       paste: (project, parent) => void props.onPaste(project, parent),
       pasteSelected: (fallback) => {
+        pasteSelectedSpy(fallback);
         if (fallback) void props.onPaste(fallback.project, fallback.parent);
       },
       drop: async (project: Project, parent: string, paths: string[]) => {
@@ -681,7 +683,7 @@ describe("App editor panes", () => {
     await menuAction("back");
     await user.click(screen.getByText("package.json"));
     await waitFor(() => expect(nativeMenu.state!.canGoForward).toBe(false));
-    fireEvent.keyDown(window, { code: "ArrowLeft", ctrlKey: true, altKey: true });
+    fireEvent.keyDown(window, { code: "BracketLeft", key: "[", metaKey: true });
     expect(screen.getByRole("tab", { name: "README.md" })).toHaveAttribute("aria-selected", "true");
   });
 
@@ -1611,7 +1613,7 @@ describe("App editor panes", () => {
     expect(firstPane).toHaveAttribute("hidden");
     expect(secondPane).not.toHaveAttribute("hidden");
 
-    await user.keyboard("{Control>}s{/Control}");
+    await user.keyboard("{Meta>}s{/Meta}");
     expect(saveSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -2282,6 +2284,37 @@ describe("App editor panes", () => {
     expect(screen.getByTestId("editor-p1\u0000README.md")).toBeInTheDocument();
   });
 
+  it("routes file creation and tree paste without an open tab", async () => {
+    render(<App />);
+    await screen.findByText("README.md");
+
+    fireEvent.keyDown(window, { code: "KeyN", key: "n", metaKey: true });
+    expect(createSpy).toHaveBeenCalledWith("p1", "", false);
+    fireEvent.keyDown(window, { code: "KeyN", key: "N", metaKey: true, shiftKey: true });
+    expect(createSpy).toHaveBeenCalledWith("p1", "", true);
+    fireEvent.keyDown(window, { code: "KeyV", key: "v", metaKey: true });
+    expect(pasteSelectedSpy).toHaveBeenCalledWith(null);
+  });
+
+  it("uses the same modal guard for menu actions and shortcuts", async () => {
+    const user = userEvent.setup();
+    vi.mocked(open).mockResolvedValueOnce(null);
+    render(<App />);
+    await screen.findByText("README.md");
+    await user.click(screen.getByRole("button", { name: /快速打开文件/ }));
+    expect(nativeMenu.state?.blocked).toBe(true);
+
+    const openFile = { code: "KeyO", key: "o", metaKey: true };
+    await menuAction("open-file");
+    fireEvent.keyDown(document.activeElement!, openFile);
+    expect(open).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document.activeElement!, { ...openFile, shiftKey: true });
+    expect(nativeMenu.state?.blocked).toBe(false);
+    fireEvent.keyDown(window, openFile);
+    expect(open).toHaveBeenCalledOnce();
+  });
+
   it("routes Cmd file shortcuts to the tree and leaves text fields alone", async () => {
     Object.defineProperty(navigator, "userAgent", {
       value: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15",
@@ -2303,17 +2336,106 @@ describe("App editor panes", () => {
     expect(createSpy).toHaveBeenLastCalledWith("p1", "src", false);
     fireEvent.keyDown(window, { code: "KeyN", key: "N", metaKey: true, shiftKey: true });
     expect(createSpy).toHaveBeenLastCalledWith("p1", "src", true);
-    fireEvent.keyDown(window, { code: "F2", key: "F2" });
+    fireEvent.keyDown(window, { code: "F6", key: "F6", shiftKey: true });
     expect(renameSpy).toHaveBeenCalledWith("p1", "src/a.ts");
 
     const input = document.createElement("input");
     document.body.append(input);
     fireEvent.keyDown(input, { code: "KeyC", key: "c", metaKey: true });
     fireEvent.keyDown(input, { code: "KeyN", key: "n", metaKey: true });
-    fireEvent.keyDown(input, { code: "F2", key: "F2" });
+    fireEvent.keyDown(input, { code: "F6", key: "F6", shiftKey: true });
     input.remove();
     expect(apiMock.copyEntry).toHaveBeenCalledTimes(1);
     expect(createSpy).toHaveBeenCalledTimes(2);
     expect(renameSpy).toHaveBeenCalledTimes(1);
+
+    // Renaming works while the file is focused in the editor, but not in other text fields.
+    const fakeEditable = (className: string) => {
+      const element = document.createElement("div");
+      element.className = className;
+      Object.defineProperty(element, "isContentEditable", { value: true });
+      document.body.append(element);
+      return element;
+    };
+    const content = fakeEditable("cm-content");
+    const host = document.createElement("div");
+    host.className = "cm-editor";
+    host.append(content);
+    document.body.append(host);
+    fireEvent.keyDown(content, { code: "F6", key: "F6", shiftKey: true });
+    expect(renameSpy).toHaveBeenCalledTimes(2);
+    expect(renameSpy).toHaveBeenLastCalledWith("p1", "src/a.ts");
+    const field = fakeEditable("rich-editor");
+    fireEvent.keyDown(field, { code: "F6", key: "F6", shiftKey: true });
+    expect(renameSpy).toHaveBeenCalledTimes(2);
+    host.remove();
+    content.remove();
+    field.remove();
+  });
+
+  it("runs the IDEA definition shortcut from outside the editor once", async () => {
+    Object.defineProperty(navigator, "userAgent", {
+      value: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15",
+      configurable: true,
+    });
+    apiMock.findDefinitions.mockResolvedValueOnce({ source: "lsp", locations: [], message: null });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByText("README.md"));
+    fireEvent.keyDown(window, { code: "KeyB", key: "b", metaKey: true });
+    await waitFor(() => expect(apiMock.findDefinitions).toHaveBeenCalledOnce());
+    expect(apiMock.findDefinitions).toHaveBeenCalledWith("p1", "README.md", {
+      line: 0,
+      character: 0,
+    });
+  });
+
+  it("opens the terminal and settings with the IDEA shortcuts on macOS", async () => {
+    Object.defineProperty(navigator, "userAgent", {
+      value: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15",
+      configurable: true,
+    });
+    render(<App />);
+    await waitFor(() => expect(nativeMenu.state?.ready).toBe(true));
+    fireEvent.keyDown(window, { code: "Backquote", key: "`", ctrlKey: true });
+    expect(screen.getByRole("region", { name: "终端面板" })).toBeVisible();
+    fireEvent.keyDown(window, { code: "Comma", key: ",", metaKey: true });
+    expect(screen.getByRole("dialog", { name: "设置" })).toBeInTheDocument();
+  });
+
+  it("follows a custom shortcut instead of the default", async () => {
+    Object.defineProperty(navigator, "userAgent", {
+      value: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15",
+      configurable: true,
+    });
+    apiMock.bootstrapWorkspace.mockResolvedValueOnce({
+      projects: [{ id: "p1", name: "Demo", root: "/demo" }],
+      activeProjectId: "p1",
+      theme: "system",
+      fonts: DEFAULT_FONT_SETTINGS,
+      preferences: { ...DEFAULT_PREFERENCES, shortcuts: { save: "F8" } },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByText("src/a.ts"));
+    fireEvent.keyDown(window, { code: "KeyS", key: "s", metaKey: true });
+    expect(saveSpy).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { code: "F8", key: "F8" });
+    await waitFor(() => expect(saveSpy).toHaveBeenCalledOnce());
+  });
+
+  it("keeps the default save key inert after clearing it", async () => {
+    apiMock.bootstrapWorkspace.mockResolvedValueOnce({
+      projects: [{ id: "p1", name: "Demo", root: "/demo" }],
+      activeProjectId: "p1",
+      theme: "system",
+      fonts: DEFAULT_FONT_SETTINGS,
+      preferences: { ...DEFAULT_PREFERENCES, shortcuts: { save: "" } },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByText("src/a.ts"));
+    fireEvent.keyDown(window, { code: "KeyS", key: "s", metaKey: true });
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 });

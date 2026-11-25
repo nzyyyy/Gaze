@@ -55,31 +55,13 @@ export interface NativeMenuState {
   showStatusBar: boolean;
 }
 
-export function isNativeMenuShortcut(event: KeyboardEvent) {
-  if (event.altKey) {
-    return (
-      event.metaKey &&
-      !event.ctrlKey &&
-      !event.shiftKey &&
-      ["ArrowLeft", "ArrowRight"].includes(event.code)
-    );
-  }
-  if (event.metaKey && !event.ctrlKey) {
-    return event.shiftKey
-      ? ["KeyO", "KeyF", "KeyG"].includes(event.code)
-      : ["Comma", "KeyO", "KeyS", "KeyW", "KeyQ", "KeyP", "Backslash"].includes(event.code);
-  }
-  return !event.metaKey && !event.ctrlKey && event.code === "F12";
-}
-
 export function useNativeMenu(
   state: NativeMenuState,
   onAction: (action: NativeMenuAction) => Promise<void>,
   onError: (error: unknown) => void,
 ) {
-  const supported = isTauri() && /Mac/.test(navigator.userAgent);
+  const supported = isTauri();
   const [listening, setListening] = useState(false);
-  const [active, setActive] = useState(false);
   const stateRef = useRef(state);
   const actionRef = useRef(onAction);
   const errorRef = useRef(onError);
@@ -131,27 +113,11 @@ export function useNativeMenu(
   useEffect(() => {
     if (!listening) return;
     let disposed = false;
-    void sync(state)
-      .then(() => {
-        if (!disposed) setActive(true);
-      })
-      .catch((error: unknown) => {
-        if (!disposed) errorRef.current(error);
-      });
+    void sync(state).catch((error: unknown) => {
+      if (!disposed) errorRef.current(error);
+    });
     return () => {
       disposed = true;
     };
   }, [listening, state, sync]);
-
-  useEffect(() => {
-    if (!active) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (!isNativeMenuShortcut(event)) return;
-      // The OS accelerator dispatches the menu action; don't also run DOM keymaps.
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    };
-    window.addEventListener("keydown", handleKeyDown, true);
-    return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [active]);
 }

@@ -4,6 +4,14 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 
 import { Select } from "./Select";
 import { ExternalPlugins } from "./ExternalPlugins";
+import { ShortcutSettings } from "./ShortcutSettings";
+import {
+  SHORTCUT_COMMANDS,
+  resolveShortcuts,
+  shortcutCommandLabel,
+  shortcutConflicts,
+  shortcutLabel,
+} from "../lib/shortcuts";
 
 import mapleLicense from "../assets/fonts/LICENSE.txt?raw";
 import {
@@ -105,7 +113,19 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
   const [testingAi, setTestingAi] = useState(false);
   const [aiTest, setAiTest] = useState<{ ok: boolean; message: string } | null>(null);
   const aiConfig = draft.preferences.aiCompletion;
-  const manualShortcut = isMac ? "⌘⇧↩" : "Ctrl+Shift+Enter";
+  const manualShortcut = "⌘⇧↩";
+  const resolvedShortcuts = resolveShortcuts(draft.preferences.shortcuts);
+  const preferenceDescription = (field: (typeof PREFERENCE_FIELDS)[number]) => {
+    if (field.key === "quickDocumentationOnHover")
+      return resolvedShortcuts["quick-documentation"]
+        ? t(field.description, shortcutLabel(resolvedShortcuts["quick-documentation"]))
+        : t("鼠标停在符号上时显示说明。");
+    if (field.key === "autoParameterInfo")
+      return resolvedShortcuts["parameter-info"]
+        ? t(field.description, shortcutLabel(resolvedShortcuts["parameter-info"]))
+        : t("进入函数调用后约 1 秒显示。");
+    return t(field.description);
+  };
   const search = query.trim().toLowerCase();
   const matches = (id: SettingsCategory, text: string) =>
     search
@@ -162,7 +182,7 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
         field.key === "aiCompletionEnabled"
           ? `${t("API 格式")} ${t("Base URL")} ${t("模型 ID")} API Key ${t("测试连接")} Responses Chat Completions Messages /v1/responses /v1/chat/completions /v1/messages`
           : "";
-      return matches(id, `${t(field.label)} ${t(field.description)} ${tag} ${detailTerms}`);
+      return matches(id, `${t(field.label)} ${preferenceDescription(field)} ${tag} ${detailTerms}`);
     });
     const fonts = AREAS.filter(
       (area) =>
@@ -176,11 +196,34 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
     const cursor = id === "terminal" && matches(id, t("光标样式 方块 竖线 下划线"));
     const sizes =
       id === "layout" ? LAYOUT_FIELDS.filter((field) => matches(id, t(field.label))) : [];
-    if (!fields.length && !fonts.length && !colors && !mode && !locale && !cursor && !sizes.length)
+    const keymap =
+      id === "keymap" &&
+      matches(
+        id,
+        SHORTCUT_COMMANDS.map(
+          (command) => `${t(command.label)} ${shortcutLabel(resolvedShortcuts[command.id])}`,
+        ).join(" "),
+      );
+    if (
+      !fields.length &&
+      !fonts.length &&
+      !colors &&
+      !mode &&
+      !locale &&
+      !cursor &&
+      !sizes.length &&
+      !keymap
+    )
       return null;
     return (
       <section className="settings-section" key={id} aria-labelledby={`settings-${id}-title`}>
         <h3 id={`settings-${id}-title`}>{t(label)}</h3>
+        {keymap && (
+          <ShortcutSettings
+            shortcuts={draft.preferences.shortcuts ?? {}}
+            onChange={(shortcuts) => updatePreference("shortcuts", shortcuts)}
+          />
+        )}
         {id === "plugins" && !search && (
           <div className="settings-plugin-filters" role="group" aria-label={t("插件分类")}>
             {pluginFilterIds.map((filter) => (
@@ -303,7 +346,7 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
             key={field.key}
             id={field.key}
             label={t(field.label)}
-            description={t(field.description)}
+            description={preferenceDescription(field)}
             tag={
               field.pluginCategory && (search || pluginFilter === "all")
                 ? t(BUILTIN_PLUGIN_CATEGORIES[field.pluginCategory])
@@ -569,6 +612,7 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
               layout[field.key] < field.min ||
               layout[field.key] > field.max,
           );
+          const conflict = shortcutConflicts(resolvedShortcuts)[0];
           const config = {
             ...aiConfig,
             url: aiConfig.url.trim(),
@@ -582,8 +626,14 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
           const invalid =
             preferencesError(draft.preferences) ??
             (incompleteAi
+              ? t("AI 行内补全尚未配置完整，请填写 Base URL、模型 ID 和 API Key，或关闭该开关。")
+              : null) ??
+            (conflict
               ? t(
-                  "AI 行内补全尚未配置完整，请填写 Base URL、模型 ID 和 API Key，或关闭该开关。",
+                  "快捷键冲突：“{0}”和“{1}”都使用了 {2}。",
+                  shortcutCommandLabel(conflict[1]![0]!),
+                  shortcutCommandLabel(conflict[1]![1]!),
+                  shortcutLabel(conflict[0]),
                 )
               : null) ??
             (invalidSize
@@ -596,6 +646,11 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
               : null);
           if (invalid) {
             setError(invalid);
+            if (conflict) {
+              setCategory("keymap");
+              setQuery("");
+              resetContent();
+            }
             if (incompleteAi) {
               pluginScrollTopRef.current = contentRef.current?.scrollTop ?? 0;
               setShowAiSettings(true);

@@ -5,6 +5,7 @@ import {
   useEffect,
   useId,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -22,6 +23,7 @@ import {
 } from "lucide-react";
 
 import { api } from "../lib/api";
+import { matchShortcut, type ShortcutBindings } from "../lib/shortcuts";
 import type { DirEntry, PasteResult, Project } from "../lib/types";
 import { basename, errorMessage } from "../lib/utils";
 import { parentPath } from "../lib/utils";
@@ -64,6 +66,7 @@ interface FileTreeProps {
   activeProjectId: string | null;
   activeFilePath: string | null;
   active: boolean;
+  shortcutBindings: ShortcutBindings;
   refresh: TreeRefresh;
   initialOpenProjects?: string[];
   initialExpandedDirectories?: string[];
@@ -81,6 +84,8 @@ interface FileTreeProps {
 }
 
 const directoryKey = (projectId: string, path: string) => `${projectId}\u0000${path}`;
+const isSelectable = (node: FlatNode) =>
+  node.kind === "project" || node.kind === "directory" || node.kind === "file";
 
 export interface FileTreeHandle {
   /** Paste clipboard files into `parent` with the same refresh the row menu uses. */
@@ -102,6 +107,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
     activeProjectId,
     activeFilePath,
     active,
+    shortcutBindings,
     refresh,
     initialOpenProjects,
     initialExpandedDirectories,
@@ -160,13 +166,11 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
     const key = directoryKey(project.id, path);
     const version = (requestVersions.current.get(key) ?? 0) + 1;
     requestVersions.current.set(key, version);
-    setDirectories((current) => ({
-      ...current,
-      [key]:
-        current[key]?.status === "loaded"
-          ? current[key]
-          : { status: "loading", entries: current[key]?.entries ?? [] },
-    }));
+    setDirectories((current) =>
+      current[key]?.status === "loaded"
+        ? current
+        : { ...current, [key]: { status: "loading", entries: current[key]?.entries ?? [] } },
+    );
     try {
       const listing = await api.listDirectory(project.id, path);
       if (requestVersions.current.get(key) !== version) return;
@@ -337,12 +341,45 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
     estimateSize: () => 27,
     overscan: 12,
   });
+  const selectedIndexRef = useRef(0);
+  useLayoutEffect(() => {
+    if (!selectedKey) return;
+    const selectable = nodes.filter(isSelectable);
+    const index = selectable.findIndex((node) => node.key === selectedKey);
+    if (index >= 0) {
+      selectedIndexRef.current = index;
+      return;
+    }
+    // A reloaded ancestor temporarily hides the selected row.
+    if (
+      nodes.some(
+        (node) =>
+          node.kind === "loading" &&
+          (node.parentKey === `project\u0000${node.project.id}`
+            ? selectedKey.startsWith(directoryKey(node.project.id, ""))
+            : selectedKey.startsWith(`${node.parentKey}/`)),
+      )
+    )
+      return;
+    // Keep the roving focus on a nearby row when the focused row disappears
+    // (trashed file, external deletion, or a collapsed parent directory).
+    const neighbour = selectable[Math.min(selectedIndexRef.current, selectable.length - 1)];
+    setSelectedKey(neighbour?.key ?? null);
+    if (neighbour && document.activeElement === scrollRef.current)
+      virtualizer.scrollToIndex(nodes.indexOf(neighbour));
+  }, [nodes, selectedKey, virtualizer]);
+
   const virtualItems = virtualizer.getVirtualItems();
   const selectedIndex = nodes.findIndex((node) => node.key === selectedKey);
   const activeDescendant =
     selectedIndex >= 0 && virtualItems.some((item) => item.index === selectedIndex)
       ? `${treeId}-node-${selectedIndex}`
       : undefined;
+  const activeRowVisible =
+    activeDescendant &&
+    virtualizer.range &&
+    selectedIndex >= virtualizer.range.startIndex &&
+    selectedIndex <= virtualizer.range.endIndex;
 
   const toggleProject = (project: Project) => {
     const nextOpen = !openProjects.has(project.id);
@@ -379,8 +416,6 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
     if (opening && !directories[key]) void loadDirectory(project, entry.path);
   };
 
-  const isSelectable = (node: FlatNode) =>
-    node.kind === "project" || node.kind === "directory" || node.kind === "file";
   const selectNode = (
     node: FlatNode,
     modifiers: { shiftKey?: boolean; metaKey?: boolean; ctrlKey?: boolean } = {},
@@ -530,10 +565,42 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
           ];
     const failures = results.filter((item) => "error" in item && item.error);
     const completed = results.filter((item) => !("error" in item && item.error));
-    const id = operation.project.id;
+    const { project } = operation;
+    const { id } = project;
+    const changedParents = new Set<string>();
+    const removed = new Set<string>();
+    if ("parentPath" in operation) changedParents.add(operation.parentPath);
+    for (const { source, entry } of completed) {
+      if (source) {
+        changedParents.add(parentPath(source.path));
+        if (source.path !== entry?.path) removed.add(directoryKey(id, source.path));
+      }
+      if (entry) changedParents.add(parentPath(entry.path));
+    }
 
-    for (const [key, version] of requestVersions.current) {
-      if (key.startsWith(id + "\u0000")) requestVersions.current.set(key, version + 1);
+    if (removed.size) {
+      const prefix = directoryKey(id, "");
+      const removedPaths = [...removed];
+      const removedDirectory = (key: string) =>
+        removedPaths.some((path) => key === path || key.startsWith(path + "/"));
+      // A request started before the move or deletion must not restore the old subtree.
+      for (const [key, version] of requestVersions.current) {
+        if (removedDirectory(key)) requestVersions.current.set(key, version + 1);
+      }
+      setDirectories((current) => {
+        const next = { ...current };
+        for (const [key, listing] of Object.entries(current)) {
+          if (!key.startsWith(prefix)) continue;
+          if (removedDirectory(key)) delete next[key];
+          else if (changedParents.has(key.slice(prefix.length))) {
+            const entries = listing.entries.filter(
+              (item) => !removed.has(directoryKey(id, item.path)),
+            );
+            if (entries.length !== listing.entries.length) next[key] = { ...listing, entries };
+          }
+        }
+        return next;
+      });
     }
     setExpandedDirectories((current) => {
       const next = new Set<string>();
@@ -565,9 +632,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
       return next;
     });
     setOpenProjects((current) => new Set(current).add(id));
-    setDirectories((current) =>
-      Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith(id + "\u0000"))),
-    );
+    for (const parent of changedParents) void loadDirectory(project, parent);
     setSelectedKeys(new Set());
     if (failures.length && (operation.kind === "move" || operation.kind === "trash")) {
       const pending = failures.map((item) => item.source!);
@@ -587,9 +652,6 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
     setPasteBusy(true);
     try {
       const result = await (paths ? onPaste(project, parent, paths) : onPaste(project, parent));
-      for (const [key, version] of requestVersions.current) {
-        if (key.startsWith(project.id + "\u0000")) requestVersions.current.set(key, version + 1);
-      }
       setOpenProjects((current) => new Set(current).add(project.id));
       setExpandedDirectories((current) => {
         const next = new Set(current);
@@ -597,11 +659,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
           next.add(directoryKey(project.id, path));
         return next;
       });
-      setDirectories((current) =>
-        Object.fromEntries(
-          Object.entries(current).filter(([key]) => !key.startsWith(project.id + "\u0000")),
-        ),
-      );
+      void loadDirectory(project, parent);
       onNotice(
         [
           t("已{0} {1} 项", paths ? t("复制") : t("粘贴"), result.entries.length),
@@ -687,7 +745,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
         </div>
       ) : (
         <div
-          className="tree-scroll"
+          className={`tree-scroll${activeRowVisible ? " has-active-row" : ""}`}
           ref={scrollRef}
           role="tree"
           tabIndex={0}
@@ -695,7 +753,19 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
           aria-multiselectable="true"
           aria-activedescendant={activeDescendant}
           onKeyDown={(event) => {
-            if (event.defaultPrevented || event.altKey) return;
+            if (event.defaultPrevented) return;
+            const shortcut = matchShortcut(event, shortcutBindings);
+            if (shortcut === "delete-file" && selectedNodes.length) {
+              event.preventDefault();
+              setOperation({
+                kind: "trash",
+                project: selectedNodes[0]!.project,
+                entry: selectedNodes[0]!.entry!,
+                entries: selectedNodes.map((node) => node.entry!),
+              });
+              return;
+            }
+            if (shortcut || event.altKey) return;
             if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a") {
               event.preventDefault();
               const projectId =
@@ -707,17 +777,6 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
                     .map((node) => node.key),
                 ),
               );
-              return;
-            }
-            if ((event.key === "Delete" || event.key === "Backspace") && selectedNodes.length) {
-              event.preventDefault();
-              event.stopPropagation();
-              setOperation({
-                kind: "trash",
-                project: selectedNodes[0]!.project,
-                entry: selectedNodes[0]!.entry!,
-                entries: selectedNodes.map((node) => node.entry!),
-              });
               return;
             }
             if (event.metaKey || event.ctrlKey) return;

@@ -3,7 +3,15 @@ import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView, runScopeHandlers } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { expect, it, vi } from "vitest";
-import { stickyHeaders, stickyScroll, syntaxSelection } from "./readingTools";
+import { Prec } from "@codemirror/state";
+import {
+  extendSyntaxSelection,
+  shrinkSyntaxSelection,
+  stickyHeaders,
+  stickyScroll,
+  syntaxSelection,
+} from "./readingTools";
+import { resolveShortcuts, shortcutKeymap } from "./shortcuts";
 import { matchLanguage } from "./language";
 
 it("pins nested headers for the visible code line in JavaScript and Python", async () => {
@@ -70,37 +78,49 @@ it("paints pinned Python keywords and strings and updates them when the theme ch
 
 it("shrinks through the actual selection history and clears it after a manual move", async () => {
   const javascript = await matchLanguage("main.js").description!.load();
+  const keys = resolveShortcuts({});
   const view = new EditorView({
     doc: "const result = call(value, other);",
-    extensions: [javascript, syntaxSelection],
+    extensions: [
+      javascript,
+      syntaxSelection,
+      Prec.high(
+        shortcutKeymap(keys, {
+          "extend-selection": extendSyntaxSelection,
+          "shrink-selection": shrinkSyntaxSelection,
+        }),
+      ),
+    ],
   });
   try {
-    const mac = /Mac/.test(navigator.platform);
-    const press = (key: string) =>
-      runScopeHandlers(
+    const press = (action: "extend-selection" | "shrink-selection") => {
+      const parts = (keys[action] ?? "").split("+");
+      return runScopeHandlers(
         view,
         new KeyboardEvent("keydown", {
-          key,
-          shiftKey: true,
-          altKey: true,
-          ctrlKey: !mac,
-          metaKey: mac,
+          code: parts.at(-1)!,
+          key: parts.at(-1)!,
+          altKey: parts.includes("Alt"),
+          ctrlKey: parts.includes("Ctrl"),
+          metaKey: parts.includes("Mod"),
+          shiftKey: parts.includes("Shift"),
         }),
         "editor",
       );
+    };
     view.dispatch({ selection: { anchor: 21 } });
     const initial = view.state.selection;
-    expect(press("ArrowUp")).toBe(true);
+    expect(press("extend-selection")).toBe(true);
     const expanded = view.state.selection;
     expect(view.state.sliceDoc(expanded.main.from, expanded.main.to)).toBe("value");
-    expect(press("ArrowUp")).toBe(true);
-    expect(press("ArrowDown")).toBe(true);
+    expect(press("extend-selection")).toBe(true);
+    expect(press("shrink-selection")).toBe(true);
     expect(view.state.selection.eq(expanded)).toBe(true);
-    expect(press("ArrowDown")).toBe(true);
+    expect(press("shrink-selection")).toBe(true);
     expect(view.state.selection.eq(initial)).toBe(true);
-    expect(press("ArrowUp")).toBe(true);
+    expect(press("extend-selection")).toBe(true);
     view.dispatch({ selection: { anchor: 0 } });
-    expect(press("ArrowDown")).toBe(false);
+    expect(press("shrink-selection")).toBe(false);
   } finally {
     view.destroy();
   }

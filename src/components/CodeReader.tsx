@@ -76,7 +76,13 @@ import {
 import { indentGuides } from "../lib/indentGuides";
 import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
 import { rainbowBrackets } from "../lib/rainbowBrackets";
-import { stickyScroll, syntaxSelection } from "../lib/readingTools";
+import {
+  extendSyntaxSelection,
+  shrinkSyntaxSelection,
+  stickyScroll,
+  syntaxSelection,
+} from "../lib/readingTools";
+import { resolveShortcuts, shortcutKeymap, type NavigationTarget } from "../lib/shortcuts";
 import type { EditorViewState } from "../lib/session";
 import { isMarkdownFile, matchLanguage } from "../lib/language";
 import {
@@ -178,6 +184,8 @@ interface EditorSurfaceProps {
   pythonRevision?: number;
   previewRequest?: MarkdownPreviewRequest | null;
   onGoToDefinition?: (position: TextPosition, result: NavigationResult) => void;
+  /** Returns whether the workspace handled the target; `undefined` skips the editor binding. */
+  onNavigate?: (target: NavigationTarget) => boolean;
   onOpenMarkdownFile?: (projectId: string, path: string, fragment: string | null) => void;
   onNotice?: (message: string) => void;
   onStatus: (status: EditorStatus | null) => void;
@@ -407,8 +415,7 @@ function initialExtensions(
   onDocumentChanged: (view: EditorView) => void,
 ) {
   const keyBindings = [
-    { key: "Mod-f", run: openEditorSearch, scope: "editor search-panel" },
-    ...searchKeymap,
+    ...searchKeymap.filter(({ key }) => key !== "Mod-f"),
     ...foldKeymap,
     ...(editable ? closeBracketsKeymap : []),
     ...defaultKeymap,
@@ -451,8 +458,16 @@ function preferenceExtensions(
   mode: TextFile["mode"],
   editable: boolean,
   text: string,
+  onNavigate: ((target: NavigationTarget) => boolean) | undefined,
 ) {
+  const shortcuts = resolveShortcuts(preferences.shortcuts);
+  const navigate = (view: EditorView, target: NavigationTarget) => {
+    if (!onNavigate?.(target)) return false;
+    view.focus();
+    return true;
+  };
   const extensions: Extension[] = [
+    Prec.high(shortcutKeymap(shortcuts, { find: openEditorSearch }, "editor search-panel")),
     EditorState.tabSize.of(preferences.tabSize),
     indentUnit.of(
       mode === "normal"
@@ -465,13 +480,23 @@ function preferenceExtensions(
     extensions.push(highlightActiveLine(), highlightActiveLineGutter());
   if (preferences.indentWithTab && editable) extensions.push(keymap.of([indentWithTab]));
   if (mode === "normal") {
+    // Runs before the default keymaps, which bind the same keys to other commands.
     extensions.push(
+      Prec.high(
+        shortcutKeymap(shortcuts, {
+          "next-problem": nextDiagnostic,
+          "prev-problem": previousDiagnostic,
+          "extend-selection": extendSyntaxSelection,
+          "shrink-selection": shrinkSyntaxSelection,
+          back: (view) => navigate(view, "back"),
+          forward: (view) => navigate(view, "forward"),
+          definition: (view) => navigate(view, "definition"),
+          references: (view) => navigate(view, "references"),
+          implementation: (view) => navigate(view, "implementation"),
+        }),
+      ),
       rainbowBrackets,
       syntaxSelection,
-      keymap.of([
-        { key: "F2", run: nextDiagnostic },
-        { key: "Shift-F2", run: previousDiagnostic },
-      ]),
     );
     if (preferences.showStickyScroll) extensions.push(stickyScroll);
     if (preferences.showIndentGuides) extensions.push(indentGuides);
@@ -510,6 +535,7 @@ export function CodeReader({
   previewRequest,
   onOpenMarkdownFile,
   onGoToDefinition,
+  onNavigate,
   onNotice,
   onStatus,
   onDirtyChange,
@@ -551,6 +577,12 @@ export function CodeReader({
   onOpenFileLinkRef.current = onOpenMarkdownFile;
   const onGoToDefinitionRef = useRef(onGoToDefinition);
   onGoToDefinitionRef.current = onGoToDefinition;
+  const onNavigateRef = useRef(onNavigate);
+  onNavigateRef.current = onNavigate;
+  const appNavigation = useCallback(
+    (target: NavigationTarget) => onNavigateRef.current?.(target) === true,
+    [],
+  );
   const documentRef = useRef<TextFile | null>(null);
   const baselineRef = useRef("");
   const dirtyRef = useRef(false);
@@ -1211,6 +1243,7 @@ export function CodeReader({
             content.mode,
             content.editable,
             content.content,
+            appNavigation,
           ),
         ),
         operationCompartment.current.of(
@@ -1382,10 +1415,16 @@ export function CodeReader({
     if (view && document)
       view.dispatch({
         effects: preferencesCompartment.current.reconfigure(
-          preferenceExtensions(preferences, document.mode, document.editable, document.content),
+          preferenceExtensions(
+            preferences,
+            document.mode,
+            document.editable,
+            document.content,
+            appNavigation,
+          ),
         ),
       });
-  }, [preferences, loaded]);
+  }, [preferences, loaded, appNavigation]);
 
   useEffect(() => {
     viewRef.current?.dispatch({ effects: minimapCompartment.current.reconfigure(minimap ?? []) });
@@ -1395,6 +1434,7 @@ export function CodeReader({
     const view = viewRef.current;
     const document = documentRef.current;
     if (!view || document?.mode !== "normal") return;
+    const shortcuts = resolveShortcuts(preferences.shortcuts);
     closeCompletion(view);
     const wanted = () =>
       viewRef.current === view &&
@@ -1410,6 +1450,7 @@ export function CodeReader({
           ? editorLanguageTools({
               projectId: tab.projectId,
               path: tab.path,
+              shortcut: (id) => shortcuts[id] ?? null,
               autoParameterInfo: preferences.autoParameterInfo,
               hoverEnabled: preferences.quickDocumentationOnHover,
               wanted,
@@ -1440,6 +1481,7 @@ export function CodeReader({
     canShowQuickDocumentation,
     preferences.quickDocumentationOnHover,
     preferences.autoParameterInfo,
+    preferences.shortcuts,
     pythonRevision,
   ]);
 

@@ -666,7 +666,8 @@ describe("App", () => {
     expect(screen.getByLabelText("终端字体")).toHaveTextContent("Maple Mono NF CN");
     await user.click(screen.getByRole("button", { name: "取消" }));
     expect(apiMock.saveSettings).toHaveBeenCalledTimes(2);
-    await user.keyboard("{Control>}[Comma]{/Control}");
+    // Settings follows the IDEA macOS keymap: ⌘,.
+    await user.keyboard("{Meta>}[Comma]{/Meta}");
     expect(screen.getByRole("dialog", { name: "设置" })).toBeInTheDocument();
     await user.click(
       within(screen.getByRole("navigation", { name: "设置分类" })).getByRole("button", {

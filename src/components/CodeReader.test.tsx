@@ -55,6 +55,7 @@ import { CodeReader, type CodeReaderHandle, type EditorTab, type SaveResult } fr
 import type { TextFile } from "../lib/types";
 import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
 import type { RecoveryRecord } from "../lib/api";
+import type { NavigationTarget } from "../lib/shortcuts";
 import { setLanguage } from "../lib/i18n";
 import { EditorState, StateEffect } from "@codemirror/state";
 import { pluginApi } from "../plugins/api";
@@ -101,6 +102,7 @@ function renderReader(
     preferences?: Preferences;
     withPlugins?: boolean;
     onGoToDefinition?: (position: { line: number; character: number }) => void;
+    onNavigate?: (target: NavigationTarget) => boolean;
   } = {},
 ) {
   const onDirtyChange = vi.fn();
@@ -134,6 +136,7 @@ function renderReader(
     reloadToken: 0,
     externalChangeToken: 0,
     onGoToDefinition: overrides.onGoToDefinition,
+    onNavigate: overrides.onNavigate,
     onStatus,
     onDirtyChange,
     onSaved,
@@ -151,6 +154,100 @@ async function editorContent(): Promise<HTMLElement> {
   await waitFor(() => expect(document.querySelector(".cm-content")).not.toBeNull());
   return document.querySelector(".cm-content") as HTMLElement;
 }
+
+it("binds navigation and problem keys from the configured shortcuts", async () => {
+  const onNavigate = vi.fn().mockReturnValue(true);
+  renderReader({
+    content: "const first = 1;\nconst second = 2;\n",
+    onNavigate,
+    preferences: { ...DEFAULT_PREFERENCES, shortcuts: { back: "F4", definition: "" } },
+  });
+  const view = EditorView.findFromDOM(await editorContent())!;
+  act(() =>
+    view.dispatch(
+      setDiagnostics(view.state, [{ from: 6, to: 11, severity: "error", message: "Problem" }]),
+    ),
+  );
+  view.focus();
+  // An unbound key falls through: nothing else uses ⌘B here.
+  expect(fireEvent.keyDown(view.contentDOM, { code: "KeyB", key: "b", metaKey: true })).toBe(true);
+  expect(onNavigate).not.toHaveBeenCalled();
+  act(() => view.dispatch({ selection: { anchor: 8 } }));
+  fireEvent.keyDown(view.contentDOM, {
+    code: "BracketRight",
+    key: "]",
+    metaKey: true,
+  });
+  expect(onNavigate).toHaveBeenCalledOnce();
+  expect(onNavigate).toHaveBeenLastCalledWith("forward");
+  fireEvent.keyDown(view.contentDOM, { code: "ArrowUp", key: "ArrowUp", altKey: true });
+  expect(view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to)).toBe(
+    "first",
+  );
+  fireEvent.keyDown(view.contentDOM, { code: "ArrowDown", key: "ArrowDown", altKey: true });
+  expect(view.state.selection.main.from).toBe(view.state.selection.main.to);
+  // F2 moves to the next problem instead of renaming the file.
+  fireEvent.keyDown(view.contentDOM, { code: "F2", key: "F2" });
+  expect(view.state.selection.main.from).toBe(6);
+  fireEvent.keyDown(view.contentDOM, { code: "F4", key: "F4" });
+  expect(onNavigate).toHaveBeenCalledTimes(2);
+  expect(onNavigate).toHaveBeenLastCalledWith("back");
+});
+
+it("keeps the bold shortcut in Markdown files instead of navigating", async () => {
+  const onNavigate = vi.fn().mockReturnValue(true);
+  const { ref } = renderReader({
+    filename: "README.md",
+    content: "word",
+    onNavigate,
+    preferences: {
+      ...DEFAULT_PREFERENCES,
+      shortcuts: { definition: /Mac/.test(navigator.platform) ? "Mod+KeyB" : "Ctrl+KeyB" },
+    },
+  });
+  const view = await markdownEditor("word".length);
+  pressMarkdownShortcut(view, "b");
+  expect(ref.current!.getText()).toContain("**");
+  expect(onNavigate).not.toHaveBeenCalled();
+});
+
+it("runs Markdown navigation when the shortcut does not match formatting", async () => {
+  const onNavigate = vi.fn().mockReturnValue(true);
+  renderReader({
+    filename: "README.md",
+    content: "word",
+    onNavigate,
+    preferences: { ...DEFAULT_PREFERENCES, shortcuts: { definition: "F8" } },
+  });
+  const view = await markdownEditor(0);
+  fireEvent.keyDown(view.contentDOM, { code: "F8", key: "F8" });
+  fireEvent.keyDown(view.contentDOM, { code: "F7", key: "F7", altKey: true });
+  expect(onNavigate.mock.calls).toEqual([["definition"], ["references"]]);
+});
+
+it("rebinds file search in the editor and search panel, then clears it", async () => {
+  const preferences = { ...DEFAULT_PREFERENCES, shortcuts: { find: "F8" } };
+  const { props, rerender } = renderReader({ preferences });
+  const view = EditorView.findFromDOM(await editorContent())!;
+  view.focus();
+  const searchInput = () =>
+    view.dom.querySelector<HTMLInputElement>('.cm-search input[name="search"]');
+  const defaultShortcut = { code: "KeyF", key: "f", metaKey: true };
+  fireEvent.keyDown(view.contentDOM, defaultShortcut);
+  expect(searchInput()).toBeNull();
+
+  const shortcut = { code: "F8", key: "F8" };
+  fireEvent.keyDown(view.contentDOM, shortcut);
+  expect(searchInput()).toHaveFocus();
+  expect(fireEvent.keyDown(searchInput()!, shortcut)).toBe(false);
+  fireEvent.keyDown(searchInput()!, { key: "Escape" });
+  expect(searchInput()).toBeNull();
+
+  rerender(<CodeReader {...props} preferences={{ ...preferences, shortcuts: { find: "" } }} />);
+  fireEvent.keyDown(view.contentDOM, shortcut);
+  fireEvent.keyDown(view.contentDOM, defaultShortcut);
+  expect(searchInput()).toBeNull();
+});
 
 it("opens the current file's problems from the icon and jumps to the chosen location", async () => {
   renderReader({ content: "const first = 1;\nconst second = 2;\n" });
@@ -536,13 +633,7 @@ describe("CodeReader editing", () => {
     const openSearch = () => {
       act(() => view.focus());
       if (entry === "menu") act(() => ref.current!.openFileSearch());
-      else
-        fireEvent.keyDown(content, {
-          key: "f",
-          code: "KeyF",
-          metaKey: /Mac/.test(navigator.platform),
-          ctrlKey: !/Mac/.test(navigator.platform),
-        });
+      else fireEvent.keyDown(content, { key: "f", code: "KeyF", metaKey: true });
     };
     openSearch();
     const search = screen.getByRole("textbox", { name: "查找" });

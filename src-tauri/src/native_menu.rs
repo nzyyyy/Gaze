@@ -152,11 +152,14 @@ mod macos {
     struct NativeMenu(HashMap<String, MenuItemKind<tauri::Wry>>);
 
     pub fn install(app: &tauri::App) -> tauri::Result<()> {
-        let action = |id: &str, text: &str, key: Option<&str>| {
-            MenuItem::with_id(app, format!("gaze.{id}"), text, false, key)
+        // No accelerators here: macOS does not dispatch keys registered after the
+        // menu exists, and disabled items drop theirs. The webview handles every
+        // shortcut, so the menu only lists items.
+        let action = |id: &str, text: &str| {
+            MenuItem::with_id(app, format!("gaze.{id}"), text, false, None::<&str>)
         };
-        let check = |id: &str, text: &str, key: Option<&str>| {
-            CheckMenuItem::with_id(app, format!("gaze.{id}"), text, false, false, key)
+        let check = |id: &str, text: &str| {
+            CheckMenuItem::with_id(app, format!("gaze.{id}"), text, false, false, None::<&str>)
         };
         let separator = || PredefinedMenuItem::separator(app);
         let app_menu = Submenu::with_items(
@@ -174,7 +177,7 @@ mod macos {
                     }),
                 )?,
                 &separator()?,
-                &action("settings", "设置…", Some("Cmd+,"))?,
+                &action("settings", "设置…")?,
                 &separator()?,
                 &PredefinedMenuItem::services(app, Some("服务"))?,
                 &separator()?,
@@ -183,7 +186,7 @@ mod macos {
                 &PredefinedMenuItem::show_all(app, Some("全部显示"))?,
                 &separator()?,
                 // The native quit item bypasses the editor's save/conflict protection.
-                &action("quit", "退出 Gaze", Some("Cmd+Q"))?,
+                &action("quit", "退出 Gaze")?,
             ],
         )?;
         let file_menu = Submenu::with_items(
@@ -191,13 +194,13 @@ mod macos {
             "文件",
             true,
             &[
-                &action("open-file", "打开文件…", Some("Cmd+O"))?,
-                &action("import-project", "导入项目目录…", Some("Cmd+Shift+O"))?,
+                &action("open-file", "打开文件…")?,
+                &action("import-project", "导入项目目录…")?,
                 &separator()?,
-                &action("save", "保存", Some("Cmd+S"))?,
-                &action("close-tab", "关闭标签页", Some("Cmd+W"))?,
+                &action("save", "保存")?,
+                &action("close-tab", "关闭标签页")?,
                 &separator()?,
-                &check("auto-save", "自动保存", None)?,
+                &check("auto-save", "自动保存")?,
             ],
         )?;
         let edit_menu = Submenu::with_items(
@@ -213,14 +216,14 @@ mod macos {
                 &PredefinedMenuItem::paste(app, Some("粘贴"))?,
                 &PredefinedMenuItem::select_all(app, Some("全选"))?,
                 &separator()?,
-                &action("find", "文件内查找", None)?,
-                &action("search-workspace", "工作区搜索", Some("Cmd+Shift+F"))?,
+                &action("find", "文件内查找")?,
+                &action("search-workspace", "工作区搜索")?,
                 &separator()?,
-                &action("quick-fix", "快速修复", None)?,
-                &action("organize-imports", "整理导入", None)?,
-                &action("parameter-info", "参数提示", None)?,
-                &action("quick-documentation", "快速文档", None)?,
-                &action("format-code", "格式化代码", None)?,
+                &action("quick-fix", "快速修复")?,
+                &action("organize-imports", "整理导入")?,
+                &action("parameter-info", "参数提示")?,
+                &action("quick-documentation", "快速文档")?,
+                &action("format-code", "格式化代码")?,
             ],
         )?;
         let theme_menu = Submenu::with_items(
@@ -228,9 +231,9 @@ mod macos {
             "主题",
             true,
             &[
-                &check("theme-system", "跟随系统", None)?,
-                &check("theme-light", "浅色", None)?,
-                &check("theme-dark", "深色", None)?,
+                &check("theme-system", "跟随系统")?,
+                &check("theme-light", "浅色")?,
+                &check("theme-dark", "深色")?,
             ],
         )?;
         let view_menu = Submenu::with_items(
@@ -238,18 +241,18 @@ mod macos {
             "视图",
             true,
             &[
-                &check("files", "文件侧栏", None)?,
-                &check("search", "搜索侧栏", None)?,
-                &check("symbols", "符号与大纲", None)?,
-                &check("git", "Git 管理", Some("Cmd+Shift+G"))?,
+                &check("files", "文件侧栏")?,
+                &check("search", "搜索侧栏")?,
+                &check("symbols", "符号与大纲")?,
+                &check("git", "Git 管理")?,
                 &separator()?,
                 // The webview handles the physical key before editor and terminal keymaps.
-                &check("terminal", "终端", None)?,
-                &action("toggle-split", "切换右侧编辑区", Some("Cmd+Backslash"))?,
+                &check("terminal", "终端")?,
+                &action("toggle-split", "切换右侧编辑区")?,
                 &separator()?,
-                &check("word-wrap", "自动换行", None)?,
-                &check("line-numbers", "显示行号", None)?,
-                &check("status-bar", "显示状态栏", None)?,
+                &check("word-wrap", "自动换行")?,
+                &check("line-numbers", "显示行号")?,
+                &check("status-bar", "显示状态栏")?,
                 &theme_menu,
             ],
         )?;
@@ -258,14 +261,14 @@ mod macos {
             "前往",
             true,
             &[
-                &action("back", "后退", Some("Cmd+Alt+Left"))?,
-                &action("forward", "前进", Some("Cmd+Alt+Right"))?,
+                &action("back", "后退")?,
+                &action("forward", "前进")?,
                 &separator()?,
-                &action("quick-open", "快速打开", Some("Cmd+P"))?,
+                &action("quick-open", "快速打开")?,
                 &separator()?,
-                &action("definition", "跳转到定义", Some("F12"))?,
-                &action("references", "查找引用", Some("Shift+F12"))?,
-                &action("implementation", "查找实现", None)?,
+                &action("definition", "跳转到定义")?,
+                &action("references", "查找引用")?,
+                &action("implementation", "查找实现")?,
             ],
         )?;
         let window_menu = Submenu::with_items(
@@ -361,6 +364,8 @@ mod macos {
                 _ => {}
             }
         }
+        // Accelerators stay as configured at creation: macOS does not dispatch
+        // keys set afterwards, so the webview handles every shortcut itself.
         Ok(())
     }
 }

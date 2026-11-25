@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{
     cache::Cache,
     color_schemes::ColorSchemes,
@@ -50,6 +52,8 @@ pub struct Preferences {
     pub typescript_enabled: bool,
     pub ai_completion_enabled: bool,
     pub ai_completion: crate::ai_completion::Config,
+    /// Customised shortcuts by command id; an empty string removes the default.
+    pub shortcuts: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
@@ -105,6 +109,7 @@ impl Default for Preferences {
             typescript_enabled: true,
             ai_completion_enabled: false,
             ai_completion: Default::default(),
+            shortcuts: HashMap::new(),
         }
     }
 }

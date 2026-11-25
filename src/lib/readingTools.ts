@@ -1,7 +1,7 @@
 import { selectParentSyntax } from "@codemirror/commands";
 import { foldNodeProp, syntaxTree } from "@codemirror/language";
 import { StateEffect, StateField, type EditorSelection, type EditorState } from "@codemirror/state";
-import { EditorView, ViewPlugin, keymap, type ViewUpdate } from "@codemirror/view";
+import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { appendHighlightedText } from "./highlightedText";
 import { t } from "./i18n";
 
@@ -16,41 +16,34 @@ const selectionHistory = StateField.define<readonly EditorSelection[]>({
   },
 });
 
-export const syntaxSelection = [
-  selectionHistory,
-  keymap.of([
-    {
-      key: "Mod-Alt-Shift-ArrowUp",
-      run: (view) =>
-        selectParentSyntax({
-          state: view.state,
-          dispatch: (transaction) =>
-            view.dispatch({
-              selection: transaction.selection,
-              scrollIntoView: true,
-              effects: setSelectionHistory.of([
-                ...view.state.field(selectionHistory),
-                view.state.selection,
-              ]),
-            }),
-        }),
-    },
-    {
-      key: "Mod-Alt-Shift-ArrowDown",
-      run(view) {
-        const history = view.state.field(selectionHistory);
-        const selection = history.at(-1);
-        if (!selection) return false;
-        view.dispatch({
-          selection,
-          effects: setSelectionHistory.of(history.slice(0, -1)),
-          scrollIntoView: true,
-        });
-        return true;
-      },
-    },
-  ]),
-];
+export const syntaxSelection = [selectionHistory];
+
+export function extendSyntaxSelection(view: EditorView) {
+  return selectParentSyntax({
+    state: view.state,
+    dispatch: (transaction) =>
+      view.dispatch({
+        selection: transaction.selection,
+        scrollIntoView: true,
+        effects: setSelectionHistory.of([
+          ...view.state.field(selectionHistory),
+          view.state.selection,
+        ]),
+      }),
+  });
+}
+
+export function shrinkSyntaxSelection(view: EditorView) {
+  const history = view.state.field(selectionHistory, false);
+  const selection = history?.at(-1);
+  if (!history || !selection) return false;
+  view.dispatch({
+    selection,
+    effects: setSelectionHistory.of(history.slice(0, -1)),
+    scrollIntoView: true,
+  });
+  return true;
+}
 
 export function stickyHeaders(state: EditorState, lineNumber: number): number[] {
   const { doc } = state;
