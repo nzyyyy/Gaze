@@ -481,7 +481,7 @@ describe("App editor panes", () => {
     expect(screen.getByRole("region", { name: "终端面板" })).toBeVisible();
   });
 
-  it("saves and searches the active file, disabling save while readonly or saving", async () => {
+  it("saves the active file and disables save while readonly or saving", async () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(await screen.findByText("README.md"));
@@ -489,9 +489,7 @@ describe("App editor panes", () => {
     act(() => editorStatusHandler.current!(editableStatus));
     expect(nativeMenu.state!.canSave).toBe(true);
     await menuAction("save");
-    await menuAction("find");
     expect(saveSpy).toHaveBeenCalledOnce();
-    expect(fileSearchSpy).toHaveBeenCalledOnce();
     for (const status of [
       { ...editableStatus, readOnly: true },
       { ...editableStatus, saving: true },
@@ -1096,27 +1094,35 @@ describe("App editor panes", () => {
     );
   });
 
-  it("restores each pane's selected tab independently", async () => {
+  it("restores split pane ownership, the active pane and each pane's selected tab", async () => {
     const user = userEvent.setup();
     localStorage.setItem(
       "gaze:session",
       JSON.stringify({
         version: 1,
         splitOpen: true,
-        activePane: "secondary",
+        activePane: "primary",
         tabs: [
           { projectId: "p1", path: "README.md", pane: "primary" },
           { projectId: "p1", path: "package.json", pane: "primary" },
           { projectId: "p1", path: "src/a.ts", pane: "secondary" },
         ],
-        active: { projectId: "p1", path: "src/a.ts", pane: "secondary" },
+        active: { projectId: "p1", path: "package.json", pane: "primary" },
         views: {},
         tree: { openProjects: [], expandedDirectories: [] },
       }),
     );
     const first = render(<App />);
-    await user.click(await screen.findByRole("tab", { name: "README.md" }));
-    await user.click(screen.getByRole("tab", { name: "a.ts" }));
+    const readme = await screen.findByRole("tab", { name: "README.md" });
+    const source = screen.getByRole("tab", { name: "a.ts" });
+    expect(screen.getAllByRole("tablist")).toHaveLength(2);
+    expect(readme.closest(".editor-pane")).toHaveAttribute("data-pane", "primary");
+    expect(source.closest(".editor-pane")).toHaveAttribute("data-pane", "secondary");
+    expect(screen.getByRole("button", { name: "关闭右侧编辑区" })).toBeInTheDocument();
+    await menuAction("find");
+    expect(fileSearchSpy).toHaveBeenLastCalledWith("p1\u0000package.json");
+    await user.click(readme);
+    await user.click(source);
     first.unmount();
     render(<App />);
     expect(
@@ -1125,34 +1131,6 @@ describe("App editor panes", () => {
     expect(
       screen.getByTestId("editor-p1\u0000src/a.ts").closest(".document-panel"),
     ).not.toHaveAttribute("hidden");
-  });
-
-  it("restores split pane ownership and the active pane from the session", async () => {
-    localStorage.setItem(
-      "gaze:session",
-      JSON.stringify({
-        version: 1,
-        tabs: [
-          { projectId: "p1", path: "README.md", pane: "primary" },
-          { projectId: "p1", path: "package.json", pane: "secondary" },
-        ],
-        active: { projectId: "p1", path: "README.md", pane: "primary" },
-        activePane: "primary",
-        splitOpen: true,
-        views: {},
-        tree: { openProjects: ["p1"], expandedDirectories: [] },
-      }),
-    );
-    render(<App />);
-    await screen.findByRole("tab", { name: "README.md" });
-    expect(document.querySelectorAll(".editor-pane")).toHaveLength(2);
-    expect(
-      screen.getByTestId("editor-p1\u0000README.md").closest(".document-panel"),
-    ).not.toHaveAttribute("hidden");
-    expect(
-      screen.getByTestId("editor-p1\u0000package.json").closest(".document-panel"),
-    ).not.toHaveAttribute("hidden");
-    expect(screen.getByRole("button", { name: "关闭右侧编辑区" })).toBeInTheDocument();
   });
 
   it("toggles the terminal before a focused input can consume Ctrl+Backquote", async () => {
@@ -2002,6 +1980,12 @@ describe("App editor panes", () => {
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "关闭 Git 工作区" })).not.toBeInTheDocument();
     await user.click(within(rail).getByRole("button", { name: "项目文件" }));
+    expect(screen.queryByRole("region", { name: "Git 工作区" })).not.toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: "README.md" })).toBeVisible();
+    expect(within(rail).getByRole("button", { name: "Git 管理" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
     expect(screen.getByRole("tab", { name: "README.md" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("editor-p1\u0000README.md")).toBe(editor);
     expect(editor).toBeVisible();
@@ -2258,21 +2242,6 @@ describe("App editor panes", () => {
     expect(second).toHaveValue("历史 / abc123");
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
     expect(screen.getAllByRole("region", { name: "Git 工作区" })).toHaveLength(1);
-  });
-
-  it("replaces Git with project files when its sidebar icon is selected", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-    await screen.findByRole("button", { name: "README.md" });
-    await user.click(screen.getByRole("button", { name: "Git 管理" }));
-    expect(await screen.findByRole("region", { name: "Git 工作区" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "项目文件" }));
-    expect(screen.getByRole("button", { name: "README.md" })).toBeVisible();
-    expect(screen.queryByRole("region", { name: "Git 工作区" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Git 管理" })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
   });
 
   it("opens a newly created file and moves within a selected parent", async () => {

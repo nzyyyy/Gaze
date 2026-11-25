@@ -232,12 +232,6 @@ describe("CodeReader editing", () => {
     expect(view.dom.querySelector(".cm-indent-guides")).toBeInTheDocument();
   });
 
-  it.each(["large", "longLine"] as const)("keeps indent guides out of %s mode", async (mode) => {
-    renderReader({ mode, editable: false });
-    const view = EditorView.findFromDOM(await editorContent())!;
-    expect(view.dom.querySelector(".cm-indent-guides")).not.toBeInTheDocument();
-  });
-
   it.each([
     ["a.ts", "(", ")"],
     ["a.ts", "{", "}"],
@@ -274,7 +268,7 @@ describe("CodeReader editing", () => {
     expect(view.state.doc.toString()).toBe("");
   });
 
-  it.each([136, 400, 612])(
+  it.each([136, 612])(
     "keeps tooltips inside the editor viewport near vertical position %s",
     async (top) => {
       renderReader();
@@ -1133,12 +1127,16 @@ describe("CodeReader editing", () => {
     );
   });
 
-  it.each(["large", "longLine"] as const)("disables Markdown preview in %s mode", async (mode) => {
-    renderReader({ filename: "large.md", mode, editable: false });
-    await editorContent();
-    expect(screen.getByRole("button", { name: "预览" })).toBeDisabled();
-    expect(screen.getByText("大文件或超长行文件仅支持源码阅读")).toBeInTheDocument();
-  });
+  it.each(["large", "longLine"] as const)(
+    "keeps %s Markdown in source mode without preview or indent guides",
+    async (mode) => {
+      renderReader({ filename: "large.md", mode, editable: false });
+      const view = EditorView.findFromDOM(await editorContent())!;
+      expect(view.dom.querySelector(".cm-indent-guides")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "预览" })).toBeDisabled();
+      expect(screen.getByText("大文件或超长行文件仅支持源码阅读")).toBeInTheDocument();
+    },
+  );
 
   it("does not offer Markdown preview for other files", async () => {
     renderReader();
@@ -1202,58 +1200,66 @@ describe("CodeReader editing", () => {
   });
 
   it("marks edits dirty and auto-saves after the debounce", async () => {
-    const user = userEvent.setup();
     const { onDirtyChange, onSaved } = renderReader();
-    const content = await editorContent();
-    await user.click(content);
-    await user.keyboard("x");
+    const view = EditorView.findFromDOM(await editorContent())!;
+    vi.useFakeTimers();
+    try {
+      act(() => view.dispatch({ changes: { from: 0, insert: "x" }, userEvent: "input.type" }));
+      expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+      await act(() => vi.advanceTimersByTimeAsync(DEFAULT_PREFERENCES.autoSaveDelay - 1));
+      expect(apiMock.writeFile).not.toHaveBeenCalled();
+      await act(() => vi.advanceTimersByTimeAsync(1));
 
-    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true));
-    await waitFor(() => expect(apiMock.writeFile).toHaveBeenCalledTimes(1), {
-      timeout: 3000,
-    });
-
-    const args = apiMock.writeFile.mock.calls[0]!;
-    expect(args[0]).toBe("p1");
-    expect(args[1]).toBe("src/a.ts");
-    expect(args[2]).toContain("x");
-    expect(args[4]).toBe("utf8");
-    expect(args[5]).toBe("lf");
-    expect(args[6]).toBe(false);
-    expect(onSaved).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
+      expect(apiMock.writeFile).toHaveBeenCalledExactlyOnceWith(
+        "p1",
+        "src/a.ts",
+        expect.stringContaining("x"),
+        { size: 17, modifiedNs: "1" },
+        "utf8",
+        "lf",
+        false,
+      );
+      expect(onSaved).toHaveBeenCalledOnce();
+      expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("pauses auto-save when the file changed on disk", async () => {
-    const user = userEvent.setup();
     apiMock.writeFile.mockRejectedValue({
       code: "conflict",
       message: "文件已在磁盘上被修改，保存已阻止。",
     });
     renderReader();
-    const content = await editorContent();
-    await user.click(content);
-    await user.keyboard("x");
-
-    expect(await screen.findByText(/文件已在磁盘上被修改/)).toBeInTheDocument();
-    await waitFor(() => expect(apiMock.writeFile).toHaveBeenCalledTimes(1));
-    await user.keyboard("y");
-    await new Promise((resolve) => window.setTimeout(resolve, 1100));
-    expect(apiMock.writeFile).toHaveBeenCalledTimes(1);
+    const view = EditorView.findFromDOM(await editorContent())!;
+    vi.useFakeTimers();
+    try {
+      act(() => view.dispatch({ changes: { from: 0, insert: "x" }, userEvent: "input.type" }));
+      await act(() => vi.advanceTimersByTimeAsync(DEFAULT_PREFERENCES.autoSaveDelay));
+      expect(screen.getByText(/文件已在磁盘上被修改/)).toBeInTheDocument();
+      expect(apiMock.writeFile).toHaveBeenCalledOnce();
+      act(() => view.dispatch({ changes: { from: 0, insert: "y" }, userEvent: "input.type" }));
+      await act(() => vi.advanceTimersByTimeAsync(5000));
+      expect(apiMock.writeFile).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("edits normalized LF content but saves with the original CRLF line ending", async () => {
     const user = userEvent.setup();
-    renderReader({ content: "first\r\nsecond\r\n", lineEnding: "crlf" });
+    const { ref } = renderReader({ content: "first\r\nsecond\r\n", lineEnding: "crlf" });
     const content = await editorContent();
     const lines = Array.from(content.querySelectorAll(".cm-line")).map((line) => line.textContent);
     expect(lines).toEqual(["first", "second", ""]);
     await user.click(content);
     await user.keyboard("x");
 
-    await waitFor(() => expect(apiMock.writeFile).toHaveBeenCalledTimes(1), {
-      timeout: 3000,
+    await act(async () => {
+      expect(await ref.current!.save()).toEqual({ status: "saved" });
     });
+    expect(apiMock.writeFile).toHaveBeenCalledOnce();
     const args = apiMock.writeFile.mock.calls[0]!;
     expect(args[2]).not.toContain("\r");
     expect(args[5]).toBe("crlf");

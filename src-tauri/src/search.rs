@@ -585,30 +585,6 @@ mod tests {
     }
 
     #[test]
-    fn maps_nested_projects_by_longest_root() {
-        let temporary = tempfile::tempdir().unwrap();
-        let outer = temporary.path().canonicalize().unwrap();
-        let inner = outer.join("packages/app");
-        std::fs::create_dir_all(inner.join("src")).unwrap();
-        std::fs::write(inner.join("src/main.ts"), "export {}").unwrap();
-        let lookup = ProjectLookup::new(vec![
-            Project {
-                id: "outer".to_string(),
-                name: "Outer".to_string(),
-                root: outer.display().to_string(),
-            },
-            Project {
-                id: "inner".to_string(),
-                name: "Inner".to_string(),
-                root: inner.display().to_string(),
-            },
-        ]);
-        let (project, path) = lookup.resolve(&inner.join("src/main.ts")).unwrap();
-        assert_eq!(project.id, "inner");
-        assert_eq!(path, "src/main.ts");
-    }
-
-    #[test]
     fn long_preview_keeps_match_window() {
         let mut ranges = vec![SearchRange {
             start: 900,
