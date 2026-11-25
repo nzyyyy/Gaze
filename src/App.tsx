@@ -43,6 +43,7 @@ import { LocationPicker } from "./components/LocationPicker";
 import { QuickOpen } from "./components/QuickOpen";
 import { SearchPanel } from "./components/SearchPanel";
 import { SettingsDialog } from "./components/SettingsDialog";
+import type { EditorLanguageAction } from "./lib/editorLanguageTools";
 import { SidebarLayout, type SidebarLayoutHandle } from "./components/SidebarLayout";
 import { EditorSplitResizer } from "./components/EditorSplitResizer";
 import { SymbolPanel } from "./components/SymbolPanel";
@@ -1427,11 +1428,7 @@ export default function App() {
         // jumping to the declaration itself (IDEA behavior). The definition
         // points at the same file and line as the cursor when the symbol is
         // declared here.
-        if (
-          kind === "definition" &&
-          result.source === "lsp" &&
-          result.locations.length === 1
-        ) {
+        if (kind === "definition" && result.source === "lsp" && result.locations.length === 1) {
           const loc = result.locations[0]!;
           if (
             loc.path === tab.path &&
@@ -2086,6 +2083,7 @@ export default function App() {
     !editorStatus.readOnly &&
     !editorStatus.saving;
   const menuCanNavigate = menuHasFile && editorStatus !== null && !navigationBusy;
+  const menuCanUseEditorActions = menuHasFile && !!editorStatus?.canUseEditorActions;
   const menuState = useMemo<NativeMenuState>(
     () => ({
       language,
@@ -2101,6 +2099,7 @@ export default function App() {
       hasFile: menuHasFile,
       canSave: menuCanSave,
       canNavigate: menuCanNavigate,
+      canUseEditorActions: menuCanUseEditorActions,
       canGoBack: navigationHistory.back > 0,
       canGoForward: navigationHistory.forward > 0,
       splitOpen,
@@ -2125,6 +2124,7 @@ export default function App() {
       menuHasFile,
       menuCanSave,
       menuCanNavigate,
+      menuCanUseEditorActions,
       navigationHistory.back,
       navigationHistory.forward,
       splitOpen,
@@ -2137,6 +2137,18 @@ export default function App() {
       preferences.showStatusBar,
     ],
   );
+
+  const runEditorAction = (action: EditorLanguageAction) => {
+    if (
+      !activeTab ||
+      !menuCanUseEditorActions ||
+      fileOperationBusyRef.current ||
+      gitOperationBusyRef.current ||
+      closingTabsRef.current
+    )
+      return;
+    return editorsRef.current.get(activeTab.key)?.runEditorAction(action);
+  };
 
   const handleMenuAction = async (action: NativeMenuAction) => {
     if (
@@ -2207,6 +2219,12 @@ export default function App() {
         case "references":
         case "implementation":
           if (menuState.canNavigate) await runNavigation(action);
+          break;
+        case "quick-fix":
+        case "organize-imports":
+        case "parameter-info":
+        case "format-code":
+          await runEditorAction(action);
           break;
         case "theme-system":
         case "theme-light":

@@ -1677,6 +1677,172 @@ button:focus-visible,
 
 .editor-surface .cm-editor {
   height: 100%;
+  position: relative;
+}
+
+.cm-sticky-headers {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: var(--editor-bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.has-minimap .cm-sticky-headers {
+  right: var(--minimap-width, 110px);
+}
+
+.cm-sticky-headers > button {
+  display: block;
+  width: 100%;
+  padding: 0 12px 0 calc(var(--sticky-gutter, 0px) + 12px);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.cm-sticky-headers > button:hover {
+  background: var(--hover);
+}
+
+.editor-problems {
+  position: absolute;
+  top: 3px;
+  right: 24px;
+  left: 8px;
+  z-index: 6;
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+.has-minimap .editor-problems {
+  right: calc(var(--minimap-width, 110px) + 18px);
+}
+
+.editor-problems-trigger {
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  gap: 5px;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: transparent;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.editor-problem-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.editor-problem-count.is-error {
+  color: var(--danger);
+}
+
+.editor-problem-count.is-warning {
+  color: var(--icon-config);
+}
+
+.editor-problem-count.is-info {
+  color: var(--accent);
+}
+
+.editor-problems-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  width: min(340px, 100%);
+  max-height: min(260px, 45vh);
+  box-sizing: border-box;
+  overflow: auto;
+  margin: 0;
+  padding: 3px;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+}
+
+.editor-problems-panel button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 7px;
+  width: 100%;
+  padding: 6px;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.editor-problems-panel button:hover,
+.editor-problems-panel button:focus-visible {
+  background: var(--hover);
+}
+
+.editor-problem-message {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.editor-problem-location {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.cm-signature-help,
+.cm-quick-fixes {
+  max-width: min(440px, 75vw);
+  max-height: 210px;
+  overflow: auto;
+  padding: 6px;
+  overflow-wrap: anywhere;
+}
+
+.cm-signature-help strong {
+  color: var(--accent);
+}
+
+.cm-quick-fixes > button {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cm-quick-fixes > button:focus,
+.cm-quick-fixes > button:hover {
+  background: var(--hover);
+}
+
+.cm-quick-fixes > button[aria-disabled="true"] {
+  color: var(--text-muted);
 }
 
 .code-minimap {

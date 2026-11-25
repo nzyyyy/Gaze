@@ -1394,6 +1394,66 @@ async fn lsp_resolve_code_action(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+async fn lsp_editor_revision_matches(
+    project_id: String,
+    path: String,
+    content: String,
+    revision: lsp::DocumentRevision,
+    state: State<'_, AppState>,
+) -> Result<bool, CommandError> {
+    let project = state
+        .project(&project_id)
+        .await
+        .map_err(CommandError::from)?;
+    state
+        .lsp
+        .editor_revision_matches(&project, &path, &content, &revision)
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn lsp_signature_help(
+    project_id: String,
+    path: String,
+    content: String,
+    position: TextPosition,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<lsp::SignatureHelp>, CommandError> {
+    let project = state
+        .project(&project_id)
+        .await
+        .map_err(CommandError::from)?;
+    state
+        .lsp
+        .signature_help(&app, &project, &path, &content, position)
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn lsp_format(
+    project_id: String,
+    path: String,
+    content: String,
+    range: Option<lsp::LspRange>,
+    options: lsp::FormattingOptions,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<lsp::FormatResult, CommandError> {
+    let project = state
+        .project(&project_id)
+        .await
+        .map_err(CommandError::from)?;
+    state
+        .lsp
+        .format(&app, &project, &path, &content, range, options)
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 async fn start_search(
     request_id: String,
     query: String,
@@ -1572,6 +1632,9 @@ pub fn run() {
             find_implementations,
             lsp_code_actions,
             lsp_resolve_code_action,
+            lsp_editor_revision_matches,
+            lsp_signature_help,
+            lsp_format,
             start_search,
             continue_search,
             cancel_search,

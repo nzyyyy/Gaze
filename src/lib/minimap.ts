@@ -1,27 +1,13 @@
 import { t } from "./i18n";
-import { foldedRanges, highlightingFor, syntaxTree } from "@codemirror/language";
-import type { EditorState } from "@codemirror/state";
+import { foldedRanges, syntaxTree } from "@codemirror/language";
 import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
-import { highlightTree } from "@lezer/highlight";
+import { appendHighlightedText, syntaxTokens } from "./highlightedText";
 
 import { changeBlocksField } from "../git/editorChanges";
 
 const PADDING = 4;
 const PIXELS_PER_LINE = 4;
 const SVG_NS = "http://www.w3.org/2000/svg";
-
-function tokens(state: EditorState, from: number, to: number) {
-  const ranges: { from: number; to: number; classes: string }[] = [];
-  highlightTree(
-    syntaxTree(state),
-    { style: (tags) => highlightingFor(state, tags) },
-    (start, end, classes) =>
-      ranges.push({ from: Math.max(from, start), to: Math.min(to, end), classes }),
-    from,
-    to,
-  );
-  return ranges;
-}
 
 class Minimap {
   readonly dom = document.createElement("div");
@@ -239,7 +225,7 @@ class Minimap {
               if (column >= size.width) break;
               const end = Math.min(part.to, part.from + Math.ceil(size.width) * 2);
               const text = view.state.doc.sliceString(part.from, end);
-              const ranges = tokens(view.state, part.from, end);
+              const ranges = syntaxTokens(view.state, part.from, end);
               let token = 0;
               let position = part.from;
               for (const character of text) {
@@ -347,16 +333,7 @@ class Minimap {
         label.className = "code-minimap-preview-number";
         label.textContent = String(number);
         const code = document.createElement("span");
-        let position = source.from;
-        for (const token of tokens(state, source.from, end)) {
-          if (token.from > position) code.append(state.doc.sliceString(position, token.from));
-          const span = document.createElement("span");
-          span.className = token.classes;
-          span.textContent = state.doc.sliceString(token.from, token.to);
-          code.append(span);
-          position = token.to;
-        }
-        if (position < end) code.append(state.doc.sliceString(position, end));
+        appendHighlightedText(code, state, source.from, end);
         row.append(label, code);
         lines.push(row);
       }

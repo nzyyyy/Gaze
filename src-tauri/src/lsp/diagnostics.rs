@@ -61,12 +61,16 @@ impl<F: Fn(DiagnosticsUpdate)> Publisher<F> {
             return;
         }
         let index = TextIndex::new(&document.text);
-        let items = items
+        let (raw, items): (Vec<_>, Vec<_>) = items
             .iter()
             .take(1_000)
-            .filter_map(|item| normalize(item, &document.text, &index, encoding))
-            .collect::<Vec<_>>();
+            .filter_map(|item| {
+                normalize(item, &document.text, &index, encoding)
+                    .map(|normalized| (item.clone(), normalized))
+            })
+            .unzip();
         document.diagnostics = Some(items.clone());
+        document.raw_diagnostics = raw;
         let update = DiagnosticsUpdate {
             project_id: self.project.id.clone(),
             path,

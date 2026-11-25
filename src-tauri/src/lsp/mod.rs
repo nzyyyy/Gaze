@@ -2,6 +2,7 @@ mod client;
 mod code_action;
 mod completion;
 mod diagnostics;
+mod editor_tools;
 mod hover;
 mod positions;
 
@@ -19,6 +20,7 @@ use url::Url;
 pub use code_action::{CodeAction, CodeActionResolve, CodeActionResult, FileEdit, WorkspaceEdit};
 pub use completion::{CompletionItem, CompletionResolve, CompletionResult};
 pub use diagnostics::{DiagnosticSync, DiagnosticsUpdate};
+pub use editor_tools::{DocumentRevision, FormatResult, FormattingOptions, SignatureHelp};
 pub use hover::HoverContent;
 pub use positions::{LspPosition, LspRange, PositionEncoding, TextIndex};
 
@@ -62,6 +64,9 @@ struct ServerCapabilities {
     hover: bool,
     code_action: bool,
     code_action_resolve: bool,
+    signature_help: bool,
+    formatting: bool,
+    range_formatting: bool,
 }
 
 struct OpenDocument {
@@ -70,6 +75,7 @@ struct OpenDocument {
     text: Arc<String>,
     dirty: bool,
     diagnostics: Option<Vec<diagnostics::CodeDiagnostic>>,
+    raw_diagnostics: Vec<Value>,
 }
 
 struct LoadedDocument {
@@ -149,7 +155,19 @@ impl LspSession {
                         "willSaveWaitUntil": false,
                         "didSave": false
                     },
-                    "publishDiagnostics": { "versionSupport": true },
+                    "publishDiagnostics": { "versionSupport": true, "dataSupport": true },
+                    "signatureHelp": { "signatureInformation": {
+                        "parameterInformation": { "labelOffsetSupport": true },
+                        "activeParameterSupport": true
+                    } },
+                    "codeAction": {
+                        "codeActionLiteralSupport": { "codeActionKind": {
+                            "valueSet": ["", "quickfix", "source", "source.organizeImports"]
+                        } },
+                        "dataSupport": true,
+                        "disabledSupport": true,
+                        "resolveSupport": { "properties": ["edit"] }
+                    },
                     "definition": { "linkSupport": true },
                     "references": {},
                     "hover": { "contentFormat": ["markdown", "plaintext"] },
@@ -204,6 +222,12 @@ impl LspSession {
                 .unwrap_or(false),
             hover: capability_enabled(&server_capabilities, "hoverProvider"),
             code_action: capability_enabled(&server_capabilities, "codeActionProvider"),
+            signature_help: capability_enabled(&server_capabilities, "signatureHelpProvider"),
+            formatting: capability_enabled(&server_capabilities, "documentFormattingProvider"),
+            range_formatting: capability_enabled(
+                &server_capabilities,
+                "documentRangeFormattingProvider",
+            ),
             code_action_resolve: server_capabilities
                 .pointer("/codeActionProvider/resolveProvider")
                 .and_then(Value::as_bool)
@@ -293,6 +317,7 @@ impl LspSession {
                         text: Arc::clone(&disk_text),
                         dirty: false,
                         diagnostics: None,
+                        raw_diagnostics: Vec::new(),
                     },
                 );
                 self.client.notify(
@@ -359,6 +384,7 @@ impl LspSession {
                         text: Arc::clone(&text),
                         dirty: true,
                         diagnostics: None,
+                        raw_diagnostics: Vec::new(),
                     },
                 );
                 self.client.notify(
@@ -403,6 +429,7 @@ impl LspSession {
         document.text = text;
         document.dirty = dirty;
         document.diagnostics = None;
+        document.raw_diagnostics.clear();
         self.client.notify(
             "textDocument/didChange",
             json!({
@@ -1152,36 +1179,68 @@ impl LspManager {
         range: LspRange,
         kinds: &[String],
     ) -> GazeResult<CodeActionResult> {
-        let session = self.session_for(app, project, relative_path).await?;
-        let mut actions = session
-            .code_action(relative_path, content, range, kinds)
-            .await?;
-        // Ruff fallback: pyright has no `source.organizeImports`; use Ruff's CLI
-        // to sort and remove unused imports when the server didn't offer one.
-        if is_python_extension(
-            Path::new(relative_path)
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or(""),
-        ) && kinds.iter().any(|k| k == "source.organizeImports")
-            && !actions.iter().any(|a| {
-                a.kind
-                    .as_deref()
-                    .is_some_and(|k| k.starts_with("source.organizeImports"))
+        let organize = is_python_path(relative_path)
+            && kinds.iter().any(|kind| kind == "source.organizeImports");
+        let mut result = match self.session_for(app, project, relative_path).await {
+            Ok(session) => {
+                session
+                    .code_action(relative_path, content, range, kinds)
+                    .await?
+            }
+            Err(GazeError::ToolMissing(_) | GazeError::Unsupported(_)) if organize => {
+                self.ensure_python_enabled()?;
+                CodeActionResult::default()
+            }
+            Err(error) => return Err(error),
+        };
+        if organize
+            && !result.actions.iter().any(|action| {
+                action.disabled_reason.is_none()
+                    && action
+                        .kind
+                        .as_deref()
+                        .is_some_and(|kind| kind.starts_with("source.organizeImports"))
             })
         {
-            if let Some(action) = self
-                .ruff_organize_imports(project, relative_path, content)
-                .await
-            {
-                actions.push(action);
+            let output = self
+                .run_ruff(
+                    project,
+                    relative_path,
+                    content,
+                    &[
+                        "check",
+                        "--extend-select",
+                        "I",
+                        "--fixable",
+                        "I,F401",
+                        "--fix",
+                        "--no-unsafe-fixes",
+                        "--exit-zero",
+                        "--quiet",
+                    ],
+                )
+                .await?;
+            let edits = diff_text_edits(content, &output);
+            result.source = "ruff".to_string();
+            result.message = None;
+            result.revision = None;
+            if !edits.is_empty() {
+                result.actions.push(CodeAction {
+                    title: "Optimize Imports (Ruff)".to_string(),
+                    kind: Some("source.organizeImports.ruff".to_string()),
+                    disabled_reason: None,
+                    is_preferred: true,
+                    edit: Some(WorkspaceEdit {
+                        files: vec![FileEdit {
+                            path: relative_path.to_string(),
+                            edits,
+                        }],
+                    }),
+                    resolve: None,
+                });
             }
         }
-        Ok(CodeActionResult {
-            actions,
-            source: "lsp".to_string(),
-            message: None,
-        })
+        Ok(result)
     }
 
     pub async fn resolve_code_action(
@@ -1198,69 +1257,69 @@ impl LspManager {
             .await
     }
 
-    /// Optimize Imports with Ruff's CLI for a Python file no language server
-    /// organizes. Returns `None` when Ruff is not installed or the file has no
-    /// import changes to make.
-    async fn ruff_organize_imports(
+    async fn run_ruff(
         &self,
         project: &Project,
-        relative_path: &str,
+        path: &str,
         content: &str,
-    ) -> Option<CodeAction> {
-        let ruff = self.find_ruff(project).await?;
-        let full_path = Path::new(&project.root).join(relative_path);
-        let original = content.to_string();
-        let stdin_text = original.clone();
-        let output = tokio::task::spawn_blocking(move || {
-            let mut command = std::process::Command::new(&ruff);
-            command.args([
-                "check",
-                "--extend-select",
-                "I",
-                "--fixable",
-                "I,F401",
-                "--fix",
-                "--exit-zero",
-                "--quiet",
-                "--stdin-filename",
-            ]);
-            command.arg(&full_path);
-            command.arg("-");
-            command.stdin(std::process::Stdio::piped());
-            command.stdout(std::process::Stdio::piped());
-            command.stderr(std::process::Stdio::piped());
-            if let Some(dir) = full_path.parent() {
-                command.current_dir(dir);
-            }
-            let mut child = command.spawn().ok()?;
-            use std::io::Write;
-            child.stdin.take()?.write_all(stdin_text.as_bytes()).ok()?;
-            let output = child.wait_with_output().ok()?;
-            if output.status.success() {
-                Some(String::from_utf8_lossy(&output.stdout).into_owned())
-            } else {
-                None
-            }
+        args: &[&str],
+    ) -> GazeResult<String> {
+        use tokio::io::AsyncWriteExt;
+
+        if content.len() as u64 > crate::files::MAX_FILE_BYTES {
+            return Err(GazeError::Unsupported(
+                "文件过大，无法运行 Ruff。".to_string(),
+            ));
+        }
+        let root = PathBuf::from(&project.root);
+        let path = path.to_string();
+        let full_path =
+            tokio::task::spawn_blocking(move || crate::files::resolve_within_root(&root, &path))
+                .await
+                .map_err(GazeError::Join)??;
+        let ruff = self.find_ruff(project).await.ok_or_else(|| {
+            GazeError::ToolMissing("请安装 Ruff 以处理此 Python 文件。".to_string())
+        })?;
+        let mut command = tokio::process::Command::new(ruff);
+        command
+            .args(args)
+            .arg("--stdin-filename")
+            .arg(&full_path)
+            .arg("-")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
+        if let Some(parent) = full_path.parent() {
+            command.current_dir(parent);
+        }
+        let error = |message: &str| GazeError::Message(message.to_string());
+        let mut child = command.spawn().map_err(|_| error("无法启动 Ruff。"))?;
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| error("无法向 Ruff 写入源码。"))?;
+        let write = async move { stdin.write_all(content.as_bytes()).await };
+        let output = tokio::time::timeout(REQUEST_TIMEOUT, async {
+            let (written, output) = tokio::join!(write, child.wait_with_output());
+            (written, output)
         })
         .await
-        .ok()??;
-        let edits = diff_text_edits(&original, &output);
-        if edits.is_empty() {
-            return None;
+        .map_err(|_| error("Ruff 请求超时。"))?;
+        let (written, output) = output;
+        let output = output.map_err(|_| error("无法读取 Ruff 的结果。"))?;
+        if !output.status.success() {
+            let detail = String::from_utf8_lossy(&output.stderr);
+            return Err(GazeError::Message(format!(
+                "Ruff 执行失败：{}",
+                detail.lines().take(3).collect::<Vec<_>>().join(" ")
+            )));
         }
-        Some(CodeAction {
-            title: "Optimize Imports (Ruff)".to_string(),
-            kind: Some("source.organizeImports.ruff".to_string()),
-            disabled_reason: None,
-            is_preferred: true,
-            edit: Some(WorkspaceEdit {
-                files: vec![FileEdit {
-                    path: relative_path.to_string(),
-                    edits,
-                }],
-            }),
-            resolve: None,
-        })
+        written.map_err(|_| error("无法向 Ruff 写入源码。"))?;
+        if output.stdout.len() as u64 > crate::files::MAX_FILE_BYTES {
+            return Err(error("Ruff 返回的内容过大。"));
+        }
+        String::from_utf8(output.stdout).map_err(|_| error("Ruff 返回了无效的 UTF-8。"))
     }
 
     /// Finds the `ruff` binary: first in the project's Python environment,
@@ -1420,16 +1479,20 @@ fn is_python_extension(extension: &str) -> bool {
         .any(|item| extension.eq_ignore_ascii_case(item))
 }
 
-/// Computes the minimal text edits that transform `original` into `formatted`.
-/// Uses a simple line-based diff: finds the first and last differing lines and
-/// replaces that span. Suitable for import organization where changes are
-/// typically confined to the file's header.
+fn is_python_path(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|ext| is_python_extension(&ext.to_ascii_lowercase()))
+}
+
+/// Replaces the span between the first and last differing lines.
 fn diff_text_edits(original: &str, formatted: &str) -> Vec<CompletionEdit> {
     if original == formatted {
         return Vec::new();
     }
-    let old_lines: Vec<&str> = original.lines().collect();
-    let new_lines: Vec<&str> = formatted.lines().collect();
+    let old_lines: Vec<&str> = original.split_inclusive('\n').collect();
+    let new_lines: Vec<&str> = formatted.split_inclusive('\n').collect();
     // Find the first differing line.
     let mut start = 0;
     while start < old_lines.len() && start < new_lines.len() && old_lines[start] == new_lines[start]
@@ -1446,21 +1509,13 @@ fn diff_text_edits(original: &str, formatted: &str) -> Vec<CompletionEdit> {
     // Compute UTF-16 offsets for the edit range.
     let from: usize = old_lines[..start]
         .iter()
-        .map(|l| l.encode_utf16().count() + 1)
+        .map(|l| l.encode_utf16().count())
         .sum();
     let to: usize = old_lines[..old_end]
         .iter()
-        .map(|l| l.encode_utf16().count() + 1)
+        .map(|l| l.encode_utf16().count())
         .sum();
-    let insert = if new_end > start {
-        let mut text = new_lines[start..new_end].join("\n");
-        // The replaced span in the original always ends with a newline
-        // (each line in `lines()` is followed by `\n` in the source).
-        text.push('\n');
-        text
-    } else {
-        String::new()
-    };
+    let insert = new_lines[start..new_end].concat();
     vec![CompletionEdit { from, to, insert }]
 }
 
@@ -2329,6 +2384,31 @@ mod tests {
                 .all(|item| item["severity"] != 1 || item["start"]["line"] != 0),
             "{diagnostics}"
         );
+        let buffer = "def draw(width: int, height: int):\n    pass\n\ndraw(1, 2)\n";
+        let signature = session
+            .signature_help(
+                "main.py",
+                buffer,
+                TextPosition {
+                    line: 3,
+                    character: 8,
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let value = serde_json::to_value(signature).unwrap();
+        assert!(
+            value["signatures"][0]["label"]
+                .as_str()
+                .unwrap()
+                .contains("height: int"),
+            "{value}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("main.py")).unwrap(),
+            document
+        );
         let tools = Tools {
             rg: None,
             ctags: None,
@@ -2520,6 +2600,68 @@ mod tests {
         let hover = serde_json::to_string(&hover).unwrap();
         assert!(hover.contains("findUser"), "{hover}");
         assert!(hover.contains("Finds a user by ID"), "{hover}");
+        let signature = session
+            .signature_help(
+                "src/你好.ts",
+                &hover_text,
+                TextPosition {
+                    line: hover_text.lines().count() as u32 - 1,
+                    character: character + 9,
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(serde_json::to_string(&signature)
+            .unwrap()
+            .contains("id: number"));
+        let unformatted = "const value={x:1,y:2};\n";
+        for range in [
+            None,
+            Some(LspRange {
+                start: LspPosition {
+                    line: 0,
+                    character: 0,
+                },
+                end: LspPosition {
+                    line: 0,
+                    character: 22,
+                },
+            }),
+        ] {
+            let format_options =
+                serde_json::from_value(json!({"tabSize": 2, "insertSpaces": true})).unwrap();
+            let formatted = session
+                .format("src/你好.ts", unformatted, range, format_options)
+                .await
+                .unwrap();
+            assert!(!serde_json::to_value(formatted).unwrap()["edits"]
+                .as_array()
+                .unwrap()
+                .is_empty());
+        }
+        let imports = "import { exportedWidget as z } from './dependency';\n\
+                       import { exportedWidget as a } from './dependency';\n\
+                       export const values = [a('a'), z('z')];\n";
+        let organized = session
+            .code_action(
+                "src/你好.ts",
+                imports,
+                LspRange {
+                    start: LspPosition {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: LspPosition {
+                        line: 3,
+                        character: 0,
+                    },
+                },
+                &["source.organizeImports".to_string()],
+            )
+            .await
+            .unwrap();
+        assert!(organized.actions.iter().any(|action| action.edit.is_some()));
         let completions = serde_json::to_value(completions).unwrap();
         assert!(completions["items"]
             .as_array()
@@ -2574,7 +2716,9 @@ mod tests {
             .unwrap()
             .contains("${1:name}"));
 
-        let invalid = format!("{edited}\nconst wrong: number = \"text\";\n");
+        let invalid = format!(
+            "{edited}\nconst wrong: number = \"text\";\nconst missing = exportedWidget('name');\n"
+        );
         let sync = session.sync_buffer("src/你好.ts", &invalid).await.unwrap();
         tokio::time::timeout(Duration::from_secs(12), async {
             while let Some(batch) = diagnostics_rx.recv().await {
@@ -2583,6 +2727,12 @@ mod tests {
                     && batch["items"].as_array().unwrap().iter().any(|item| {
                         item["severity"] == 1
                             && item["message"].as_str().unwrap().contains("not assignable")
+                    })
+                    && batch["items"].as_array().unwrap().iter().any(|item| {
+                        item["message"]
+                            .as_str()
+                            .unwrap()
+                            .contains("Cannot find name 'exportedWidget'")
                     })
                 {
                     return;
@@ -2593,7 +2743,42 @@ mod tests {
         .await
         .expect("TypeScript should publish a type error for the unsaved buffer");
 
+        let line = invalid.lines().count() as u32 - 1;
+        let position = LspPosition {
+            line,
+            character: "const missing = ".len() as u32,
+        };
+        let fixes = session
+            .code_action(
+                "src/你好.ts",
+                &invalid,
+                LspRange {
+                    start: position,
+                    end: position,
+                },
+                &["quickfix".to_string()],
+            )
+            .await
+            .unwrap();
+        let revision = fixes.revision.unwrap();
+        assert!(
+            fixes
+                .actions
+                .iter()
+                .any(|action| action.title.contains("import") && action.edit.is_some()),
+            "{:?}",
+            fixes.actions
+        );
         let fixed = session.sync_buffer("src/你好.ts", &edited).await.unwrap();
+        assert!(
+            !session
+                .document_matches(
+                    &session.document_uri("src/你好.ts").unwrap(),
+                    &revision,
+                    &invalid
+                )
+                .await
+        );
         tokio::time::timeout(Duration::from_secs(12), async {
             while let Some(batch) = diagnostics_rx.recv().await {
                 if batch["version"] == fixed.version
@@ -2743,5 +2928,12 @@ mod tests {
         assert_eq!(edits.len(), 1);
         // "你好\n" = 2 UTF-16 units + 1 for newline = 3.
         assert_eq!(edits[0].from, 3);
+    }
+
+    #[test]
+    fn diff_text_edits_handles_a_missing_final_newline() {
+        let edits = diff_text_edits("print('😀')", "print(\"😀\")\n");
+        assert_eq!(edits[0].to, "print('😀')".encode_utf16().count());
+        assert_eq!(edits[0].insert, "print(\"😀\")\n");
     }
 }

@@ -1,6 +1,7 @@
 use super::*;
 
 use super::completion::{parse_edit, CompletionEdit};
+use super::editor_tools::{encoded_range, DocumentRevision, RequestDocument};
 
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -8,6 +9,7 @@ pub struct CodeActionResult {
     pub actions: Vec<CodeAction>,
     pub source: String,
     pub message: Option<String>,
+    pub revision: Option<DocumentRevision>,
 }
 
 #[derive(Debug, Serialize)]
@@ -24,8 +26,9 @@ pub struct CodeAction {
 
 #[derive(Debug, Serialize, serde::Deserialize)]
 pub struct CodeActionResolve {
-    pub session: String,
-    pub action: Value,
+    path: String,
+    revision: DocumentRevision,
+    action: Value,
 }
 
 #[derive(Debug, Serialize)]
@@ -37,8 +40,6 @@ pub struct WorkspaceEdit {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileEdit {
-    /// Project-relative path when the file belongs to the session's project,
-    /// otherwise the absolute path (external files, library sources).
     pub path: String,
     pub edits: Vec<CompletionEdit>,
 }
@@ -46,89 +47,86 @@ pub struct FileEdit {
 impl LspSession {
     pub(super) async fn code_action(
         &self,
-        relative_path: &str,
+        path: &str,
         content: &str,
         range: LspRange,
         kinds: &[String],
-    ) -> GazeResult<Vec<CodeAction>> {
+    ) -> GazeResult<CodeActionResult> {
         if !self.capabilities.code_action {
-            return Ok(Vec::new());
+            return Ok(CodeActionResult {
+                source: "lsp".to_string(),
+                message: Some("当前语言服务器不支持代码操作。".to_string()),
+                ..Default::default()
+            });
         }
-        self.sync_buffer(relative_path, content).await?;
-        let uri = Url::from_file_path(Path::new(&self.project.root).join(relative_path))
-            .map_err(|_| GazeError::InvalidPath("无法将文件路径转换为 LSP URI。".to_string()))?;
-        let index = TextIndex::new(content);
-        let start = index.utf16_to_lsp(
-            content,
-            TextPosition {
-                line: range.start.line,
-                character: range.start.character,
-            },
-            self.encoding,
-        )?;
-        let end = index.utf16_to_lsp(
-            content,
-            TextPosition {
-                line: range.end.line,
-                character: range.end.character,
-            },
-            self.encoding,
-        )?;
-        let params = json!({
-            "textDocument": { "uri": uri },
-            "range": { "start": start, "end": end },
-            "context": {
-                "diagnostics": [],
-                "only": kinds,
-                "triggerKind": 1,
-            },
-        });
+        let doc = self.request_document(path, content).await?;
+        let range = encoded_range(&doc.index, content, range, self.encoding)?;
+        let diagnostics = self.diagnostics_in_range(&doc, range).await;
+        self.ensure_current(&doc, content).await?;
         let result = self
             .client
-            .request("textDocument/codeAction", params, REQUEST_TIMEOUT)
+            .request(
+                "textDocument/codeAction",
+                json!({
+                    "textDocument": { "uri": doc.uri },
+                    "range": range,
+                    "context": { "diagnostics": diagnostics, "only": kinds, "triggerKind": 1 },
+                }),
+                REQUEST_TIMEOUT,
+            )
             .await?;
-        let items = result.as_array().cloned().unwrap_or_default();
-        let mut actions = Vec::new();
-        for item in items {
-            if let Some(action) = self.normalize_action(&item, content, &index) {
-                actions.push(action);
-            }
-        }
-        Ok(actions)
+        self.ensure_current(&doc, content).await?;
+        let actions = result
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|item| self.normalize_action(item, path, content, &doc))
+            .collect();
+        Ok(CodeActionResult {
+            actions,
+            source: "lsp".to_string(),
+            message: None,
+            revision: Some(doc.revision),
+        })
     }
 
     pub(super) async fn resolve_code_action(
         &self,
-        relative_path: &str,
+        path: &str,
         content: &str,
         resolve: CodeActionResolve,
     ) -> GazeResult<Option<CodeAction>> {
-        if !self.capabilities.code_action_resolve || resolve.session != self.id {
+        if !self.capabilities.code_action_resolve || path != resolve.path {
             return Ok(None);
         }
-        let resolved = self
+        let doc = RequestDocument {
+            uri: self.document_uri(path)?,
+            index: TextIndex::new(content),
+            revision: resolve.revision,
+        };
+        self.ensure_current(&doc, content).await?;
+        let item = self
             .client
             .request("codeAction/resolve", resolve.action, REQUEST_TIMEOUT)
             .await?;
-        let index = TextIndex::new(content);
-        // Re-sync so the index matches the server's view of the document.
-        self.sync_buffer(relative_path, content).await?;
-        Ok(self.normalize_action(&resolved, content, &index))
+        self.ensure_current(&doc, content).await?;
+        Ok(self
+            .normalize_action(&item, path, content, &doc)
+            .filter(|action| action.edit.is_some()))
     }
 
     fn normalize_action(
         &self,
         item: &Value,
+        path: &str,
         content: &str,
-        index: &TextIndex,
+        doc: &RequestDocument,
     ) -> Option<CodeAction> {
-        // LSP allows `Command` entries in the response; we only surface full CodeActions.
-        if item.get("command").is_some_and(|c| c.is_string()) && item.get("title").is_some() {
-            // A bare Command has `command: string`; a CodeAction's `command` is an object.
-            // We skip bare commands because they have no edit to apply.
-            if item.get("command").unwrap().is_string() {
-                return None;
-            }
+        if item.get("command").is_some_and(|command| {
+            !(command.is_null()
+                || self.server_id == "typescript" && typescript_noop_command(command))
+        }) {
+            return None;
         }
         let title = item.get("title")?.as_str()?.to_string();
         let kind = item.get("kind").and_then(Value::as_str).map(str::to_string);
@@ -140,23 +138,23 @@ impl LspSession {
             .get("isPreferred")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        let edit = item
-            .get("edit")
-            .and_then(|edit| self.normalize_workspace_edit(edit, content, index));
-        // When the server deferred the edit via `data`, offer a resolve handle.
-        let resolve = if edit.is_none() && item.get("data").is_some() {
-            self.capabilities
-                .code_action_resolve
-                .then(|| CodeActionResolve {
-                    session: self.id.clone(),
-                    action: item.clone(),
-                })
-        } else {
-            None
+        let edit = match item.get("edit").filter(|value| !value.is_null()) {
+            Some(edit) => Some(WorkspaceEdit {
+                files: vec![FileEdit {
+                    path: path.to_string(),
+                    edits: single_document_edits(edit, doc, content, self.encoding)?,
+                }],
+            }),
+            None => None,
         };
-        // Skip actions that carry neither an edit nor a resolvable payload nor a command:
-        // there is nothing we can apply on the user's behalf.
-        if edit.is_none() && resolve.is_none() && item.get("command").is_none() {
+        let resolve =
+            (edit.is_none() && item.get("data").is_some() && self.capabilities.code_action_resolve)
+                .then(|| CodeActionResolve {
+                    path: path.to_string(),
+                    revision: doc.revision.clone(),
+                    action: item.clone(),
+                });
+        if edit.is_none() && resolve.is_none() && disabled_reason.is_none() {
             return None;
         }
         Some(CodeAction {
@@ -168,98 +166,67 @@ impl LspSession {
             resolve,
         })
     }
-
-    fn normalize_workspace_edit(
-        &self,
-        edit: &Value,
-        content: &str,
-        index: &TextIndex,
-    ) -> Option<WorkspaceEdit> {
-        let mut files: Vec<FileEdit> = Vec::new();
-        // `changes`: map of uri → TextEdit[]. All edits in one file share the buffer.
-        if let Some(changes) = edit.get("changes").and_then(Value::as_object) {
-            for (uri, edits) in changes {
-                let path = self.uri_to_path(uri)?;
-                let text = self.text_for_uri(uri, content);
-                let file_index = TextIndex::new(&text);
-                let parsed = parse_edits_array(edits, &text, &file_index, self.encoding)?;
-                files.push(FileEdit {
-                    path,
-                    edits: parsed,
-                });
-            }
-        }
-        // `documentChanges`: ordered TextDocumentEdit[] (may also carry file ops, which we skip).
-        if let Some(document_changes) = edit.get("documentChanges").and_then(Value::as_array) {
-            for change in document_changes {
-                let Some(text_document) = change.get("textDocument") else {
-                    continue;
-                };
-                let Some(uri) = text_document.get("uri").and_then(Value::as_str) else {
-                    continue;
-                };
-                let path = self.uri_to_path(uri)?;
-                let text = self.text_for_uri(uri, content);
-                let file_index = TextIndex::new(&text);
-                let edits_value = change.get("edits")?;
-                let parsed = parse_edits_array(edits_value, &text, &file_index, self.encoding)?;
-                files.push(FileEdit {
-                    path,
-                    edits: parsed,
-                });
-            }
-        }
-        let _ = (content, index);
-        if files.is_empty() {
-            None
-        } else {
-            Some(WorkspaceEdit { files })
-        }
-    }
-
-    fn uri_to_path(&self, uri: &str) -> Option<String> {
-        let url = Url::parse(uri).ok()?;
-        let path = url.to_file_path().ok()?;
-        let root = Path::new(&self.project.root);
-        match path.strip_prefix(root) {
-            Ok(relative) => Some(relative.to_string_lossy().replace('\\', "/")),
-            Err(_) => Some(path.to_string_lossy().into_owned()),
-        }
-    }
-
-    /// Returns the buffer for `uri` if it matches the current document, otherwise
-    /// reads from the session's open documents or falls back to the on-disk text.
-    fn text_for_uri(&self, uri: &str, current_content: &str) -> String {
-        let current_uri = Url::from_file_path(Path::new(&self.project.root).join(""))
-            .ok()
-            .map(|u| u.to_string());
-        let _ = current_uri;
-        // The common case for auto-import is that all edits target the current file.
-        // For other files we fall back to reading from disk; cross-file edits that
-        // touch unsaved buffers are rare and out of scope for this first pass.
-        if let Ok(url) = Url::parse(uri) {
-            if let Ok(path) = url.to_file_path() {
-                let root = Path::new(&self.project.root);
-                if let Ok(relative) = path.strip_prefix(root) {
-                    let relative_str = relative.to_string_lossy().replace('\\', "/");
-                    // Try the open document cache first.
-                    if let Ok(documents) = self.documents.try_lock() {
-                        if let Some(doc) = documents.get(uri) {
-                            return doc.text.as_str().to_string();
-                        }
-                    }
-                    let _ = relative_str;
-                }
-                if let Ok(text) = std::fs::read_to_string(&path) {
-                    return text;
-                }
-            }
-        }
-        current_content.to_string()
-    }
 }
 
-fn parse_edits_array(
+fn typescript_noop_command(command: &Value) -> bool {
+    // typescript-language-server's ApplyCodeActionCommand only forwards action.commands.
+    command["command"] == "_typescript.applyCodeActionCommand"
+        && command
+            .pointer("/arguments/0/action")
+            .is_some_and(|action| {
+                action.is_object()
+                    && action.get("commands").is_none_or(|commands| {
+                        commands.is_null() || commands.as_array().is_some_and(Vec::is_empty)
+                    })
+            })
+}
+
+fn single_document_edits(
+    edit: &Value,
+    doc: &RequestDocument,
+    content: &str,
+    encoding: PositionEncoding,
+) -> Option<Vec<CompletionEdit>> {
+    // Both representations are valid, but combining them could apply edits twice.
+    let edits = match (edit.get("changes"), edit.get("documentChanges")) {
+        (Some(changes), None) => {
+            let files = changes.as_object()?;
+            if files.len() != 1 {
+                return None;
+            }
+            files.get(doc.uri.as_str())?
+        }
+        (None, Some(changes)) => {
+            let [change] = changes.as_array()?.as_slice() else {
+                return None;
+            };
+            if change.pointer("/textDocument/uri")?.as_str()? != doc.uri.as_str()
+                || change
+                    .pointer("/textDocument/version")
+                    .is_some_and(|version| {
+                        !version.is_null() && version.as_i64() != Some(doc.revision.version)
+                    })
+            {
+                return None;
+            }
+            change.get("edits")?
+        }
+        _ => return None,
+    };
+    if edits.as_array()?.iter().any(|text_edit| {
+        text_edit
+            .get("annotationId")
+            .and_then(Value::as_str)
+            .is_some_and(|id| {
+                edit["changeAnnotations"][id]["needsConfirmation"].as_bool() == Some(true)
+            })
+    }) {
+        return None;
+    }
+    parse_edits_array(edits, content, &doc.index, encoding)
+}
+
+pub(super) fn parse_edits_array(
     edits: &Value,
     text: &str,
     index: &TextIndex,
@@ -279,6 +246,56 @@ fn parse_edits_array(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workspace_edit_rejects_a_second_file_resource_op_or_previous_version() {
+        let text = "let x = 1;";
+        let doc = RequestDocument {
+            uri: Url::parse("file:///main.ts").unwrap(),
+            index: TextIndex::new(text),
+            revision: DiagnosticSync {
+                session: "test".to_string(),
+                version: 3,
+                items: None,
+            }
+            .into(),
+        };
+        let edit = json!({
+            "range": { "start": { "line": 0, "character": 4 }, "end": { "line": 0, "character": 5 } },
+            "newText": "y",
+        });
+        let target = |version| {
+            json!({
+                "textDocument": { "uri": doc.uri, "version": version },
+                "edits": [edit]
+            })
+        };
+        let parse = |value| single_document_edits(&value, &doc, text, PositionEncoding::Utf8);
+        assert_eq!(
+            parse(json!({ "documentChanges": [target(3)] })).unwrap()[0].insert,
+            "y"
+        );
+        assert!(parse(json!({ "documentChanges": [target(2)] })).is_none());
+        assert!(parse(json!({ "documentChanges": [target(3), { "kind": "delete", "uri": "file:///other.ts" }] })).is_none());
+        assert!(parse(
+            json!({ "changes": { "file:///main.ts": [edit], "file:///other.ts": [edit] } })
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn typescript_quick_fix_only_accepts_a_noop_command_wrapper() {
+        let mut command = json!({
+            "command": "_typescript.applyCodeActionCommand",
+            "arguments": [{ "action": { "changes": [] } }]
+        });
+        assert!(typescript_noop_command(&command));
+        command["arguments"][0]["action"]["commands"] = json!([{ "type": "install package" }]);
+        assert!(!typescript_noop_command(&command));
+        assert!(!typescript_noop_command(&json!(
+            "_typescript.applyCodeActionCommand"
+        )));
+    }
 
     #[test]
     fn parses_changes_map() {

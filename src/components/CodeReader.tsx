@@ -13,7 +13,13 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { closeBrackets, closeBracketsKeymap, closeCompletion } from "@codemirror/autocomplete";
-import { setDiagnostics } from "@codemirror/lint";
+import {
+  forEachDiagnostic,
+  nextDiagnostic,
+  previousDiagnostic,
+  setDiagnostics,
+  setDiagnosticsEffect,
+} from "@codemirror/lint";
 import {
   defaultKeymap,
   history,
@@ -35,7 +41,7 @@ import {
   search,
   searchKeymap,
 } from "@codemirror/search";
-import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
+import { Compartment, EditorState, Prec, type Extension, type Text } from "@codemirror/state";
 import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
 import {
   closeHoverTooltips,
@@ -62,9 +68,15 @@ import { codeCompletion } from "../lib/completion";
 import { codeHover } from "../lib/hover";
 import { definitionLink } from "../lib/definitionLink";
 import { detectIndentation } from "../lib/indentation";
+import {
+  editorLanguageTools,
+  runEditorLanguageAction,
+  type EditorLanguageAction,
+} from "../lib/editorLanguageTools";
 import { indentGuides } from "../lib/indentGuides";
 import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
 import { rainbowBrackets } from "../lib/rainbowBrackets";
+import { stickyScroll, syntaxSelection } from "../lib/readingTools";
 import type { EditorViewState } from "../lib/session";
 import { isMarkdownFile, matchLanguage } from "../lib/language";
 import {
@@ -73,6 +85,7 @@ import {
   usePlugins,
   useSemanticAvailability,
 } from "../plugins/runtime";
+import { EditorProblems, type EditorProblem } from "./EditorProblems";
 import { Select } from "./Select";
 import type {
   EditorPane,
@@ -138,6 +151,7 @@ export interface CodeReaderHandle {
   getViewState(): EditorViewState | null;
   reveal(request: RevealRequest): void;
   openFileSearch(): void;
+  runEditorAction(action: EditorLanguageAction): Promise<void> | undefined;
   focus(): void;
   getText(): string | null;
   isDirty(): boolean;
@@ -447,7 +461,15 @@ function preferenceExtensions(
     extensions.push(highlightActiveLine(), highlightActiveLineGutter());
   if (preferences.indentWithTab && editable) extensions.push(keymap.of([indentWithTab]));
   if (mode === "normal") {
-    extensions.push(rainbowBrackets);
+    extensions.push(
+      rainbowBrackets,
+      syntaxSelection,
+      keymap.of([
+        { key: "F2", run: nextDiagnostic },
+        { key: "Shift-F2", run: previousDiagnostic },
+      ]),
+    );
+    if (preferences.showStickyScroll) extensions.push(stickyScroll);
     if (preferences.showIndentGuides) extensions.push(indentGuides);
     if (preferences.wordWrap) extensions.push(EditorView.lineWrapping);
     if (preferences.matchBrackets) extensions.push(bracketMatching());
@@ -556,6 +578,7 @@ export function CodeReader({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [recovery, setRecovery] = useState<RecoveryRecord | null>(null);
   const [lineCount, setLineCount] = useState(1);
+  const [problems, setProblems] = useState<{ doc: Text; items: EditorProblem[] }>();
   const [preview, setPreview] = useState(false);
   const [previewText, setPreviewText] = useState("");
   const previewTimerRef = useRef<number | null>(null);
@@ -577,6 +600,15 @@ export function CodeReader({
   const minimap = useBuiltinFeature("showMinimap", preferences.showMinimap);
   const previewVisible =
     preview && markdown && loaded?.content.kind === "text" && loaded.content.mode === "normal";
+  const canUseEditorActions =
+    active &&
+    semanticEnabled &&
+    !previewVisible &&
+    !gitLocked &&
+    !tab.projectId.startsWith("external:") &&
+    loaded?.content.kind === "text" &&
+    loaded.content.mode === "normal" &&
+    loaded.content.editable;
   const pathCompletion = useMemo(
     () =>
       active && !previewVisible && !gitLocked && !tab.projectId.startsWith("external:")
@@ -957,6 +989,12 @@ export function CodeReader({
           openEditorSearch(viewRef.current);
         }
       },
+      runEditorAction(action) {
+        const view = viewRef.current;
+        if (!view || !activeRef.current || previewRef.current) return;
+        view.focus();
+        return runEditorLanguageAction(view, action);
+      },
       focus() {
         viewRef.current?.focus();
       },
@@ -1087,6 +1125,7 @@ export function CodeReader({
     dirtyRef.current = false;
     setDirty(false);
     setLineCount(normalizedContent === "" ? 1 : normalizedContent.split("\n").length);
+    setProblems(undefined);
     resumeAutoSave();
     clearAutoSaveTimer();
     const match = matchLanguage(markdown ? tab.name.toLowerCase() : tab.name);
@@ -1166,6 +1205,28 @@ export function CodeReader({
         EditorView.updateListener.of((update) => {
           if (update.docChanged || !update.startState.selection.eq(update.state.selection)) {
             pluginRequest.current?.abort();
+          }
+          if (
+            update.transactions.some((transaction) =>
+              transaction.effects.some((effect) => effect.is(setDiagnosticsEffect)),
+            )
+          ) {
+            const doc = update.state.doc;
+            const items: EditorProblem[] = [];
+            forEachDiagnostic(update.state, ({ message, severity }, from, to) => {
+              const line = doc.lineAt(from);
+              items.push({
+                message,
+                severity,
+                from,
+                to,
+                line: line.number,
+                column: from - line.from + 1,
+              });
+            });
+            setProblems(items.length ? { doc, items } : undefined);
+          } else if (update.docChanged) {
+            setProblems(undefined);
           }
         }),
         EditorState.transactionFilter.of((transaction) =>
@@ -1332,6 +1393,19 @@ export function CodeReader({
               pathCompletion,
             )
           : [],
+        canUseEditorActions
+          ? editorLanguageTools({
+              projectId: tab.projectId,
+              path: tab.path,
+              wanted: () =>
+                viewRef.current === view &&
+                activeRef.current &&
+                !previewRef.current &&
+                !operationLockedRef.current &&
+                !gitLockedRef.current,
+              notify: (message) => onNoticeRef.current?.(message),
+            })
+          : [],
       ]),
     });
   }, [
@@ -1342,6 +1416,8 @@ export function CodeReader({
     semanticEnabled,
     inlineCompletion,
     pathCompletion,
+    canUseEditorActions,
+    pythonRevision,
   ]);
 
   useEffect(() => {
@@ -1382,40 +1458,53 @@ export function CodeReader({
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
-    if (!semanticEnabled || previousPythonRevision.current !== pythonRevision) {
+    const enabled =
+      semanticEnabled &&
+      active &&
+      !previewVisible &&
+      loaded?.content.kind === "text" &&
+      loaded.content.mode === "normal" &&
+      !tab.projectId.startsWith("external:");
+    if (!enabled || previousPythonRevision.current !== pythonRevision) {
       previousPythonRevision.current = pythonRevision;
       closeCompletion(view);
       view.dispatch(setDiagnostics(view.state, []), { effects: closeHoverTooltips });
     }
-    const enabled =
-      semanticEnabled &&
-      active &&
-      loaded?.content.kind === "text" &&
-      loaded.content.mode === "normal" &&
-      !tab.projectId.startsWith("external:");
     view.dispatch({
       effects: diagnosticsCompartment.current.reconfigure(
         enabled ? codeDiagnostics(tab.projectId, tab.path) : [],
       ),
     });
-  }, [active, loaded, tab.projectId, tab.path, pythonRevision, semanticEnabled]);
+  }, [active, loaded, tab.projectId, tab.path, pythonRevision, semanticEnabled, previewVisible]);
 
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
-    const enabled =
-      preferences.autoImportEnabled &&
-      semanticEnabled &&
-      active &&
-      loaded?.content.kind === "text" &&
-      loaded.content.mode === "normal" &&
-      !tab.projectId.startsWith("external:");
+    const enabled = preferences.autoImportEnabled && canUseEditorActions;
     view.dispatch({
       effects: autoImportCompartment.current.reconfigure(
-        enabled ? autoImportExtension(tab.projectId, tab.path) : [],
+        enabled
+          ? autoImportExtension(
+              tab.projectId,
+              tab.path,
+              () =>
+                viewRef.current === view &&
+                activeRef.current &&
+                !previewRef.current &&
+                !operationLockedRef.current &&
+                !gitLockedRef.current,
+            )
+          : [],
       ),
     });
-  }, [active, loaded, tab.projectId, tab.path, semanticEnabled, preferences.autoImportEnabled]);
+  }, [
+    canUseEditorActions,
+    loaded,
+    tab.projectId,
+    tab.path,
+    preferences.autoImportEnabled,
+    pythonRevision,
+  ]);
 
   useEffect(() => {
     clearAutoSaveTimer();
@@ -1475,6 +1564,7 @@ export function CodeReader({
     const text = documentRef.current ?? loaded.content;
     onStatus({
       path: tab.path,
+      canUseEditorActions,
       language: languageLabel,
       mode: text.mode,
       lines: lineCount,
@@ -1491,6 +1581,7 @@ export function CodeReader({
     loaded,
     languageLabel,
     lineCount,
+    canUseEditorActions,
     dirty,
     saving,
     pauseReason,
@@ -1620,6 +1711,13 @@ export function CodeReader({
     } finally {
       if (pluginRequest.current === request) pluginRequest.current = null;
     }
+  };
+
+  const jumpToProblem = (previous: boolean) => {
+    const view = viewRef.current;
+    if (!view || !activeRef.current || previewRef.current) return;
+    (previous ? previousDiagnostic : nextDiagnostic)(view);
+    view.focus();
   };
 
   const text = documentRef.current ?? loaded.content;
@@ -1769,6 +1867,27 @@ export function CodeReader({
         hidden={previewVisible}
       >
         <div className="editor-surface" ref={surfaceRef} />
+        {active && semanticEnabled && !previewVisible && problems && (
+          <EditorProblems
+            problems={problems.items}
+            onStep={jumpToProblem}
+            onSelect={({ from, to }) => {
+              const view = viewRef.current;
+              if (
+                !view ||
+                view.state.doc !== problems.doc ||
+                !activeRef.current ||
+                previewRef.current
+              )
+                return;
+              view.dispatch({
+                selection: { anchor: from, head: to },
+                effects: EditorView.scrollIntoView(from, { y: "center" }),
+              });
+              view.focus();
+            }}
+          />
+        )}
         {gitBlocks.length > 0 && lineCount > 1 && (
           <div className="git-change-map" role="group" aria-label={t("变更位置")}>
             {gitBlocks.map((block, index) => {

@@ -3,13 +3,21 @@ import { EditorView } from "@codemirror/view";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api } from "./api";
 import { autoImportExtension, unambiguousImport, editTouchesLineInDoc } from "./autoImport";
+import { synchronizedLspVersion } from "./diagnostics";
 import type { CodeAction } from "./types";
 
 vi.mock("./api", () => ({
   api: {
     onDiagnostics: vi.fn(),
     lspCodeActions: vi.fn(),
+    lspEditorRevisionMatches: vi.fn(),
+    lspResolveCodeAction: vi.fn(),
   },
+}));
+
+vi.mock("./diagnostics", async (original) => ({
+  ...(await original<typeof import("./diagnostics")>()),
+  synchronizedLspVersion: vi.fn(),
 }));
 
 let view: EditorView | undefined;
@@ -18,6 +26,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.useFakeTimers();
   vi.mocked(api.onDiagnostics).mockResolvedValue(() => {});
+  vi.mocked(synchronizedLspVersion).mockReturnValue({ session: "s", version: 1 });
 });
 
 afterEach(() => {
@@ -75,7 +84,7 @@ it("editTouchesLineInDoc detects edits on the caret line", () => {
   expect(editTouchesLineInDoc(importAction, "src/main.ts", 2, doc)).toBe(false);
 });
 
-it("applies the single import fix after idle when an error diagnostic arrives", async () => {
+it("skips an error on the caret line", async () => {
   const doc = "foo();\n";
   const view = editor(doc);
   vi.mocked(api.lspCodeActions).mockResolvedValue({
@@ -109,6 +118,41 @@ it("applies the single import fix after idle when an error diagnostic arrives", 
   await vi.advanceTimersByTimeAsync(2000);
   expect(api.lspCodeActions).not.toHaveBeenCalled();
 });
+
+it.each([false, true])(
+  "protects edits made while a fix is pending (changed = %s)",
+  async (changed) => {
+    const view = editor("foo();\n");
+    view.dispatch({ selection: { anchor: view.state.doc.length } });
+    const revision = { session: "s", version: 1 };
+    vi.mocked(api.lspEditorRevisionMatches).mockResolvedValue(true);
+    vi.mocked(api.lspCodeActions).mockImplementationOnce(async () => {
+      if (changed)
+        view.dispatch({ changes: { from: view.state.doc.length, insert: "// keep this" } });
+      return { actions: [importAction], source: "lsp", message: null, revision };
+    });
+    const handler = vi.mocked(api.onDiagnostics).mock.calls[0]?.[0];
+    handler!({
+      projectId: "p",
+      path: "src/main.ts",
+      ...revision,
+      items: [
+        {
+          start: { line: 0, character: 0 },
+          end: { line: 0, character: 3 },
+          severity: 1,
+          message: "Cannot find name 'foo'.",
+          source: "ts",
+        },
+      ],
+    });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(api.lspCodeActions).toHaveBeenCalledOnce();
+    expect(view.state.doc.toString()).toBe(
+      changed ? "foo();\n// keep this" : "import { foo } from './foo';\nfoo();\n",
+    );
+  },
+);
 
 it("does not fire when the server is unavailable", async () => {
   editor("foo();\n");

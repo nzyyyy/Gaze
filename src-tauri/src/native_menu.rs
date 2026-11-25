@@ -13,6 +13,8 @@ pub struct NativeMenuState {
     has_file: bool,
     can_save: bool,
     can_navigate: bool,
+    #[serde(default)]
+    can_use_editor_actions: bool,
     can_go_back: bool,
     can_go_forward: bool,
     split_open: bool,
@@ -35,6 +37,9 @@ impl NativeMenuState {
             "save" => self.can_save,
             "close-tab" | "find" => self.has_file,
             "definition" | "references" | "implementation" => self.can_navigate,
+            "quick-fix" | "organize-imports" | "parameter-info" | "format-code" => {
+                self.can_use_editor_actions
+            }
             "back" => self.can_go_back,
             "forward" => self.can_go_forward,
             "toggle-split" => self.has_file || self.split_open,
@@ -83,6 +88,10 @@ fn menu_text(text: &str, language: crate::preferences::Language) -> &str {
         ("全选", "Select All"),
         ("文件内查找", "Find in File"),
         ("工作区搜索", "Search Workspace"),
+        ("快速修复", "Quick Fix"),
+        ("整理导入", "Organize Imports"),
+        ("参数提示", "Parameter Info"),
+        ("格式化代码", "Reformat Code"),
         ("主题", "Theme"),
         ("跟随系统", "Follow system"),
         ("浅色", "Light"),
@@ -202,6 +211,11 @@ mod macos {
                 &separator()?,
                 &action("find", "文件内查找", None)?,
                 &action("search-workspace", "工作区搜索", Some("Cmd+Shift+F"))?,
+                &separator()?,
+                &action("quick-fix", "快速修复", None)?,
+                &action("organize-imports", "整理导入", None)?,
+                &action("parameter-info", "参数提示", None)?,
+                &action("format-code", "格式化代码", None)?,
             ],
         )?;
         let theme_menu = Submenu::with_items(

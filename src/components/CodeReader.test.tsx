@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { createRef } from "react";
 import { EditorView, showTooltip } from "@codemirror/view";
 import { undo } from "@codemirror/commands";
+import { setDiagnostics } from "@codemirror/lint";
 import { completionStatus, currentCompletions, startCompletion } from "@codemirror/autocomplete";
 import { syntaxTree } from "@codemirror/language";
 import userEvent from "@testing-library/user-event";
@@ -150,6 +151,39 @@ async function editorContent(): Promise<HTMLElement> {
   await waitFor(() => expect(document.querySelector(".cm-content")).not.toBeNull());
   return document.querySelector(".cm-content") as HTMLElement;
 }
+
+it("opens the current file's problems from the icon and jumps to the chosen location", async () => {
+  renderReader({ content: "const first = 1;\nconst second = 2;\n" });
+  const view = EditorView.findFromDOM(await editorContent())!;
+  act(() =>
+    view.dispatch(
+      setDiagnostics(view.state, [
+        { from: 6, to: 11, severity: "error", message: "First problem" },
+        { from: 23, to: 29, severity: "error", message: "Second problem" },
+      ]),
+    ),
+  );
+  const trigger = screen.getByRole("button", { name: "当前文件问题：2 个错误" });
+  expect(trigger.closest(".editor-surface-wrap")).not.toBeNull();
+  expect(trigger).toHaveTextContent("2");
+  expect(trigger).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(trigger);
+  const panel = screen.getByRole("list", { name: "当前文件问题" });
+  const second = within(panel).getByRole("button", { name: /Second problem/ });
+  expect(second).toHaveTextContent("2:7");
+  fireEvent.click(second);
+  expect(view.state.selection.main.from).toBe(23);
+  expect(screen.queryByRole("list", { name: "当前文件问题" })).toBeNull();
+  expect(view.contentDOM).toHaveFocus();
+  fireEvent.keyDown(view.contentDOM, { key: "F2" });
+  expect(view.state.selection.main.from).toBe(6);
+  fireEvent.click(trigger);
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  expect(trigger).toHaveFocus();
+  expect(trigger).toHaveAttribute("aria-expanded", "false");
+  act(() => view.dispatch(setDiagnostics(view.state, [])));
+  expect(screen.queryByRole("button", { name: /当前文件问题/ })).toBeNull();
+});
 
 async function markdownEditor(anchor: number) {
   const view = EditorView.findFromDOM(await editorContent())!;

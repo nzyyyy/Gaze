@@ -16,6 +16,7 @@ export interface Preferences extends Record<BuiltinPluginKey, boolean> {
   wordWrap: boolean;
   lineNumbers: boolean;
   showIndentGuides: boolean;
+  showStickyScroll: boolean;
   highlightActiveLine: boolean;
   codeFolding: boolean;
   matchBrackets: boolean;
@@ -57,6 +58,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   wordWrap: true,
   lineNumbers: true,
   showIndentGuides: true,
+  showStickyScroll: true,
   showMinimap: true,
   highlightActiveLine: true,
   codeFolding: true,
@@ -213,6 +215,13 @@ export const PREFERENCE_FIELDS: PreferenceField[] = [
     category: "editor",
     label: "Tab 键缩进",
     description: "按 Tab 键缩进代码；关闭后可用 Tab 移动焦点。",
+  },
+  {
+    key: "showStickyScroll",
+    type: "boolean",
+    category: "editor",
+    label: "代码标题吸顶",
+    description: "滚动时固定当前代码块的标题。",
   },
   {
     key: "autoImportEnabled",

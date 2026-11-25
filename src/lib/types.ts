@@ -312,8 +312,14 @@ export interface WorkspaceEdit {
   files: FileEdit[];
 }
 
-export interface CodeActionResolve {
+export interface DocumentRevision {
   session: string;
+  version: number;
+}
+
+export interface CodeActionResolve {
+  path: string;
+  revision: DocumentRevision;
   action: unknown;
 }
 
@@ -330,6 +336,17 @@ export interface CodeActionResult {
   actions: CodeAction[];
   source: string;
   message: string | null;
+  revision?: DocumentRevision | null;
+}
+
+export interface SignatureHelp {
+  signatures: {
+    label: string;
+    parameters: { label: string | [number, number] }[];
+    activeParameter: number | null;
+  }[];
+  activeSignature: number | null;
+  activeParameter: number | null;
 }
 
 export interface LspRange {
@@ -339,6 +356,7 @@ export interface LspRange {
 
 export interface EditorStatus {
   path: string;
+  canUseEditorActions?: boolean;
   language: string;
   mode: FileMode;
   lines: number;

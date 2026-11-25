@@ -2,6 +2,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ThemePreference } from "./types";
+import type { EditorLanguageAction } from "./editorLanguageTools";
 
 export type NativeMenuAction =
   | "settings"
@@ -30,7 +31,8 @@ export type NativeMenuAction =
   | "toggle-split"
   | "definition"
   | "references"
-  | "implementation";
+  | "implementation"
+  | EditorLanguageAction;
 
 export interface NativeMenuState {
   language?: import("./i18n").Language;
@@ -39,6 +41,7 @@ export interface NativeMenuState {
   hasFile: boolean;
   canSave: boolean;
   canNavigate: boolean;
+  canUseEditorActions?: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
   splitOpen: boolean;

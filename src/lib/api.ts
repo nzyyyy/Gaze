@@ -13,6 +13,7 @@ import type {
   CodeAction,
   CodeActionResolve,
   CodeActionResult,
+  DocumentRevision,
   FileContent,
   FileFingerprint,
   FsChangeEvent,
@@ -34,10 +35,12 @@ import type {
   ReplaceTarget,
   SearchEvent,
   SearchOptions,
+  SignatureHelp,
   SymbolSearchResult,
   TerminalEvent,
   TerminalSessionInfo,
   TextEncodingKind,
+  TextEdit,
   TextPosition,
   ThemePreference,
   ToolCapabilities,
@@ -272,6 +275,28 @@ export const api = {
     content: string,
     resolve: CodeActionResolve,
   ) => invoke<CodeAction | null>("lsp_resolve_code_action", { projectId, path, content, resolve }),
+  lspEditorRevisionMatches: (
+    projectId: string,
+    path: string,
+    content: string,
+    revision: DocumentRevision,
+  ) => invoke<boolean>("lsp_editor_revision_matches", { projectId, path, content, revision }),
+  lspSignatureHelp: (projectId: string, path: string, content: string, position: TextPosition) =>
+    invoke<SignatureHelp | null>("lsp_signature_help", { projectId, path, content, position }),
+  lspFormat: (
+    projectId: string,
+    path: string,
+    content: string,
+    range: LspRange | null,
+    options: { tabSize: number; insertSpaces: boolean },
+  ) =>
+    invoke<{ edits: TextEdit[]; revision: DocumentRevision | null }>("lsp_format", {
+      projectId,
+      path,
+      content,
+      range,
+      options,
+    }),
   onSearchEvent: (handler: (event: SearchEvent) => void): Promise<UnlistenFn> =>
     listen<SearchEvent>("gaze://search", (event) => handler(event.payload)),
   onFsChange: (handler: (event: FsChangeEvent) => void): Promise<UnlistenFn> =>

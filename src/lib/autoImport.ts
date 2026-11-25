@@ -7,7 +7,9 @@
  */
 import { ViewPlugin, type EditorView, type ViewUpdate } from "@codemirror/view";
 import { api, type DiagnosticSnapshot } from "./api";
-import type { CodeAction, LspRange } from "./types";
+import { editorDiagnostics, synchronizedLspVersion } from "./diagnostics";
+import { applyEditorEdits, codeActionEdits, editorRange } from "./editorEdits";
+import type { CodeAction } from "./types";
 import { errorCode } from "./utils";
 
 const IDLE_MS = 1500;
@@ -44,21 +46,7 @@ export function editTouchesLineInDoc(
   return false;
 }
 
-/** Convert a CodeMirror offset range to an LSP range. */
-function offsetsToLspRange(
-  doc: { lineAt(pos: number): { from: number; number: number } },
-  from: number,
-  to: number,
-): LspRange {
-  const startLine = doc.lineAt(from);
-  const endLine = doc.lineAt(to);
-  return {
-    start: { line: startLine.number - 1, character: from - startLine.from },
-    end: { line: endLine.number - 1, character: to - endLine.from },
-  };
-}
-
-export function autoImportExtension(projectId: string, path: string) {
+export function autoImportExtension(projectId: string, path: string, enabled = () => true) {
   return ViewPlugin.fromClass(
     class {
       private timer: ReturnType<typeof setTimeout> | undefined;
@@ -67,13 +55,13 @@ export function autoImportExtension(projectId: string, path: string) {
       private running = false;
       private unavailable = false;
       private disposed = false;
-      private latestDiagnostics: DiagnosticSnapshot["items"] = null;
+      private latestDiagnostics: DiagnosticSnapshot | null = null;
 
       constructor(private view: EditorView) {
         void api
           .onDiagnostics((batch) => {
             if (this.disposed || batch.projectId !== projectId || batch.path !== path) return;
-            this.latestDiagnostics = batch.items;
+            this.latestDiagnostics = batch;
             this.schedule();
           })
           .then((fn) => {
@@ -85,7 +73,8 @@ export function autoImportExtension(projectId: string, path: string) {
       }
 
       update(u: ViewUpdate) {
-        if (u.docChanged) this.schedule();
+        if (u.docChanged) this.tried.clear();
+        if (u.docChanged || u.selectionSet || u.focusChanged) this.schedule();
       }
 
       private schedule() {
@@ -97,33 +86,61 @@ export function autoImportExtension(projectId: string, path: string) {
       private async run() {
         if (this.running || this.disposed || this.unavailable) return;
         const view = this.view;
-        if (!view.dom.isConnected || !view.hasFocus) return;
-        const diagnostics = this.latestDiagnostics;
-        if (!diagnostics?.length) return;
+        if (!view.dom.isConnected || !view.hasFocus || view.state.readOnly || !enabled()) return;
+        const snapshot = this.latestDiagnostics;
+        const revision = synchronizedLspVersion(view);
+        if (
+          !snapshot?.items?.length ||
+          !revision ||
+          snapshot.session !== revision.session ||
+          snapshot.version !== revision.version
+        )
+          return;
+        const { doc } = view.state;
+        const wanted = () => !this.disposed && enabled() && view.state.doc === doc && view.hasFocus;
         this.running = true;
         try {
           const caretLine = view.state.doc.lineAt(view.state.selection.main.head).number - 1;
-          const errors = diagnostics.filter((d) => d.severity === 1);
+          const errors = snapshot.items.filter((d) => d.severity === 1);
           for (const d of errors.slice(0, MAX_DIAGNOSTICS_PER_RUN)) {
-            if (this.disposed) return;
+            if (!wanted()) return;
             // Skip the diagnostic on the caret line: the user is still typing.
             if (d.start.line <= caretLine && caretLine <= d.end.line) continue;
             const key = `${d.start.line}:${d.start.character}:${d.message}`;
             if (this.tried.has(key)) continue;
             this.tried.add(key);
-            const doc = view.state.doc;
-            const from = doc.line(d.start.line + 1).from + d.start.character;
-            const to = doc.line(d.end.line + 1).from + d.end.character;
-            const range = offsetsToLspRange(doc, from, to);
+            const diagnostic = editorDiagnostics(doc, [d])[0];
+            if (!diagnostic) continue;
+            const range = editorRange(doc, diagnostic.from, diagnostic.to);
             const result = await api.lspCodeActions(projectId, path, doc.toString(), range, [
               "quickfix",
             ]);
-            if (this.disposed) return;
+            if (!wanted()) return;
             const fix = unambiguousImport(result.actions);
-            if (fix?.edit && !editTouchesLineInDoc(fix, path, caretLine, doc)) {
-              this.applyEdit(fix);
-              return;
-            }
+            if (
+              !fix ||
+              result.revision?.session !== revision.session ||
+              result.revision.version !== revision.version
+            )
+              continue;
+            const edits = await codeActionEdits(projectId, path, doc, fix);
+            if (!edits || !wanted()) continue;
+            const action = { ...fix, edit: { files: [{ path, edits }] } };
+            const applied = await applyEditorEdits(
+              view,
+              doc,
+              edits,
+              { projectId, path, revision },
+              () => {
+                if (!wanted()) return false;
+                const line = doc.lineAt(view.state.selection.main.head).number - 1;
+                return (
+                  !(d.start.line <= line && line <= d.end.line) &&
+                  !editTouchesLineInDoc(action, path, line, doc)
+                );
+              },
+            );
+            if (applied === "applied") return;
           }
           if (this.tried.size > MAX_TRIED) this.tried.clear();
         } catch (error) {
@@ -134,20 +151,6 @@ export function autoImportExtension(projectId: string, path: string) {
         } finally {
           this.running = false;
         }
-      }
-
-      private applyEdit(action: CodeAction) {
-        const view = this.view;
-        const doc = view.state.doc;
-        const changes = (action.edit?.files ?? [])
-          .filter((f) => f.path === path)
-          .flatMap((f) => f.edits)
-          .map((e) => ({ from: e.from, to: e.to, insert: e.insert }));
-        if (!changes.length) return;
-        // Validate offsets are within the document.
-        const valid = changes.every((c) => c.from >= 0 && c.to <= doc.length && c.from <= c.to);
-        if (!valid) return;
-        view.dispatch({ changes });
       }
 
       destroy() {
