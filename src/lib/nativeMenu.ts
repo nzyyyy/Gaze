@@ -42,6 +42,7 @@ export interface NativeMenuState {
   canSave: boolean;
   canNavigate: boolean;
   canUseEditorActions?: boolean;
+  canShowQuickDocumentation?: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
   splitOpen: boolean;

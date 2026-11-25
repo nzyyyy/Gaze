@@ -33,6 +33,8 @@ vi.mock("./lib/nativeMenu", () => ({
 const windowMock = vi.hoisted(() => ({ close: vi.fn(), onCloseRequested: vi.fn() }));
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => windowMock }));
 const fileSearchSpy = vi.hoisted(() => vi.fn());
+const dismissPopupsSpy = vi.hoisted(() => vi.fn());
+const editorActionSpy = vi.hoisted(() => vi.fn());
 
 const editorStatusHandler = vi.hoisted(() => ({
   current: null as null | ((status: EditorStatus | null) => void),
@@ -244,6 +246,8 @@ vi.mock("./components/CodeReader", async () => {
         reveal: (request: { line: number; character: number }) =>
           setCursor({ line: request.line, character: request.character }),
         openFileSearch: () => fileSearchSpy(props.tab.key),
+        dismissPopups: dismissPopupsSpy,
+        runEditorAction: editorActionSpy,
         focus: () => undefined,
         getText: () => "",
         isDirty: () => dirty,
@@ -544,7 +548,25 @@ describe("App editor panes", () => {
     act(() => editorStatusHandler.current!(editableStatus));
     await menuAction(action);
     expect(apiMock[apiName]).toHaveBeenCalledWith("p1", "README.md", { line: 0, character: 0 });
+    expect(dismissPopupsSpy).toHaveBeenCalledBefore(apiMock[apiName]);
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("opens quick documentation from the native menu for a read-only editor", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByText("README.md"));
+    act(() =>
+      editorStatusHandler.current!({
+        ...editableStatus,
+        readOnly: true,
+        canUseEditorActions: false,
+        canShowQuickDocumentation: true,
+      }),
+    );
+    expect(nativeMenu.state?.canShowQuickDocumentation).toBe(true);
+    await menuAction("quick-documentation");
+    expect(editorActionSpy).toHaveBeenCalledWith("quick-documentation");
   });
 
   it("routes clicks through definition lookup with the source tab and its unsaved buffer", async () => {

@@ -1414,6 +1414,7 @@ export default function App() {
         return;
       }
       const anchor = editorsRef.current.get(tab.key)?.getNavigationAnchor?.(position) ?? null;
+      editorsRef.current.get(tab.key)?.dismissPopups();
       setNavigationBusy(true);
       try {
         if (!target?.result) await syncActiveDocument(tab.key);
@@ -2084,6 +2085,7 @@ export default function App() {
     !editorStatus.saving;
   const menuCanNavigate = menuHasFile && editorStatus !== null && !navigationBusy;
   const menuCanUseEditorActions = menuHasFile && !!editorStatus?.canUseEditorActions;
+  const menuCanShowQuickDocumentation = menuHasFile && !!editorStatus?.canShowQuickDocumentation;
   const menuState = useMemo<NativeMenuState>(
     () => ({
       language,
@@ -2100,6 +2102,7 @@ export default function App() {
       canSave: menuCanSave,
       canNavigate: menuCanNavigate,
       canUseEditorActions: menuCanUseEditorActions,
+      canShowQuickDocumentation: menuCanShowQuickDocumentation,
       canGoBack: navigationHistory.back > 0,
       canGoForward: navigationHistory.forward > 0,
       splitOpen,
@@ -2125,6 +2128,7 @@ export default function App() {
       menuCanSave,
       menuCanNavigate,
       menuCanUseEditorActions,
+      menuCanShowQuickDocumentation,
       navigationHistory.back,
       navigationHistory.forward,
       splitOpen,
@@ -2141,7 +2145,9 @@ export default function App() {
   const runEditorAction = (action: EditorLanguageAction) => {
     if (
       !activeTab ||
-      !menuCanUseEditorActions ||
+      !(action === "quick-documentation"
+        ? menuCanShowQuickDocumentation
+        : menuCanUseEditorActions) ||
       fileOperationBusyRef.current ||
       gitOperationBusyRef.current ||
       closingTabsRef.current
@@ -2223,6 +2229,7 @@ export default function App() {
         case "quick-fix":
         case "organize-imports":
         case "parameter-info":
+        case "quick-documentation":
         case "format-code":
           await runEditorAction(action);
           break;
@@ -2566,6 +2573,7 @@ export default function App() {
                       (root) => tabRoot && insideWorktree(`${tabRoot}/${tab.path}`, root),
                     )}
                     active={isActive}
+                    editorPopupsBlocked={navigationBusy || navigationDialog !== null}
                     theme={resolvedTheme}
                     fontFamily={fontStack(fonts.editor, "editor")}
                     preferences={preferences}

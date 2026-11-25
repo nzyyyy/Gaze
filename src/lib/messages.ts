@@ -10,6 +10,14 @@ export const english: Record<string, string> = {
   快速修复: "Quick Fix",
   整理导入: "Organize Imports",
   参数提示: "Parameter Info",
+  快速文档: "Quick Documentation",
+  "没有找到快速文档。": "No quick documentation found.",
+  悬停显示快速文档: "Show quick documentation on hover",
+  "鼠标停在符号上时显示说明。也可以按 F1 查看文档。":
+    "Show documentation when the pointer is over a symbol. Press F1 to open it on demand.",
+  自动显示参数提示: "Show parameter info automatically",
+  "进入函数调用后约 1 秒显示。也可以按 Ctrl+Shift+Space 查看。":
+    "Show parameter info about one second after entering a call. Press Ctrl+Shift+Space to open it on demand.",
   格式化代码: "Reformat Code",
   "当前位置没有参数提示。": "No parameter information at the caret.",
   "语言服务器返回了无效的编辑。": "The language server returned invalid edits.",

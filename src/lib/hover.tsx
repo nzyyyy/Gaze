@@ -1,10 +1,11 @@
-import { hoverTooltip, type HoverTooltipSource } from "@codemirror/view";
+import type { EditorView, HoverTooltipSource, Tooltip } from "@codemirror/view";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { api } from "./api";
 
-export function lspHoverSource(projectId: string, path: string): HoverTooltipSource {
-  return async (view, pos, side) => {
+export function documentationSource(projectId: string, path: string, wanted: () => boolean) {
+  return async (view: EditorView, pos: number, side: -1 | 0 | 1): Promise<Tooltip | null> => {
+    if (!wanted()) return null;
     const doc = view.state.doc;
     const line = doc.lineAt(pos);
     const word = [...line.text.matchAll(/[\p{L}\p{N}\p{M}_$]+/gu)].find((match) => {
@@ -20,9 +21,9 @@ export function lspHoverSource(projectId: string, path: string): HoverTooltipSou
         line: line.number - 1,
         character: Math.min(pos, line.from + word.index + word[0].length - 1) - line.from,
       });
-      if (!contents.length) return null;
+      if (!wanted() || !contents.length) return null;
       const { default: Markdown } = await import("react-markdown");
-      if (view.state.doc !== doc || !view.dom.isConnected) return null;
+      if (!wanted() || view.state.doc !== doc || !view.dom.isConnected) return null;
       return {
         pos: line.from + word.index,
         end: line.from + word.index + word[0].length,
@@ -60,5 +61,5 @@ export function lspHoverSource(projectId: string, path: string): HoverTooltipSou
   };
 }
 
-export const codeHover = (projectId: string, path: string) =>
-  hoverTooltip(lspHoverSource(projectId, path), { hoverTime: 400, hideOnChange: true });
+export const lspHoverSource = (projectId: string, path: string): HoverTooltipSource =>
+  documentationSource(projectId, path, () => true);

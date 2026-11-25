@@ -15,6 +15,8 @@ pub struct NativeMenuState {
     can_navigate: bool,
     #[serde(default)]
     can_use_editor_actions: bool,
+    #[serde(default)]
+    can_show_quick_documentation: bool,
     can_go_back: bool,
     can_go_forward: bool,
     split_open: bool,
@@ -37,6 +39,7 @@ impl NativeMenuState {
             "save" => self.can_save,
             "close-tab" | "find" => self.has_file,
             "definition" | "references" | "implementation" => self.can_navigate,
+            "quick-documentation" => self.can_show_quick_documentation,
             "quick-fix" | "organize-imports" | "parameter-info" | "format-code" => {
                 self.can_use_editor_actions
             }
@@ -91,6 +94,7 @@ fn menu_text(text: &str, language: crate::preferences::Language) -> &str {
         ("快速修复", "Quick Fix"),
         ("整理导入", "Organize Imports"),
         ("参数提示", "Parameter Info"),
+        ("快速文档", "Quick Documentation"),
         ("格式化代码", "Reformat Code"),
         ("主题", "Theme"),
         ("跟随系统", "Follow system"),
@@ -215,6 +219,7 @@ mod macos {
                 &action("quick-fix", "快速修复", None)?,
                 &action("organize-imports", "整理导入", None)?,
                 &action("parameter-info", "参数提示", None)?,
+                &action("quick-documentation", "快速文档", None)?,
                 &action("format-code", "格式化代码", None)?,
             ],
         )?;
@@ -410,6 +415,7 @@ mod tests {
             "definition",
             "references",
             "implementation",
+            "quick-documentation",
             "back",
             "forward",
             "toggle-split",
@@ -419,6 +425,7 @@ mod tests {
         state.has_file = true;
         state.can_save = true;
         state.can_navigate = true;
+        state.can_show_quick_documentation = true;
         state.can_go_back = true;
         state.can_go_forward = true;
         for action in [
@@ -426,6 +433,7 @@ mod tests {
             "find",
             "close-tab",
             "definition",
+            "quick-documentation",
             "terminal",
             "back",
             "forward",

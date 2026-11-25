@@ -1697,7 +1697,7 @@ button:focus-visible,
 .cm-sticky-headers > button {
   display: block;
   width: 100%;
-  padding: 0 12px 0 calc(var(--sticky-gutter, 0px) + 12px);
+  padding: 0 12px 0 calc(var(--sticky-gutter, 0px) + var(--editor-text-inset));
   border: 0;
   background: transparent;
   color: inherit;
@@ -4460,6 +4460,7 @@ button:focus-visible,
 }
 
 .code-hover {
+  max-width: min(460px, calc(100vw - 24px));
   max-height: min(280px, 45vh);
   overflow: auto;
   padding: 8px 12px;

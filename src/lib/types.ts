@@ -357,6 +357,7 @@ export interface LspRange {
 export interface EditorStatus {
   path: string;
   canUseEditorActions?: boolean;
+  canShowQuickDocumentation?: boolean;
   language: string;
   mode: FileMode;
   lines: number;

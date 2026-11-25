@@ -19,6 +19,14 @@ interface RankedCompletion extends Completion {
   serverSort?: string;
   description?: string | null;
   insertion?: string;
+  showDocumentation?: () => void;
+}
+
+export function showCompletionDocumentation(view: EditorView) {
+  const option = selectedCompletion(view.state) as RankedCompletion | null;
+  if (!option?.showDocumentation) return false;
+  option.showDocumentation();
+  return true;
 }
 
 const kinds: Record<number, string> = {
@@ -92,7 +100,6 @@ export function lspCompletionSource(projectId: string, path: string): Completion
             detail: item.detail ?? undefined,
             description: item.description,
             serverSort: item.sortText ?? undefined,
-            info: item.documentation ?? undefined,
             type: kinds[item.kind ?? 0] ?? "text",
             insertion: plainText,
             boost: 1,
@@ -113,24 +120,34 @@ export function lspCompletionSource(projectId: string, path: string): Completion
               else accept(resolved ?? null);
             },
           };
-          if (item.resolve) {
-            option.info = async () => {
-              await new Promise((ready) => setTimeout(ready, 260));
-              if (
-                context.aborted ||
-                !context.view ||
-                context.view.state.doc !== doc ||
-                selectedCompletion(context.view.state) !== option
-              )
-                return null;
-              const current = await resolve();
-              const text = current?.documentation || item.documentation || current?.detail;
-              if (!text) return null;
-              const node = document.createElement("div");
-              node.className = "completion-documentation";
-              node.textContent = text;
-              return node;
-            };
+          if (item.documentation || item.detail || item.resolve) {
+            option.info = () =>
+              new Promise((show) => {
+                // CodeMirror owns the pane and discards it when the selection changes.
+                const display = () => {
+                  const view = context.view;
+                  const isCurrent = () =>
+                    view?.dom.isConnected &&
+                    view.hasFocus &&
+                    view.state.doc === doc &&
+                    option.showDocumentation === display &&
+                    selectedCompletion(view.state) === option;
+                  if (!isCurrent()) return;
+                  void resolve().then((current) => {
+                    const text =
+                      current?.documentation ||
+                      item.documentation ||
+                      current?.detail ||
+                      item.detail;
+                    if (!isCurrent() || !text) return show(null);
+                    const node = document.createElement("div");
+                    node.className = "completion-documentation";
+                    node.textContent = text;
+                    show(node);
+                  });
+                };
+                option.showDocumentation = display;
+              });
           }
           return [option];
         }),
@@ -273,6 +290,28 @@ export function codeCompletion(
   return [
     autocompletion({
       aboveCursor,
+      positionInfo(_view, list, _option, _info, space) {
+        const gap = 6;
+        const left = list.left - space.left - gap;
+        const right = space.right - list.right - gap;
+        const side = left > right ? "right" : "left";
+        const width = Math.max(left, right);
+        if (width >= 160) {
+          return {
+            style: `${side}: calc(100% + ${gap}px); top: 0; max-width: ${Math.min(width, 375)}px; max-height: ${Math.max(0, space.bottom - list.top)}px`,
+          };
+        }
+        const above = list.top - space.top - gap;
+        const below = space.bottom - list.bottom - gap;
+        const edge = above > below ? "bottom" : "top";
+        const height = Math.max(above, below);
+        return {
+          style:
+            height >= 24
+              ? `${edge}: calc(100% + ${gap}px); left: 0; width: 100%; max-height: ${Math.min(height, 220)}px`
+              : "display: none",
+        };
+      },
       activateOnCompletion: (item) => !!pathCompletion && item.type === "folder",
       interactionDelay: 0,
       maxRenderedOptions: 32,

@@ -22,6 +22,8 @@ pub struct Preferences {
     pub match_brackets: bool,
     pub indent_with_tab: bool,
     pub auto_import_enabled: bool,
+    pub quick_documentation_on_hover: bool,
+    pub auto_parameter_info: bool,
     pub auto_save: bool,
     pub auto_save_delay: f64,
     pub search_case_sensitive: bool,
@@ -75,6 +77,8 @@ impl Default for Preferences {
             match_brackets: true,
             indent_with_tab: true,
             auto_import_enabled: false,
+            quick_documentation_on_hover: false,
+            auto_parameter_info: true,
             auto_save: true,
             auto_save_delay: 800.0,
             search_case_sensitive: false,
@@ -227,6 +231,8 @@ mod tests {
         assert_eq!(legacy.editor_font_size, 18.0);
         assert!(Preferences::from_stored(r#"{"unexpected":true}"#).is_err());
         assert!(legacy.typescript_enabled);
+        assert!(!legacy.quick_documentation_on_hover);
+        assert!(legacy.auto_parameter_info);
         assert!(!legacy.word_wrap);
         assert!(defaults.show_minimap);
         assert!(defaults.window_glass_enabled);
@@ -253,6 +259,8 @@ mod tests {
                 path_completion_enabled: false,
                 python_enabled: false,
                 typescript_enabled: false,
+                quick_documentation_on_hover: true,
+                auto_parameter_info: false,
                 ..defaults.clone()
             },
         };

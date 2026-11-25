@@ -22,6 +22,8 @@ export interface Preferences extends Record<BuiltinPluginKey, boolean> {
   matchBrackets: boolean;
   indentWithTab: boolean;
   autoImportEnabled: boolean;
+  quickDocumentationOnHover: boolean;
+  autoParameterInfo: boolean;
   autoSave: boolean;
   autoSaveDelay: number;
   searchCaseSensitive: boolean;
@@ -65,6 +67,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   matchBrackets: true,
   indentWithTab: true,
   autoImportEnabled: false,
+  quickDocumentationOnHover: false,
+  autoParameterInfo: true,
   autoSave: true,
   autoSaveDelay: 800,
   searchCaseSensitive: false,
@@ -222,6 +226,20 @@ export const PREFERENCE_FIELDS: PreferenceField[] = [
     category: "editor",
     label: "代码标题吸顶",
     description: "滚动时固定当前代码块的标题。",
+  },
+  {
+    key: "quickDocumentationOnHover",
+    type: "boolean",
+    category: "editor",
+    label: "悬停显示快速文档",
+    description: "鼠标停在符号上时显示说明。也可以按 F1 查看文档。",
+  },
+  {
+    key: "autoParameterInfo",
+    type: "boolean",
+    category: "editor",
+    label: "自动显示参数提示",
+    description: "进入函数调用后约 1 秒显示。也可以按 Ctrl+Shift+Space 查看。",
   },
   {
     key: "autoImportEnabled",

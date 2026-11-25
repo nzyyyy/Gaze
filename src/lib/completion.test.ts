@@ -1,14 +1,18 @@
 import {
   nextSnippetField,
   CompletionContext,
+  selectedCompletion,
+  setSelectedCompletion,
+  startCompletion,
   type CompletionResult,
 } from "@codemirror/autocomplete";
 import { history, undo } from "@codemirror/commands";
 import { EditorState, Transaction, type TransactionSpec } from "@codemirror/state";
-import type { EditorView } from "@codemirror/view";
+import { EditorView, runScopeHandlers } from "@codemirror/view";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type CodeCompletion } from "./api";
 import { codeCompletion, lspCompletionSource, snippetTemplate } from "./completion";
+import { editorLanguageTools } from "./editorLanguageTools";
 
 vi.mock("./api", () => ({ api: { completeCode: vi.fn(), resolveCompletion: vi.fn() } }));
 
@@ -55,6 +59,58 @@ beforeEach(() => {
 });
 
 describe("code completion", () => {
+  it("opens candidate documentation on F1 and discards it after a selection change", async () => {
+    vi.mocked(api.completeCode).mockResolvedValue({
+      items: [
+        { ...item, resolve: { session: "s", generation: 1, item: { label: "foo" } } },
+        { ...item, label: "format", documentation: "Formatting docs" },
+      ],
+    });
+    let finish!: (value: CodeCompletion) => void;
+    vi.mocked(api.resolveCompletion).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const view = new EditorView({
+      parent: document.body,
+      doc: "fo",
+      selection: { anchor: 2 },
+      extensions: [
+        codeCompletion("p", "a.ts"),
+        editorLanguageTools({ projectId: "p", path: "a.ts", wanted: () => true, notify: vi.fn() }),
+      ],
+    });
+    try {
+      view.focus();
+      startCompletion(view);
+      await vi.waitFor(() => expect(selectedCompletion(view.state)?.label).toBe("foo"));
+      expect(view.dom.querySelector(".completion-documentation")).toBeNull();
+      expect(api.resolveCompletion).not.toHaveBeenCalled();
+
+      const f1 = () =>
+        runScopeHandlers(view, new KeyboardEvent("keydown", { key: "F1" }), "editor");
+      expect(f1()).toBe(true);
+      expect(api.resolveCompletion).toHaveBeenCalledOnce();
+      view.dispatch({ effects: setSelectedCompletion(1) });
+      expect(selectedCompletion(view.state)?.label).toBe("format");
+      finish({ ...item, documentation: "Stale docs" });
+      await Promise.resolve();
+      expect(view.dom.querySelector(".completion-documentation")).toBeNull();
+
+      expect(f1()).toBe(true);
+      await vi.waitFor(() =>
+        expect(view.dom.querySelector(".completion-documentation")).toHaveTextContent(
+          "Formatting docs",
+        ),
+      );
+      expect(view.dom.querySelector(".cm-tooltip-autocomplete")).toBeInTheDocument();
+    } finally {
+      view.destroy();
+      view.dom.remove();
+    }
+  });
+
   it("sends the unsaved buffer and UTF-16 cursor, then replaces only the prefix", async () => {
     const view = editor("// 😀\nobj.fo");
     const source = lspCompletionSource("project", "hello.py");

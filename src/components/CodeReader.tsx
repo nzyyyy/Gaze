@@ -65,10 +65,10 @@ import { api, type RecoveryRecord } from "../lib/api";
 import { codeDiagnostics } from "../lib/diagnostics";
 import { autoImportExtension } from "../lib/autoImport";
 import { codeCompletion } from "../lib/completion";
-import { codeHover } from "../lib/hover";
 import { definitionLink } from "../lib/definitionLink";
 import { detectIndentation } from "../lib/indentation";
 import {
+  dismissEditorLanguageTooltip,
   editorLanguageTools,
   runEditorLanguageAction,
   type EditorLanguageAction,
@@ -151,6 +151,7 @@ export interface CodeReaderHandle {
   getViewState(): EditorViewState | null;
   reveal(request: RevealRequest): void;
   openFileSearch(): void;
+  dismissPopups(): void;
   runEditorAction(action: EditorLanguageAction): Promise<void> | undefined;
   focus(): void;
   getText(): string | null;
@@ -166,6 +167,7 @@ interface EditorSurfaceProps {
   tab: EditorTab;
   gitLocked?: boolean;
   active: boolean;
+  editorPopupsBlocked?: boolean;
   theme: ResolvedTheme;
   fontFamily?: string;
   preferences?: Preferences;
@@ -203,6 +205,7 @@ function editorTheme(
         color: "var(--text)",
         backgroundColor: "var(--editor-bg)",
         fontSize: `${preferences.editorFontSize}px`,
+        "--editor-text-inset": "6px",
       },
       "&.cm-focused": { outline: "none" },
       ".cm-scroller": {
@@ -211,12 +214,13 @@ function editorTheme(
         overflow: "auto",
       },
       ".cm-content": { padding: "12px 0 20px", caretColor: "var(--accent)" },
-      ".cm-line": { padding: "0 18px 0 12px" },
+      ".cm-line": { padding: "0 18px 0 var(--editor-text-inset)" },
       ".cm-gutters": {
         backgroundColor: "var(--editor-bg)",
         color: "var(--text-faint)",
         border: "none",
         paddingLeft: "8px",
+        "&.cm-gutters-before": { borderRight: "1px solid var(--border)" },
       },
       ".cm-lineNumbers .cm-gutterElement": { minWidth: "32px", padding: "0 10px 0 4px" },
       ".cm-activeLine": { backgroundColor: "var(--active-line)" },
@@ -494,6 +498,7 @@ export function CodeReader({
   tab,
   gitLocked = false,
   active,
+  editorPopupsBlocked = false,
   theme,
   fontFamily,
   preferences = DEFAULT_PREFERENCES,
@@ -536,6 +541,8 @@ export function CodeReader({
   const initialViewDocumentRef = useRef<LoadedState | null>(null);
   const revealRef = useRef(reveal);
   const activeRef = useRef(active);
+  const editorPopupsBlockedRef = useRef(editorPopupsBlocked);
+  editorPopupsBlockedRef.current = editorPopupsBlocked;
   const onNoticeRef = useRef(onNotice);
   onNoticeRef.current = onNotice;
   const onDirtyChangeRef = useRef(onDirtyChange);
@@ -600,14 +607,17 @@ export function CodeReader({
   const minimap = useBuiltinFeature("showMinimap", preferences.showMinimap);
   const previewVisible =
     preview && markdown && loaded?.content.kind === "text" && loaded.content.mode === "normal";
-  const canUseEditorActions =
+  const canShowQuickDocumentation =
     active &&
     semanticEnabled &&
     !previewVisible &&
-    !gitLocked &&
     !tab.projectId.startsWith("external:") &&
     loaded?.content.kind === "text" &&
-    loaded.content.mode === "normal" &&
+    loaded.content.mode === "normal";
+  const canUseEditorActions =
+    canShowQuickDocumentation &&
+    !gitLocked &&
+    loaded?.content.kind === "text" &&
     loaded.content.editable;
   const pathCompletion = useMemo(
     () =>
@@ -988,6 +998,12 @@ export function CodeReader({
         if (viewRef.current) {
           openEditorSearch(viewRef.current);
         }
+      },
+      dismissPopups() {
+        const view = viewRef.current;
+        if (!view) return;
+        dismissEditorLanguageTooltip(view);
+        closeCompletion(view);
       },
       runEditorAction(action) {
         const view = viewRef.current;
@@ -1380,9 +1396,27 @@ export function CodeReader({
     const document = documentRef.current;
     if (!view || document?.mode !== "normal") return;
     closeCompletion(view);
+    const wanted = () =>
+      viewRef.current === view &&
+      activeRef.current &&
+      !previewRef.current &&
+      !editorPopupsBlockedRef.current &&
+      !operationLockedRef.current;
+    const notify = (message: string) => onNoticeRef.current?.(message);
     view.dispatch({
       effects: languageToolsCompartment.current.reconfigure([
-        semanticEnabled ? codeHover(tab.projectId, tab.path) : [],
+        // Cancel pending hints before the completion keymap handles Escape.
+        canShowQuickDocumentation
+          ? editorLanguageTools({
+              projectId: tab.projectId,
+              path: tab.path,
+              autoParameterInfo: preferences.autoParameterInfo,
+              hoverEnabled: preferences.quickDocumentationOnHover,
+              wanted,
+              canEdit: () => !gitLockedRef.current,
+              notify,
+            })
+          : [],
         document.editable
           ? codeCompletion(
               tab.projectId,
@@ -1392,19 +1426,6 @@ export function CodeReader({
               Boolean(inlineCompletion),
               pathCompletion,
             )
-          : [],
-        canUseEditorActions
-          ? editorLanguageTools({
-              projectId: tab.projectId,
-              path: tab.path,
-              wanted: () =>
-                viewRef.current === view &&
-                activeRef.current &&
-                !previewRef.current &&
-                !operationLockedRef.current &&
-                !gitLockedRef.current,
-              notify: (message) => onNoticeRef.current?.(message),
-            })
           : [],
       ]),
     });
@@ -1416,7 +1437,9 @@ export function CodeReader({
     semanticEnabled,
     inlineCompletion,
     pathCompletion,
-    canUseEditorActions,
+    canShowQuickDocumentation,
+    preferences.quickDocumentationOnHover,
+    preferences.autoParameterInfo,
     pythonRevision,
   ]);
 
@@ -1565,6 +1588,7 @@ export function CodeReader({
     onStatus({
       path: tab.path,
       canUseEditorActions,
+      canShowQuickDocumentation,
       language: languageLabel,
       mode: text.mode,
       lines: lineCount,
@@ -1582,6 +1606,7 @@ export function CodeReader({
     languageLabel,
     lineCount,
     canUseEditorActions,
+    canShowQuickDocumentation,
     dirty,
     saving,
     pauseReason,
