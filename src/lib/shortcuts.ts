@@ -91,9 +91,23 @@ export const SHORTCUT_COMMANDS = [
   { id: "prev-problem", group: "editor", label: "上一个问题", key: "Shift+F2" },
   { id: "extend-selection", group: "editor", label: "扩大选区", key: "Alt+ArrowUp" },
   { id: "shrink-selection", group: "editor", label: "缩小选区", key: "Alt+ArrowDown" },
+  { id: "select-next-match", group: "editor", label: "选中下一个匹配", key: "Ctrl+KeyG" },
+  { id: "deselect-match", group: "editor", label: "撤回最后一个匹配", key: "Ctrl+Shift+KeyG" },
+  { id: "select-all-matches", group: "editor", label: "选中全部匹配", key: "Mod+Ctrl+KeyG" },
+  { id: "column-selection", group: "editor", label: "列选择模式", key: "Mod+Shift+Digit8" },
+  { id: "duplicate", group: "editor", label: "复制行或选区", key: "Mod+KeyD" },
+  { id: "move-line-up", group: "editor", label: "上移行", key: "Alt+Shift+ArrowUp" },
+  { id: "move-line-down", group: "editor", label: "下移行", key: "Alt+Shift+ArrowDown" },
+  { id: "move-statement-up", group: "editor", label: "上移语句", key: "Mod+Shift+ArrowUp" },
+  { id: "move-statement-down", group: "editor", label: "下移语句", key: "Mod+Shift+ArrowDown" },
+  { id: "delete-line", group: "editor", label: "删除整行", key: "Mod+Backspace" },
+  { id: "go-to-line", group: "editor", label: "跳到行列…", key: "Mod+KeyL" },
+  { id: "replace-in-file", group: "editor", label: "文件内替换", key: "Mod+KeyR" },
+  { id: "copy-location", group: "editor", label: "复制当前位置", key: "Mod+Alt+Shift+KeyC" },
 ] as const satisfies readonly ShortcutCommand[];
 
 export type ShortcutCommandId = (typeof SHORTCUT_COMMANDS)[number]["id"];
+type WorkspaceShortcutId = Exclude<(typeof SHORTCUT_COMMANDS)[number], { group: "editor" }>["id"];
 
 const MODIFIERS = ["Mod", "Ctrl", "Alt", "Shift"] as const;
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
@@ -250,7 +264,10 @@ export function shortcutBinding(
 ): KeyBinding | null {
   if (!shortcut) return null;
   return {
-    any: (view, event) => (shortcutFromEvent(event) === shortcut ? run(view) : false),
+    any: (view, event) =>
+      !event.isComposing && !view.compositionStarted && shortcutFromEvent(event) === shortcut
+        ? run(view)
+        : false,
     scope,
   };
 }
@@ -272,10 +289,24 @@ export function shortcutKeymap(
 export function matchShortcut(
   event: ShortcutEvent,
   bindings: ShortcutBindings,
+): ShortcutCommandId | null;
+export function matchShortcut(
+  event: ShortcutEvent,
+  bindings: ShortcutBindings,
+  scope: "workspace",
+): WorkspaceShortcutId | null;
+export function matchShortcut(
+  event: ShortcutEvent,
+  bindings: ShortcutBindings,
+  scope?: "workspace",
 ): ShortcutCommandId | null {
   const shortcut = shortcutFromEvent(event);
   if (!shortcut) return null;
-  return SHORTCUT_COMMANDS.find(({ id }) => bindings[id] === shortcut)?.id ?? null;
+  return (
+    SHORTCUT_COMMANDS.find(
+      ({ id, group }) => (scope !== "workspace" || group !== "editor") && bindings[id] === shortcut,
+    )?.id ?? null
+  );
 }
 
 /** `[key, ids]` for every key assigned to more than one command. */
@@ -286,7 +317,11 @@ export function shortcutConflicts(bindings: ShortcutBindings): [string, string[]
     if (!shortcut) continue;
     owners.set(shortcut, [...(owners.get(shortcut) ?? []), id]);
   }
-  return [...owners].filter(([, ids]) => ids.length > 1);
+  return [...owners].filter(
+    ([, ids]) =>
+      ids.length > 1 &&
+      !(ids.length === 2 && ids.includes("delete-file") && ids.includes("delete-line")),
+  );
 }
 
 export function shortcutCommandLabel(id: string): string {

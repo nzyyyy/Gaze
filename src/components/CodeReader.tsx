@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type Ref,
 } from "react";
 import { flushSync } from "react-dom";
@@ -21,11 +22,19 @@ import {
   setDiagnosticsEffect,
 } from "@codemirror/lint";
 import {
+  addCursorAbove,
+  addCursorBelow,
+  copyLineDown,
+  copyLineUp,
   defaultKeymap,
+  deleteLine,
+  deleteLineBoundaryBackward,
   history,
   historyKeymap,
   indentWithTab,
   isolateHistory,
+  moveLineDown,
+  moveLineUp,
 } from "@codemirror/commands";
 import {
   bracketMatching,
@@ -36,10 +45,13 @@ import {
   syntaxHighlighting,
 } from "@codemirror/language";
 import {
+  gotoLine,
   highlightSelectionMatches,
   openSearchPanel,
   search,
   searchKeymap,
+  selectNextOccurrence,
+  selectSelectionMatches,
 } from "@codemirror/search";
 import { Compartment, EditorState, Prec, type Extension, type Text } from "@codemirror/state";
 import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
@@ -63,6 +75,9 @@ import { computeChangeBlocksAsync } from "../git/lineDiffClient";
 import type { ChangeBlock } from "../git/lineDiff";
 import { api, type RecoveryRecord } from "../lib/api";
 import { codeDiagnostics } from "../lib/diagnostics";
+import { columnSelection, isWithinEditorSelection } from "../lib/columnSelection";
+import { writeEditorClipboard } from "../lib/editorClipboard";
+import { editorCommands, matchSelection } from "../lib/editorCommands";
 import { autoImportExtension } from "../lib/autoImport";
 import { codeCompletion } from "../lib/completion";
 import { definitionLink } from "../lib/definitionLink";
@@ -76,12 +91,7 @@ import {
 import { indentGuides } from "../lib/indentGuides";
 import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
 import { rainbowBrackets } from "../lib/rainbowBrackets";
-import {
-  extendSyntaxSelection,
-  shrinkSyntaxSelection,
-  stickyScroll,
-  syntaxSelection,
-} from "../lib/readingTools";
+import { stickyScroll, syntaxSelection } from "../lib/readingTools";
 import { resolveShortcuts, shortcutKeymap, type NavigationTarget } from "../lib/shortcuts";
 import type { EditorViewState } from "../lib/session";
 import { isMarkdownFile, matchLanguage } from "../lib/language";
@@ -92,6 +102,8 @@ import {
   useSemanticAvailability,
 } from "../plugins/runtime";
 import { EditorProblems, type EditorProblem } from "./EditorProblems";
+import { EditorContextMenu } from "./EditorContextMenu";
+import type { MenuTarget } from "./ContextMenu";
 import { Select } from "./Select";
 import type {
   EditorPane,
@@ -186,6 +198,8 @@ interface EditorSurfaceProps {
   onGoToDefinition?: (position: TextPosition, result: NavigationResult) => void;
   /** Returns whether the workspace handled the target; `undefined` skips the editor binding. */
   onNavigate?: (target: NavigationTarget) => boolean;
+  onActivate?: () => void;
+  onSearchSelection?: (text: string) => void;
   onOpenMarkdownFile?: (projectId: string, path: string, fragment: string | null) => void;
   onNotice?: (message: string) => void;
   onStatus: (status: EditorStatus | null) => void;
@@ -415,15 +429,37 @@ function initialExtensions(
   onDocumentChanged: (view: EditorView) => void,
 ) {
   const keyBindings = [
-    ...searchKeymap.filter(({ key }) => key !== "Mod-f"),
+    ...searchKeymap.filter(
+      ({ key, run }) =>
+        key !== "Mod-f" &&
+        run !== gotoLine &&
+        run !== selectNextOccurrence &&
+        run !== selectSelectionMatches,
+    ),
     ...foldKeymap,
     ...(editable ? closeBracketsKeymap : []),
-    ...defaultKeymap,
+    ...defaultKeymap.filter(
+      ({ run }) =>
+        ![
+          moveLineUp,
+          moveLineDown,
+          copyLineUp,
+          copyLineDown,
+          deleteLine,
+          deleteLineBoundaryBackward,
+          addCursorAbove,
+          addCursorBelow,
+        ].some((command) => command === run),
+    ),
     ...historyKeymap,
   ];
   const extensions = [
     highlightSpecialChars(),
     drawSelection(),
+    EditorState.allowMultipleSelections.of(true),
+    columnSelection,
+    matchSelection,
+    syntaxSelection,
     rectangularSelection(),
     ...(editable ? [closeBrackets()] : []),
     history(),
@@ -431,6 +467,7 @@ function initialExtensions(
     EditorView.editable.of(editable),
     EditorView.contentAttributes.of(() => ({
       "aria-label": t("{0}代码文件 {1}", editable ? "" : t("只读"), fileName),
+      tabindex: "0",
       spellcheck: "false",
       autocapitalize: "off",
       autocorrect: "off",
@@ -458,9 +495,12 @@ function preferenceExtensions(
   mode: TextFile["mode"],
   editable: boolean,
   text: string,
+  fileName: string,
   onNavigate: ((target: NavigationTarget) => boolean) | undefined,
+  onCopyLocation: (view: EditorView) => boolean,
 ) {
   const shortcuts = resolveShortcuts(preferences.shortcuts);
+  const plainText = mode !== "normal" || !matchLanguage(fileName).description;
   const navigate = (view: EditorView, target: NavigationTarget) => {
     if (!onNavigate?.(target)) return false;
     view.focus();
@@ -468,6 +508,27 @@ function preferenceExtensions(
   };
   const extensions: Extension[] = [
     Prec.high(shortcutKeymap(shortcuts, { find: openEditorSearch }, "editor search-panel")),
+    Prec.high(
+      shortcutKeymap(
+        shortcuts,
+        {
+          "replace-in-file": editorCommands["replace-in-file"],
+        },
+        "search-panel",
+      ),
+    ),
+    Prec.high(
+      shortcutKeymap(shortcuts, {
+        ...editorCommands,
+        "move-statement-up": plainText
+          ? editorCommands["move-line-up"]
+          : editorCommands["move-statement-up"],
+        "move-statement-down": plainText
+          ? editorCommands["move-line-down"]
+          : editorCommands["move-statement-down"],
+        "copy-location": onCopyLocation,
+      }),
+    ),
     EditorState.tabSize.of(preferences.tabSize),
     indentUnit.of(
       mode === "normal"
@@ -486,8 +547,6 @@ function preferenceExtensions(
         shortcutKeymap(shortcuts, {
           "next-problem": nextDiagnostic,
           "prev-problem": previousDiagnostic,
-          "extend-selection": extendSyntaxSelection,
-          "shrink-selection": shrinkSyntaxSelection,
           back: (view) => navigate(view, "back"),
           forward: (view) => navigate(view, "forward"),
           definition: (view) => navigate(view, "definition"),
@@ -496,7 +555,6 @@ function preferenceExtensions(
         }),
       ),
       rainbowBrackets,
-      syntaxSelection,
     );
     if (preferences.showStickyScroll) extensions.push(stickyScroll);
     if (preferences.showIndentGuides) extensions.push(indentGuides);
@@ -536,6 +594,8 @@ export function CodeReader({
   onOpenMarkdownFile,
   onGoToDefinition,
   onNavigate,
+  onActivate,
+  onSearchSelection,
   onNotice,
   onStatus,
   onDirtyChange,
@@ -545,6 +605,12 @@ export function CodeReader({
   const language = useLanguage();
   const surfaceRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    view: EditorView;
+    target: MenuTarget;
+    state: EditorState;
+  } | null>(null);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
   const diagnosticsCompartment = useRef(new Compartment());
   const autoImportCompartment = useRef(new Compartment());
   const languageToolsCompartment = useRef(new Compartment());
@@ -570,6 +636,16 @@ export function CodeReader({
   const editorPopupsBlockedRef = useRef(editorPopupsBlocked);
   editorPopupsBlockedRef.current = editorPopupsBlocked;
   const onNoticeRef = useRef(onNotice);
+  const copyLocation = useCallback(
+    (view: EditorView) => {
+      const number = view.state.doc.lineAt(view.state.selection.main.head).number;
+      void writeEditorClipboard(`${tab.path}:${number}`).catch((error: unknown) =>
+        onNoticeRef.current?.(errorMessage(error)),
+      );
+      return true;
+    },
+    [tab.path],
+  );
   onNoticeRef.current = onNotice;
   const onDirtyChangeRef = useRef(onDirtyChange);
   const onSavedRef = useRef(onSaved);
@@ -1243,7 +1319,9 @@ export function CodeReader({
             content.mode,
             content.editable,
             content.content,
+            tab.name,
             appNavigation,
+            copyLocation,
           ),
         ),
         operationCompartment.current.of(
@@ -1324,7 +1402,7 @@ export function CodeReader({
     };
     // The editor is rebuilt only when a document revision is loaded.
     // Theme changes are applied through the theme compartment below.
-  }, [loaded, tab.name, markdown, clearAutoSaveTimer, resumeAutoSave]);
+  }, [loaded, tab.name, markdown, clearAutoSaveTimer, resumeAutoSave, copyLocation]);
 
   useEffect(() => {
     viewRef.current?.dispatch({
@@ -1334,6 +1412,8 @@ export function CodeReader({
             ? {
                 Find: "查找",
                 Replace: "替换",
+                "Go to line": "跳到行列",
+                go: "跳转",
                 next: "下一个",
                 previous: "上一个",
                 all: "全部",
@@ -1420,11 +1500,17 @@ export function CodeReader({
             document.mode,
             document.editable,
             document.content,
+            tab.name,
             appNavigation,
+            copyLocation,
           ),
         ),
       });
-  }, [preferences, loaded, appNavigation]);
+  }, [preferences, loaded, tab.name, appNavigation, copyLocation]);
+
+  useEffect(() => {
+    if (!active || previewVisible || editorPopupsBlocked) closeContextMenu();
+  }, [active, closeContextMenu, editorPopupsBlocked, previewVisible]);
 
   useEffect(() => {
     viewRef.current?.dispatch({ effects: minimapCompartment.current.reconfigure(minimap ?? []) });
@@ -1787,6 +1873,35 @@ export function CodeReader({
     view.focus();
   };
 
+  const openContextMenu = (pointer?: ReactMouseEvent<HTMLDivElement>) => {
+    const view = viewRef.current;
+    if (!view || previewVisible || editorPopupsBlocked || view.compositionStarted) return;
+    if (pointer && !view.contentDOM.contains(pointer.target as Node)) return;
+    pointer?.preventDefault();
+    onActivate?.();
+    if (pointer) {
+      const position = view.posAtCoords({ x: pointer.clientX, y: pointer.clientY }, false);
+      if (!isWithinEditorSelection(view, position, pointer.clientX)) {
+        view.dispatch({ selection: { anchor: position }, userEvent: "select.pointer" });
+      }
+    }
+    closeCompletion(view);
+    dismissEditorLanguageTooltip(view);
+    view.dispatch({ effects: closeHoverTooltips });
+    const anchor = view.coordsAtPos(view.state.selection.main.head);
+    const bounds = view.dom.getBoundingClientRect();
+    setContextMenu({
+      view,
+      state: view.state,
+      target: {
+        x: pointer?.clientX ?? anchor?.left ?? bounds.left,
+        y: pointer?.clientY ?? anchor?.bottom ?? bounds.top,
+        trigger: view.contentDOM,
+        focusFirstItem: pointer === undefined,
+      },
+    });
+  };
+
   const text = documentRef.current ?? loaded.content;
   return (
     <section
@@ -1933,7 +2048,55 @@ export function CodeReader({
         className={`editor-surface-wrap${minimap ? " has-minimap" : ""}`}
         hidden={previewVisible}
       >
-        <div className="editor-surface" ref={surfaceRef} />
+        <div
+          className="editor-surface"
+          ref={surfaceRef}
+          onContextMenu={openContextMenu}
+          onMouseDownCapture={(event) => {
+            if (
+              event.button === 0 &&
+              event.ctrlKey &&
+              !event.altKey &&
+              !event.metaKey &&
+              /Mac/.test(navigator.userAgent) &&
+              viewRef.current?.contentDOM.contains(event.target as Node)
+            ) {
+              event.stopPropagation();
+              openContextMenu(event);
+            }
+          }}
+          onKeyDown={(event) => {
+            if (
+              (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) &&
+              viewRef.current?.contentDOM.contains(event.target as Node)
+            ) {
+              event.preventDefault();
+              event.stopPropagation();
+              openContextMenu();
+            }
+          }}
+        />
+        {contextMenu && active && !previewVisible && !editorPopupsBlocked && (
+          <EditorContextMenu
+            {...contextMenu}
+            shortcuts={resolveShortcuts(preferences.shortcuts)}
+            canUseLanguage={canShowQuickDocumentation}
+            canNavigate={text.mode === "normal" && !tab.projectId.startsWith("external:")}
+            canFold={text.mode === "normal" && preferences.codeFolding}
+            onClose={closeContextMenu}
+            isCurrent={() =>
+              viewRef.current === contextMenu.view &&
+              activeRef.current &&
+              !previewRef.current &&
+              !editorPopupsBlockedRef.current
+            }
+            canEdit={() => !gitLockedRef.current && !operationLockedRef.current}
+            onNavigate={appNavigation}
+            onCopyLocation={copyLocation}
+            onSearchSelection={onSearchSelection}
+            onError={(error) => onNoticeRef.current?.(errorMessage(error))}
+          />
+        )}
         {active && semanticEnabled && !previewVisible && problems && (
           <EditorProblems
             problems={problems.items}

@@ -57,7 +57,8 @@ import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
 import type { RecoveryRecord } from "../lib/api";
 import type { NavigationTarget } from "../lib/shortcuts";
 import { setLanguage } from "../lib/i18n";
-import { EditorState, StateEffect } from "@codemirror/state";
+import { EditorSelection, EditorState, StateEffect } from "@codemirror/state";
+import { columnMode, selectedEditorText } from "../lib/columnSelection";
 import { pluginApi } from "../plugins/api";
 import { PluginProvider } from "../plugins/runtime";
 
@@ -192,6 +193,312 @@ it("binds navigation and problem keys from the configured shortcuts", async () =
   fireEvent.keyDown(view.contentDOM, { code: "F4", key: "F4" });
   expect(onNavigate).toHaveBeenCalledTimes(2);
   expect(onNavigate).toHaveBeenLastCalledWith("back");
+});
+
+it("selects matches in temporal order and keeps the latest selected match as the primary cursor", async () => {
+  const content = "name names name NAME name";
+  renderReader({ content });
+  const dom = await editorContent();
+  const view = EditorView.findFromDOM(dom)!;
+  view.focus();
+  act(() => view.dispatch({ selection: { anchor: 12 } }));
+  const next = () => fireEvent.keyDown(dom, { code: "KeyG", key: "g", ctrlKey: true });
+  next();
+  next();
+  next();
+  expect(view.state.selection.ranges.map(({ from }) => from)).toEqual([0, 11, 21]);
+  expect(view.state.selection.main.from).toBe(0);
+  fireEvent.keyDown(dom, { code: "KeyG", key: "G", ctrlKey: true, shiftKey: true });
+  expect(view.state.selection.ranges.map(({ from }) => from)).toEqual([11, 21]);
+  expect(view.state.selection.main.from).toBe(21);
+  fireEvent.keyDown(dom, { code: "Escape", key: "Escape" });
+  expect(view.state.selection.ranges.map(({ from, to }) => [from, to])).toEqual([[25, 25]]);
+  act(() => view.dispatch({ selection: { anchor: 1 } }));
+  fireEvent.keyDown(dom, { code: "KeyG", key: "g", ctrlKey: true, metaKey: true });
+  expect(view.state.selection.ranges.map(({ from }) => from)).toEqual([0, 11, 21]);
+});
+
+it("duplicates selected text and entire lines, moves and deletes lines, and opens the file shortcuts", async () => {
+  renderReader({ content: "first\nlast" });
+  const dom = await editorContent();
+  const view = EditorView.findFromDOM(dom)!;
+  view.focus();
+  const key = (code: string, name: string) =>
+    fireEvent.keyDown(dom, { code, key: name, metaKey: true });
+  act(() => view.dispatch({ selection: { anchor: 1, head: 3 } }));
+  key("KeyD", "d");
+  expect(view.state.doc.toString()).toBe("firirst\nlast");
+  act(() => view.dispatch({ selection: { anchor: 0 } }));
+  key("KeyD", "d");
+  expect(view.state.doc.toString()).toBe("firirst\nfirirst\nlast");
+  act(() => view.dispatch({ selection: { anchor: view.state.doc.line(3).from } }));
+  fireEvent.keyDown(dom, { code: "ArrowUp", key: "ArrowUp", altKey: true, shiftKey: true });
+  expect(view.state.doc.toString()).toBe("firirst\nlast\nfirirst");
+  key("Backspace", "Backspace");
+  expect(view.state.doc.toString()).toBe("firirst\nfirirst");
+  key("KeyL", "l");
+  expect(document.querySelector(".cm-goto-line input")).toHaveFocus();
+  fireEvent.keyDown(document.activeElement!, { key: "Escape", code: "Escape" });
+  key("KeyR", "r");
+  expect(document.querySelector('.cm-search input[name="replace"]')).toHaveFocus();
+});
+
+it("moves a complete TypeScript statement and its inline comment with Command Shift arrows", async () => {
+  const original = "first(\n  1,\n); // first\nsecond();\n";
+  renderReader({ content: original });
+  const dom = await editorContent();
+  const view = EditorView.findFromDOM(dom)!;
+  await waitFor(() => expect(syntaxTree(view.state).topNode.name).toBe("Script"));
+  view.focus();
+  act(() => view.dispatch({ selection: { anchor: original.indexOf("1") } }));
+  fireEvent.keyDown(dom, { code: "ArrowDown", key: "ArrowDown", metaKey: true, shiftKey: true });
+  const moved = "second();\nfirst(\n  1,\n); // first\n";
+  expect(view.state.doc.toString()).toBe(moved);
+  expect(view.state.selection.main.head).toBe(moved.indexOf("1"));
+  expect(view.state.selection.main.empty).toBe(true);
+  fireEvent.keyDown(dom, { code: "ArrowUp", key: "ArrowUp", metaKey: true, shiftKey: true });
+  expect(view.state.doc.toString()).toBe(original);
+  act(() => {
+    undo(view);
+  });
+  expect(view.state.doc.toString()).toBe(moved);
+});
+
+it("keeps moved Python statements and their comments in the same suite", async () => {
+  const original =
+    "def run():\n    first()\n    # Attached\n    second(\n        1,\n    )\n\noutside()\n";
+  renderReader({ filename: "example.py", content: original });
+  const dom = await editorContent();
+  const view = EditorView.findFromDOM(dom)!;
+  await waitFor(() =>
+    expect(syntaxTree(view.state).topNode.firstChild?.name).toBe("FunctionDefinition"),
+  );
+  view.focus();
+  act(() => view.dispatch({ selection: { anchor: original.indexOf("second") } }));
+  const up = () =>
+    fireEvent.keyDown(dom, { code: "ArrowUp", key: "ArrowUp", metaKey: true, shiftKey: true });
+  const moved =
+    "def run():\n    # Attached\n    second(\n        1,\n    )\n    first()\n\noutside()\n";
+  up();
+  expect(view.state.doc.toString()).toBe(moved);
+  up();
+  expect(view.state.doc.toString()).toBe(moved);
+});
+
+it("leaves code intact if rearranging statements would merge them", async () => {
+  const content = "const zero = 0;\n(first)()\nsecond()\n";
+  renderReader({ content });
+  const dom = await editorContent();
+  const view = EditorView.findFromDOM(dom)!;
+  await waitFor(() => expect(syntaxTree(view.state).topNode.name).toBe("Script"));
+  view.focus();
+  act(() => view.dispatch({ selection: { anchor: content.indexOf("first") } }));
+  fireEvent.keyDown(dom, { code: "ArrowDown", key: "ArrowDown", metaKey: true, shiftKey: true });
+  expect(view.state.doc.toString()).toBe(content);
+  expect(view.state.selection.main.empty).toBe(true);
+});
+
+it("moves a method within its class instead of moving the enclosing declaration", async () => {
+  const content = "class Example {\n  first() {\n    run();\n  }\n  second() {}\n}\noutside();\n";
+  renderReader({ content });
+  const dom = await editorContent();
+  const view = EditorView.findFromDOM(dom)!;
+  await waitFor(() => expect(syntaxTree(view.state).topNode.name).toBe("Script"));
+  view.focus();
+  act(() => view.dispatch({ selection: { anchor: content.indexOf("first") } }));
+  fireEvent.keyDown(dom, { code: "ArrowDown", key: "ArrowDown", metaKey: true, shiftKey: true });
+  expect(view.state.doc.toString()).toBe(
+    "class Example {\n  second() {}\n  first() {\n    run();\n  }\n}\noutside();\n",
+  );
+});
+
+it("honors duplicate remapping and does not fall back to the former move-line binding", async () => {
+  renderReader({
+    content: "first\nlast",
+    preferences: { ...DEFAULT_PREFERENCES, shortcuts: { duplicate: "F4", "move-line-down": "" } },
+  });
+  const dom = await editorContent();
+  const view = EditorView.findFromDOM(dom)!;
+  view.focus();
+  fireEvent.keyDown(dom, { code: "KeyD", key: "d", metaKey: true });
+  fireEvent.keyDown(dom, { code: "ArrowDown", key: "ArrowDown", altKey: true, shiftKey: true });
+  fireEvent.keyDown(dom, { code: "F4", key: "F4", isComposing: true });
+  expect(view.state.doc.toString()).toBe("first\nlast");
+  fireEvent.keyDown(dom, { code: "F4", key: "F4" });
+  expect(view.state.doc.toString()).toBe("first\nfirst\nlast");
+});
+
+it("moves lines with statement shortcuts in a plain-text gitignore", async () => {
+  renderReader({ filename: ".gitignore", content: "node_modules/\ndist/\ncoverage/\n" });
+  const dom = await editorContent();
+  const view = EditorView.findFromDOM(dom)!;
+  view.focus();
+  fireEvent.keyDown(dom, { code: "ArrowDown", key: "ArrowDown", metaKey: true, shiftKey: true });
+  expect(view.state.doc.toString()).toBe("dist/\nnode_modules/\ncoverage/\n");
+  expect(view.state.selection.main.head).toBe(6);
+  fireEvent.keyDown(dom, { code: "ArrowUp", key: "ArrowUp", metaKey: true, shiftKey: true });
+  expect(view.state.doc.toString()).toBe("node_modules/\ndist/\ncoverage/\n");
+});
+
+it("adds and removes mouse carets and clones the primary caret with a double Option gesture", async () => {
+  renderReader({
+    content: "one\ntwo\nthree",
+    preferences: { ...DEFAULT_PREFERENCES, wordWrap: false },
+  });
+  const dom = await editorContent();
+  const view = EditorView.findFromDOM(dom)!;
+  view.focus();
+  const position = vi.spyOn(view, "posAtCoords").mockReturnValue(4);
+  fireEvent.mouseDown(dom, { button: 0, altKey: true, shiftKey: true });
+  expect(view.state.selection.ranges.map(({ head }) => head)).toEqual([0, 4]);
+  fireEvent.mouseDown(dom, { button: 0, altKey: true, shiftKey: true });
+  expect(view.state.selection.ranges.map(({ head }) => head)).toEqual([0]);
+  position.mockRestore();
+  vi.spyOn(view, "moveVertically").mockReturnValue(EditorSelection.cursor(4));
+  fireEvent.keyDown(dom, { code: "AltLeft", key: "Alt", altKey: true });
+  fireEvent.keyUp(dom, { code: "AltLeft", key: "Alt" });
+  fireEvent.keyDown(dom, { code: "AltLeft", key: "Alt", altKey: true });
+  fireEvent.keyDown(dom, { code: "ArrowDown", key: "ArrowDown", altKey: true });
+  expect(view.state.selection.ranges.map(({ head }) => head)).toEqual([0, 4]);
+  expect(view.state.selection.main.head).toBe(4);
+});
+
+it("copies virtual columns and pads paste and IME input in a single undoable edit", async () => {
+  const original = "\tab\nx\n";
+  const user = userEvent.setup();
+  renderReader({ content: original, preferences: { ...DEFAULT_PREFERENCES, tabSize: 4 } });
+  const dom = await editorContent();
+  const view = EditorView.findFromDOM(dom)!;
+  view.focus();
+  act(() => view.dispatch({ selection: { anchor: 3 } }));
+  fireEvent.keyDown(dom, { code: "Digit8", key: "*", metaKey: true, shiftKey: true });
+  expect(columnMode(view.state)).toBe(true);
+  fireEvent.keyDown(dom, { code: "ArrowDown", key: "ArrowDown", shiftKey: true });
+  fireEvent.keyDown(dom, { code: "ArrowRight", key: "ArrowRight", shiftKey: true });
+  expect(selectedEditorText(view.state)).toBe(" \n ");
+  expect(view.state.doc.toString()).toBe(original);
+  await navigator.clipboard.writeText("Y\nZ");
+  await user.paste();
+  expect(view.state.doc.toString()).toBe("\tabY\nx     Z\n");
+  act(() => {
+    undo(view);
+  });
+  expect(view.state.doc.toString()).toBe(original);
+  expect(selectedEditorText(view.state)).toBe(" \n ");
+  act(() => view.dispatch({ selection: { anchor: 3 } }));
+  fireEvent.keyDown(dom, { code: "ArrowDown", key: "ArrowDown", shiftKey: true });
+  act(() => view.dispatch(view.state.replaceSelection("中"), { userEvent: "input.type.compose" }));
+  expect(view.state.doc.toString()).toBe("\tab中\nx     中\n");
+  act(() => {
+    undo(view);
+  });
+  expect(view.state.doc.toString()).toBe(original);
+});
+
+it("tracks virtual columns during a mouse drag and keeps line endings intact on Delete", async () => {
+  const original = "\tab\nx\n";
+  renderReader({ content: original, preferences: { ...DEFAULT_PREFERENCES, tabSize: 4 } });
+  const dom = await editorContent();
+  const view = EditorView.findFromDOM(dom)!;
+  view.focus();
+  fireEvent.keyDown(dom, { code: "Digit8", key: "*", metaKey: true, shiftKey: true });
+  vi.spyOn(view, "defaultCharacterWidth", "get").mockReturnValue(8);
+  vi.spyOn(view, "posAtCoords").mockImplementation(({ y }) => (y < 20 ? 3 : 5));
+  vi.spyOn(view, "coordsAtPos").mockImplementation((pos) =>
+    pos === 3
+      ? { left: 48, right: 48, top: 5, bottom: 18 }
+      : { left: 8, right: 8, top: 24, bottom: 38 },
+  );
+  fireEvent.mouseDown(dom, { button: 0, buttons: 1, detail: 1, clientX: 48, clientY: 10 });
+  fireEvent.mouseMove(document, { buttons: 1, clientX: 64, clientY: 30 });
+  fireEvent.mouseUp(document, { button: 0, clientX: 64, clientY: 30 });
+  expect(selectedEditorText(view.state)).toBe("  \n  ");
+  fireEvent.keyDown(dom, { code: "Delete", key: "Delete" });
+  expect(view.state.doc.toString()).toBe(original);
+  fireEvent.keyDown(dom, { code: "Delete", key: "Delete" });
+  expect(view.state.doc.toString()).toBe(original);
+  fireEvent.keyDown(dom, { code: "Backspace", key: "Backspace" });
+  expect(view.state.doc.toString()).toBe("\ta\nx\n");
+});
+
+it("opens the contextual menu without collapsing ranges and scopes clipboard actions to unchanged state", async () => {
+  const user = userEvent.setup();
+  renderReader({ content: "first second" });
+  const dom = await editorContent();
+  const view = EditorView.findFromDOM(dom)!;
+  act(() =>
+    view.dispatch({
+      selection: EditorSelection.create([
+        EditorSelection.range(0, 5),
+        EditorSelection.range(6, 12),
+      ]),
+    }),
+  );
+  vi.spyOn(view, "posAtCoords").mockReturnValue(2);
+  fireEvent.contextMenu(dom, { button: 2 });
+  let menu = screen.getByRole("menu", { name: "编辑器操作" });
+  expect(menu).toHaveFocus();
+  expect(within(menu).getByRole("menuitem", { name: "剪切" })).not.toHaveFocus();
+  await user.keyboard("{ArrowDown}");
+  expect(within(menu).getByRole("menuitem", { name: "剪切" })).toHaveFocus();
+  expect(view.state.selection.ranges).toHaveLength(2);
+  await user.click(within(menu).getByRole("menuitem", { name: "复制" }));
+  expect(await navigator.clipboard.readText()).toBe("first\nsecond");
+  expect(view.state.selection.ranges).toHaveLength(2);
+  fireEvent.keyDown(dom, { code: "KeyC", key: "C", metaKey: true, altKey: true, shiftKey: true });
+  expect(await navigator.clipboard.readText()).toBe("src/a.ts:1");
+  vi.spyOn(view, "posAtCoords").mockReturnValue(5);
+  act(() => view.dispatch({ selection: { anchor: 6, head: 12 } }));
+  fireEvent.contextMenu(dom, { button: 2 });
+  menu = screen.getByRole("menu", { name: "编辑器操作" });
+  expect(menu).toHaveFocus();
+  await user.keyboard("{ArrowUp}");
+  expect(within(menu).getAllByRole("menuitem").at(-1)).toHaveFocus();
+  expect(view.state.selection.main.head).toBe(5);
+  expect(within(menu).queryByRole("menuitem", { name: /^剪切/ })).not.toBeInTheDocument();
+  const read = vi.spyOn(navigator.clipboard, "readText");
+  let completePaste: (text: string) => void = () => {};
+  read.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        completePaste = resolve;
+      }),
+  );
+  fireEvent.click(within(menu).getByRole("menuitem", { name: /^粘贴/ }));
+  act(() => view.dispatch({ selection: { anchor: 0 } }));
+  await act(async () => completePaste("stale"));
+  expect(view.state.doc.toString()).toBe("first second");
+  view.focus();
+  fireEvent.keyDown(dom, { code: "F10", key: "F10", shiftKey: true });
+  expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: "粘贴" })).toHaveFocus();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  expect(dom).toHaveFocus();
+});
+
+it("leaves the document untouched when clipboard writes fail or Git locks the editor", async () => {
+  const user = userEvent.setup();
+  const { rerender, props } = renderReader({ content: "first second" });
+  const dom = await editorContent();
+  const view = EditorView.findFromDOM(dom)!;
+  const onNotice = vi.fn();
+  rerender(<CodeReader {...props} onNotice={onNotice} />);
+  act(() => view.dispatch({ selection: { anchor: 0, head: 5 } }));
+  vi.spyOn(view, "posAtCoords").mockReturnValue(2);
+  vi.spyOn(navigator.clipboard, "writeText").mockRejectedValueOnce(
+    new Error("clipboard unavailable"),
+  );
+  fireEvent.contextMenu(dom, { button: 2 });
+  await user.click(screen.getByRole("menuitem", { name: /^剪切/ }));
+  await waitFor(() => expect(onNotice).toHaveBeenCalledWith("clipboard unavailable"));
+  expect(view.state.doc.toString()).toBe("first second");
+  rerender(<CodeReader {...props} gitLocked />);
+  fireEvent.contextMenu(dom, { button: 2 });
+  expect(screen.getByRole("menuitem", { name: /^剪切/ })).toBeDisabled();
+  expect(screen.getByRole("menuitem", { name: /^粘贴/ })).toBeDisabled();
+  expect(screen.getByRole("menuitem", { name: "复制" })).toBeEnabled();
+  fireEvent.keyDown(dom, { code: "Backspace", key: "Backspace", metaKey: true });
+  expect(view.state.doc.toString()).toBe("first second");
 });
 
 it("keeps the bold shortcut in Markdown files instead of navigating", async () => {

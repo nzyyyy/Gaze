@@ -22,6 +22,7 @@ interface SearchPanelProps {
   preferences?: Preferences;
   active: boolean;
   focusSignal: number;
+  editorSearch?: { text: string } | null;
   capabilities: ToolCapabilities | null;
   projects?: Project[];
   activeProjectId?: string | null;
@@ -46,6 +47,7 @@ export function SearchPanel({
   preferences = DEFAULT_PREFERENCES,
   active,
   focusSignal,
+  editorSearch,
   capabilities,
   projects = [],
   activeProjectId = null,
@@ -128,6 +130,12 @@ export function SearchPanel({
     setReplaceError("");
     setReplaceMessage("");
   }, [onCancelReplace]);
+
+  useEffect(() => {
+    if (!editorSearch || applyingRef.current) return;
+    setQuery(editorSearch.text);
+    setRegex(false);
+  }, [editorSearch]);
 
   useEffect(() => {
     cancelPreview();

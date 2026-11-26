@@ -4457,6 +4457,30 @@ button:focus-visible,
 .button-danger {
   color: var(--danger, #c84b45);
 }
+.editor-context-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: auto;
+  min-height: 28px;
+  padding-block: 5px;
+}
+.editor-context-menu:focus {
+  outline: none;
+}
+.editor-context-menu kbd {
+  margin-left: auto;
+  color: var(--text-muted);
+  font: inherit;
+}
+.editor-context-menu .editor-menu-check {
+  color: var(--accent);
+}
+.editor-context-menu [role="separator"] {
+  height: 1px;
+  margin: 4px 7px;
+  background: var(--border);
+}
 .file-operation-dialog {
   grid-template-columns: minmax(0, 1fr);
   max-width: min(460px, calc(100vw - 32px));

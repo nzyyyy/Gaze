@@ -244,6 +244,7 @@ export default function App() {
   const [sidebarView, setSidebarView] = useState<SidebarView>("files");
   const sidebarLayoutRef = useRef<SidebarLayoutHandle>(null);
   const [searchFocusSignal, setSearchFocusSignal] = useState(0);
+  const [editorSearch, setEditorSearch] = useState<{ text: string } | null>(null);
   const [quickOpen, setQuickOpen] = useState(false);
   const [navigationBusy, setNavigationBusy] = useState(false);
   const [navigationDialog, setNavigationDialog] = useState<NavigationDialog | null>(null);
@@ -1335,6 +1336,14 @@ export default function App() {
     setSearchFocusSignal((value) => value + 1);
   }, []);
 
+  const searchSelectedText = useCallback(
+    (text: string) => {
+      setEditorSearch({ text });
+      focusGlobalSearch();
+    },
+    [focusGlobalSearch],
+  );
+
   const syncActiveDocument = useCallback(async (key = activeKeyRef.current) => {
     if (!key) return;
     const handle = editorsRef.current.get(key);
@@ -2160,12 +2169,12 @@ export default function App() {
       if (!capture && shouldBlockKeyboard()) event.preventDefault();
       return;
     }
-    if (event.defaultPrevented) return;
+    if (event.defaultPrevented || event.isComposing) return;
     const command = capture
       ? shortcutBindings.terminal && shortcutFromEvent(event) === shortcutBindings.terminal
         ? "terminal"
         : null
-      : matchShortcut(event, shortcutBindings);
+      : matchShortcut(event, shortcutBindings, "workspace");
     if (!command || (command === "terminal") !== capture) return;
     if (!canRunWorkspaceCommand(command === "quick-open")) return;
 
@@ -2175,16 +2184,6 @@ export default function App() {
       (event.target instanceof HTMLElement && event.target.isContentEditable);
     let action: WorkspaceCommand;
     switch (command) {
-      case "quick-fix":
-      case "organize-imports":
-      case "parameter-info":
-      case "quick-documentation":
-      case "format-code":
-      case "next-problem":
-      case "prev-problem":
-      case "extend-selection":
-      case "shrink-selection":
-        return;
       case "sidebar-files":
         action = "files";
         break;
@@ -2217,7 +2216,12 @@ export default function App() {
       case "paste-file":
       case "new-file":
       case "new-folder":
-        if (inTextInput || !(window.getSelection()?.isCollapsed ?? true)) return;
+        if (
+          inTextInput ||
+          (event.target instanceof Element && event.target.closest(".cm-editor")) ||
+          !(window.getSelection()?.isCollapsed ?? true)
+        )
+          return;
         if (!activeTab && (action === "copy-file" || action === "delete-file")) return;
         break;
     }
@@ -2512,6 +2516,7 @@ export default function App() {
                 preferences={preferences}
                 active={sidebarView === "search"}
                 focusSignal={searchFocusSignal}
+                editorSearch={editorSearch}
                 capabilities={capabilities}
                 projects={snapshot?.projects ?? []}
                 activeProjectId={currentProject?.id ?? null}
@@ -2566,7 +2571,13 @@ export default function App() {
                       (root) => tabRoot && insideWorktree(`${tabRoot}/${tab.path}`, root),
                     )}
                     active={isActive}
-                    editorPopupsBlocked={navigationBusy || navigationDialog !== null}
+                    editorPopupsBlocked={
+                      navigationBusy ||
+                      navigationDialog !== null ||
+                      settingsOpen ||
+                      !!pendingAction ||
+                      quickOpen
+                    }
                     theme={resolvedTheme}
                     fontFamily={fontStack(fonts.editor, "editor")}
                     preferences={preferences}
@@ -2590,6 +2601,8 @@ export default function App() {
                       );
                       return true;
                     }}
+                    onActivate={() => activatePane(pane)}
+                    onSearchSelection={searchSelectedText}
                     onOpenMarkdownFile={handleOpenMarkdownFile}
                     onNotice={notify}
                     onStatus={isActive ? setEditorStatus : noopStatus}

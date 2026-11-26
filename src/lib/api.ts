@@ -122,6 +122,8 @@ export const api = {
     invoke<DirEntry>("move_entry", { projectId, path, destinationPath }),
   trashEntry: (projectId: string, path: string) => invoke<void>("trash_entry", { projectId, path }),
   hasFileClipboard: () => invoke<boolean>("has_file_clipboard"),
+  readEditorClipboard: () => invoke<string | null>("read_editor_clipboard"),
+  writeEditorClipboard: (text: string) => invoke<void>("write_editor_clipboard", { text }),
   copyEntry: (projectId: string, path: string) => invoke<void>("copy_entry", { projectId, path }),
   pasteEntries: (projectId: string, parentPath: string) =>
     invoke<PasteResult>("paste_entries", { projectId, parentPath }),

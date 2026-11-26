@@ -197,6 +197,69 @@ describe("App", () => {
     expect(within(screen.getByRole("banner")).getByText("Demo")).toBeInTheDocument();
   });
 
+  it("uses the clicked split editor for the context menu and searches its selection literally", async () => {
+    apiMock.readFile.mockImplementation(async (projectId: string, path: string) => {
+      const content = path === "left.txt" ? "left\nuntouched" : "x.*\nright";
+      return {
+        kind: "text",
+        projectId,
+        path,
+        content,
+        encoding: "UTF-8",
+        encodingKind: "utf8",
+        lineEnding: "lf",
+        mode: "normal",
+        editable: true,
+        editBlockedReason: null,
+        fingerprint: { size: content.length, modifiedNs: "1" },
+        size: content.length,
+        warnings: [],
+      };
+    });
+    localStorage.setItem(
+      "gaze:session",
+      JSON.stringify({
+        version: 1,
+        splitOpen: true,
+        activePane: "primary",
+        tabs: [
+          { projectId: "p1", path: "left.txt", pane: "primary" },
+          { projectId: "p1", path: "right.txt", pane: "secondary" },
+        ],
+        active: { projectId: "p1", path: "left.txt", pane: "primary" },
+      }),
+    );
+    render(<App />);
+    const left = EditorView.findFromDOM(
+      await screen.findByRole("textbox", { name: "代码文件 left.txt" }),
+    )!;
+    const rightContent = await screen.findByRole("textbox", { name: "代码文件 right.txt" });
+    const right = EditorView.findFromDOM(rightContent)!;
+    fireEvent.click(screen.getByRole("button", { name: "全局搜索" }));
+    const regex = screen.getByRole("button", { name: "使用正则表达式" });
+    fireEvent.click(regex);
+    expect(regex).toHaveAttribute("aria-pressed", "true");
+    act(() => right.dispatch({ selection: { anchor: 0, head: 3 } }));
+    vi.spyOn(right, "posAtCoords").mockReturnValue(2);
+    fireEvent.contextMenu(rightContent, { button: 2 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "在工作区搜索选中文本" }));
+    const search = screen.getByRole("textbox", { name: "在工作区中搜索" });
+    expect(search).toHaveValue("x.*");
+    expect(regex).toHaveAttribute("aria-pressed", "false");
+    expect(search).toHaveFocus();
+    await waitFor(() =>
+      expect(apiMock.startSearch).toHaveBeenCalledWith(
+        expect.any(String),
+        "x.*",
+        expect.objectContaining({ regex: false }),
+      ),
+    );
+    right.focus();
+    fireEvent.keyDown(rightContent, { code: "Backspace", key: "Backspace", metaKey: true });
+    expect(right.state.doc.toString()).toBe("right");
+    expect(left.state.doc.toString()).toBe("left\nuntouched");
+  });
+
   it("keeps an undecided crash draft when closing and reopening its clean tab", async () => {
     const draft = {
       projectId: "p1",

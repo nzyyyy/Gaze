@@ -617,6 +617,16 @@ async fn has_file_clipboard(app: AppHandle) -> Result<bool, CommandError> {
     .await
 }
 
+#[tauri::command]
+async fn read_editor_clipboard(app: AppHandle) -> Result<Option<String>, CommandError> {
+    native_file_action(&app, native_files::read_clipboard_text).await
+}
+
+#[tauri::command]
+async fn write_editor_clipboard(app: AppHandle, text: String) -> Result<(), CommandError> {
+    native_file_action(&app, move || native_files::write_clipboard_text(&text)).await
+}
+
 // AppKit's shared pasteboard must be serialized with WebKit on the main thread.
 async fn native_file_action<T: Send + 'static>(
     app: &AppHandle,
@@ -1599,6 +1609,8 @@ pub fn run() {
             move_entry,
             trash_entry,
             has_file_clipboard,
+            read_editor_clipboard,
+            write_editor_clipboard,
             copy_entry,
             paste_entries,
             copy_dropped_files,

@@ -78,11 +78,15 @@ mod macos {
         let value = path
             .to_str()
             .ok_or_else(|| GazeError::InvalidPath("文件路径不是有效的 Unicode。".into()))?;
+        write_text(board, value)
+    }
+
+    fn write_text(board: &NSPasteboard, value: &str) -> GazeResult<()> {
         board.clearContents();
         if !board.setString_forType(&NSString::from_str(value), unsafe {
             NSPasteboardTypeString
         }) {
-            return Err(GazeError::Message("无法复制路径到系统剪贴板。".into()));
+            return Err(GazeError::Message("无法写入系统剪贴板。".into()));
         }
         Ok(())
     }
@@ -100,6 +104,22 @@ mod macos {
     pub fn copy_path(path: &Path) -> GazeResult<()> {
         require_main_thread()?;
         write_path(&NSPasteboard::generalPasteboard(), path)
+    }
+
+    pub fn read_clipboard_text() -> GazeResult<Option<String>> {
+        require_main_thread()?;
+        Ok(read_text(&NSPasteboard::generalPasteboard()))
+    }
+
+    fn read_text(board: &NSPasteboard) -> Option<String> {
+        board
+            .stringForType(unsafe { NSPasteboardTypeString })
+            .map(|text| text.to_string())
+    }
+
+    pub fn write_clipboard_text(value: &str) -> GazeResult<()> {
+        require_main_thread()?;
+        write_text(&NSPasteboard::generalPasteboard(), value)
     }
 
     pub fn reveal(path: &Path) -> GazeResult<()> {
@@ -131,6 +151,8 @@ mod macos {
                     copy_file(path),
                     copy_path(path),
                     reveal(path),
+                    read_clipboard_text().map(|_| ()),
+                    write_clipboard_text("source"),
                 ] {
                     assert!(result.unwrap_err().to_string().contains("必须在主线程"));
                 }
@@ -150,13 +172,9 @@ mod macos {
             assert_eq!(read_paths(&board).unwrap(), paths);
             write_path(&board, &paths[0]).unwrap();
             assert!(read_paths(&board).unwrap().is_empty());
-            assert_eq!(
-                board
-                    .stringForType(unsafe { NSPasteboardTypeString })
-                    .unwrap()
-                    .to_string(),
-                paths[0].to_str().unwrap()
-            );
+            assert_eq!(read_text(&board).as_deref(), paths[0].to_str());
+            write_text(&board, "first\n    中文").unwrap();
+            assert_eq!(read_text(&board).as_deref(), Some("first\n    中文"));
             board.clearContents();
         }
 
@@ -190,6 +208,16 @@ pub fn copy_file(_path: &Path) -> GazeResult<()> {
 pub use copy_file as copy_path;
 #[cfg(not(target_os = "macos"))]
 pub use copy_file as reveal;
+
+#[cfg(not(target_os = "macos"))]
+pub fn read_clipboard_text() -> GazeResult<Option<String>> {
+    clipboard_paths().map(|_| None)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn write_clipboard_text(_value: &str) -> GazeResult<()> {
+    clipboard_paths().map(|_| ())
+}
 
 #[cfg(not(target_os = "macos"))]
 pub fn copy_item(_source: &Path, _target: &Path) -> GazeResult<()> {

@@ -40,8 +40,29 @@ it("keeps ⌘C for copying a file and follows IDEA for the rest", () => {
     "parameter-info": "Mod+KeyP",
     "extend-selection": "Alt+ArrowUp",
     "shrink-selection": "Alt+ArrowDown",
+    "select-next-match": "Ctrl+KeyG",
+    "deselect-match": "Ctrl+Shift+KeyG",
+    "select-all-matches": "Mod+Ctrl+KeyG",
+    "column-selection": "Mod+Shift+Digit8",
+    duplicate: "Mod+KeyD",
+    "move-line-up": "Alt+Shift+ArrowUp",
+    "move-line-down": "Alt+Shift+ArrowDown",
+    "move-statement-up": "Mod+Shift+ArrowUp",
+    "move-statement-down": "Mod+Shift+ArrowDown",
+    "delete-line": "Mod+Backspace",
+    "go-to-line": "Mod+KeyL",
+    "replace-in-file": "Mod+KeyR",
+    "copy-location": "Mod+Alt+Shift+KeyC",
   });
   expect(bindings.quit).toBe("Mod+KeyQ");
+});
+
+it("resolves file deletion in the workspace without resolving editor-only actions", () => {
+  const bindings = resolveShortcuts({});
+  expect(matchShortcut({ code: "Backspace", metaKey: true }, bindings, "workspace")).toBe(
+    "delete-file",
+  );
+  expect(matchShortcut({ code: "KeyD", metaKey: true }, bindings, "workspace")).toBeNull();
 });
 
 it("lets an override replace or remove a default, and ignores unknown or invalid values", () => {
