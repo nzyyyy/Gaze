@@ -1,6 +1,13 @@
 import { t, useLanguage } from "../lib/i18n";
-import { ChevronLeft, ChevronRight, PanelRight, X } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, GitCompare, PanelRight, X } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 
 import { api } from "../lib/api";
 import { errorMessage } from "../lib/utils";
@@ -20,6 +27,7 @@ interface TabBarProps {
   splitOpen?: boolean;
   onMoveToOtherPane?: (tab: EditorTab) => void;
   onReorder?: (sourceKey: string, targetKey: string, after: boolean) => void;
+  comparison?: { name: string; active: boolean; onActivate: () => void; onClose: () => void };
 }
 
 type DropTarget = { key: string; after: boolean };
@@ -36,9 +44,11 @@ export function TabBar({
   splitOpen = false,
   onMoveToOtherPane,
   onReorder,
+  comparison,
 }: TabBarProps) {
   useLanguage();
   const activeTabRef = useRef<HTMLDivElement>(null);
+  const comparisonButton = useRef<HTMLButtonElement>(null);
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
   const focusedTabKeyRef = useRef<string | null>(null);
   const stripRef = useRef<HTMLDivElement>(null);
@@ -219,7 +229,11 @@ export function TabBar({
       block: "nearest",
       inline: "nearest",
     });
-  }, [activeKey, tabs.length]);
+    updateScrollEdges();
+  }, [activeKey, tabs.length, comparison?.active, comparison?.name, updateScrollEdges]);
+  useLayoutEffect(() => {
+    if (comparison?.active) comparisonButton.current?.focus({ preventScroll: true });
+  }, [comparison?.active]);
   useLayoutEffect(() => {
     const focusedKey = focusedTabKeyRef.current;
     if (!focusedKey || tabs.some((tab) => tab.key === focusedKey)) return;
@@ -255,6 +269,27 @@ export function TabBar({
     ? insertionIndex - (sourceIndex < insertionIndex ? 1 : 0)
     : sourceIndex;
   const dragWidth = dragRef.current?.width ?? 0;
+  const moveTabFocus = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const count = tabs.length + Number(!!comparison);
+    const next =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? count - 1
+          : (index + (event.key === "ArrowRight" ? 1 : -1) + count) % count;
+    event.preventDefault();
+    event.stopPropagation();
+    if (next === tabs.length) {
+      comparisonButton.current?.focus();
+      comparison?.onActivate();
+    } else {
+      const tab = tabs[next]!;
+      tabRefs.current.get(tab.key)?.focus();
+      onActivate(tab);
+    }
+  };
   return (
     <>
       <div className="tab-bar">
@@ -292,7 +327,9 @@ export function TabBar({
             ) {
               if (event.clientX < rect.left + 24) strip.scrollLeft -= 20;
               else if (event.clientX > rect.right - 24) strip.scrollLeft += 20;
-              const elements = Array.from(strip.querySelectorAll<HTMLElement>(".tab"));
+              const elements = Array.from(
+                strip.querySelectorAll<HTMLElement>(".tab:not(.comparison-tab)"),
+              );
               // Hit-test layout positions so the animation cannot shift its own drop target.
               const index = elements.findIndex((element) => {
                 return (
@@ -337,9 +374,10 @@ export function TabBar({
           {tabs.map((tab, index) => {
             const showProject = (nameCounts.get(tab.name) ?? 0) > 1;
             const isDirty = dirtyKeys.has(tab.key);
+            const selected = tab.key === activeKey && !comparison?.active;
             return (
               <div
-                className={`tab ${tab.key === activeKey ? "is-active" : ""}${tab.key === draggingKey ? " is-dragging" : ""}`}
+                className={`tab ${selected ? "is-active" : ""}${tab.key === draggingKey ? " is-dragging" : ""}`}
                 style={{
                   transform:
                     tab.key === draggingKey
@@ -353,7 +391,7 @@ export function TabBar({
                 data-drop={
                   dropTarget?.key === tab.key ? (dropTarget.after ? "after" : "before") : undefined
                 }
-                ref={tab.key === activeKey ? activeTabRef : null}
+                ref={selected ? activeTabRef : null}
                 key={tab.key}
                 onFocus={() => {
                   focusedTabKeyRef.current = tab.key;
@@ -377,8 +415,8 @@ export function TabBar({
                   }}
                   className="tab-main"
                   role="tab"
-                  tabIndex={tab.key === activeKey ? 0 : -1}
-                  aria-selected={tab.key === activeKey}
+                  tabIndex={selected ? 0 : -1}
+                  aria-selected={selected}
                   aria-label={`${showProject ? `${tab.projectName} ` : ""}${tab.name}${
                     isDirty ? t("（未保存）") : ""
                   }`}
@@ -421,21 +459,7 @@ export function TabBar({
                       if (target) onReorder(tab.key, target.key, after);
                       return;
                     }
-                    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-                    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-                    const targetIndex =
-                      event.key === "Home"
-                        ? 0
-                        : event.key === "End"
-                          ? tabs.length - 1
-                          : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) %
-                            tabs.length;
-                    const target = tabs[targetIndex];
-                    if (!target) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    tabRefs.current.get(target.key)?.focus();
-                    onActivate(target);
+                    moveTabFocus(event, index);
                   }}
                   data-tooltip={`${tab.projectName}/${tab.path}${isDirty ? t("（未保存）") : ""}`}
                 >
@@ -459,6 +483,40 @@ export function TabBar({
               </div>
             );
           })}
+          {comparison && (
+            <div
+              className={`tab comparison-tab${comparison.active ? " is-active" : ""}`}
+              ref={comparison.active ? activeTabRef : null}
+            >
+              <button
+                className="tab-main"
+                type="button"
+                role="tab"
+                ref={comparisonButton}
+                tabIndex={comparison.active ? 0 : -1}
+                aria-selected={comparison.active}
+                data-tooltip={comparison.name}
+                onClick={comparison.onActivate}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape" && comparison.active) {
+                    event.preventDefault();
+                    comparison.onClose();
+                  } else moveTabFocus(event, tabs.length);
+                }}
+              >
+                <GitCompare size={14} aria-hidden="true" />
+                <span className="tab-name">{comparison.name}</span>
+              </button>
+              <button
+                className="tab-close"
+                type="button"
+                onClick={comparison.onClose}
+                aria-label={t("关闭 {0}", comparison.name)}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          )}
         </div>
         <div className="tab-tools">
           {(scrollEdges.left || scrollEdges.right) && (

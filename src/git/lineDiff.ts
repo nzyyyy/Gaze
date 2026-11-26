@@ -123,7 +123,12 @@ function diffOperations(oldLines: string[], newLines: string[]): Step[] {
 
 /** Groups the diff between `base` and `current` into contiguous change blocks. */
 export function computeChangeBlocks(base: string, current: string): ChangeBlock[] {
-  const steps = diffOperations(splitLines(base), splitLines(current));
+  const oldLines = splitLines(base);
+  const newLines = splitLines(current);
+  // The empty editor row is only a common line when the other side ends in a newline.
+  if (base === "" && newLines[newLines.length - 1] !== "") oldLines.pop();
+  if (current === "" && oldLines[oldLines.length - 1] !== "") newLines.pop();
+  const steps = diffOperations(oldLines, newLines);
   const blocks: ChangeBlock[] = [];
   let oldLine = 1;
   let newLine = 1;

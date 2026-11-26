@@ -69,7 +69,8 @@ import {
 } from "@codemirror/view";
 import { AlertCircle, FileQuestion, LoaderCircle, RotateCcw } from "lucide-react";
 
-import { gitChangeGutter, setChangeBlocks } from "../git/editorChanges";
+import { changeBlockAtLine, gitChangeGutter, setChangeBlocks } from "../git/editorChanges";
+import type { EditorDiffAnchor, EditorDiffSnapshot } from "../git/EditorDiff";
 import { useFileBase } from "../git/hooks/useFileBase";
 import { computeChangeBlocksAsync } from "../git/lineDiffClient";
 import type { ChangeBlock } from "../git/lineDiff";
@@ -124,6 +125,9 @@ const MARKDOWN_PREVIEW_DELAY_MS = 120;
 const GIT_DIFF_MAX_BYTES = 1024 * 1024;
 const GIT_DIFF_MAX_LINES = 20_000;
 
+const EditorChangePopover = lazy(() =>
+  import("../git/EditorDiff").then(({ EditorChangePopover }) => ({ default: EditorChangePopover })),
+);
 const MarkdownPreview = lazy(() =>
   import("./MarkdownPreview").catch(() => ({
     default: () => (
@@ -202,6 +206,7 @@ interface EditorSurfaceProps {
   onSearchSelection?: (text: string) => void;
   onOpenMarkdownFile?: (projectId: string, path: string, fragment: string | null) => void;
   onNotice?: (message: string) => void;
+  onOpenComparison?: (snapshot: EditorDiffSnapshot) => void;
   onStatus: (status: EditorStatus | null) => void;
   onDirtyChange: (dirty: boolean) => void;
   onSaved: () => void;
@@ -619,6 +624,7 @@ export function CodeReader({
   onActivate,
   onSearchSelection,
   onNotice,
+  onOpenComparison,
   onStatus,
   onDirtyChange,
   onSaved,
@@ -699,6 +705,7 @@ export function CodeReader({
   const scheduleAutoSaveRef = useRef<() => void>(() => undefined);
   const gitBase = useFileBase(tab.projectId, tab.path, active);
   const gitBaseRef = useRef<string | null>(null);
+  const gitSnapshotRef = useRef<{ doc: Text; base: string; blocks: ChangeBlock[] } | null>(null);
   const gitDiffTimerRef = useRef<number | null>(null);
   const gitDiffRequestRef = useRef(0);
   const gitSelectRef = useRef<(block: ChangeBlock, element: HTMLElement) => void>(() => undefined);
@@ -766,8 +773,9 @@ export function CodeReader({
   const [gitBlocks, setGitBlocks] = useState<ChangeBlock[]>([]);
   const [changePopup, setChangePopup] = useState<{
     block: ChangeBlock;
-    left: number;
-    top: number;
+    anchor: EditorDiffAnchor;
+    view: EditorView;
+    snapshot: NonNullable<typeof gitSnapshotRef.current>;
   } | null>(null);
 
   revealRef.current = reveal;
@@ -893,8 +901,15 @@ export function CodeReader({
     const doc = view.state.doc;
     const tooLarge = doc.length > GIT_DIFF_MAX_BYTES || doc.lines > GIT_DIFF_MAX_LINES;
     const apply = (blocks: ChangeBlock[]) => {
-      if (request !== gitDiffRequestRef.current || viewRef.current !== view || !activeRef.current)
+      if (
+        request !== gitDiffRequestRef.current ||
+        viewRef.current !== view ||
+        !activeRef.current ||
+        view.state.doc !== doc ||
+        gitBaseRef.current !== base
+      )
         return;
+      gitSnapshotRef.current = base === null ? null : { doc, base, blocks };
       setGitBlocks(blocks);
       view.dispatch({ effects: setChangeBlocks.of(blocks) });
     };
@@ -928,47 +943,79 @@ export function CodeReader({
   const scheduleGitDiffRef = useRef(scheduleGitDiff);
   scheduleGitDiffRef.current = scheduleGitDiff;
 
-  const openChangePopup = useCallback((block: ChangeBlock, element: HTMLElement) => {
-    const rect = element.getBoundingClientRect();
-    setChangePopup({
-      block,
-      left: Math.max(8, Math.min(rect.right + 8, window.innerWidth - 376)),
-      top: Math.max(8, Math.min(rect.top, window.innerHeight - 268)),
-    });
+  const openChangePopup = useCallback((block: ChangeBlock, anchor: EditorDiffAnchor) => {
+    const view = viewRef.current;
+    const snapshot = gitSnapshotRef.current;
+    if (
+      !view ||
+      !snapshot ||
+      snapshot.doc !== view.state.doc ||
+      snapshot.base !== gitBaseRef.current ||
+      !snapshot.blocks.includes(block)
+    )
+      return;
+    setChangePopup({ block, anchor, view, snapshot });
   }, []);
   gitSelectRef.current = openChangePopup;
 
-  const revertChange = useCallback((block: ChangeBlock) => {
+  const closeChangePopup = useCallback((restoreFocus = false) => {
+    setChangePopup(null);
+    if (restoreFocus) viewRef.current?.focus();
+  }, []);
+
+  const currentChangePopup = () => {
+    if (
+      changePopup &&
+      changePopup.view === viewRef.current &&
+      changePopup.snapshot.doc === changePopup.view.state.doc &&
+      changePopup.snapshot.base === gitBaseRef.current
+    )
+      return changePopup;
+    closeChangePopup();
+    return null;
+  };
+
+  const revertChange = () => {
+    const popup = currentChangePopup();
     const view = viewRef.current;
     if (
+      !popup ||
       !view ||
       !documentRef.current?.editable ||
       operationLockedRef.current ||
       gitLockedRef.current
     )
       return;
+    const { block } = popup;
     const doc = view.state.doc;
-    if (block.kind === "deleted") {
-      const text = block.oldLines.join("\n");
-      const beforeLine = block.from <= doc.lines;
-      view.dispatch({
-        changes: beforeLine
-          ? { from: doc.line(block.from).from, insert: `${text}\n` }
-          : { from: doc.length, insert: `\n${text}` },
-        userEvent: "delete.revert",
-        scrollIntoView: false,
-      });
-    } else {
-      const start = doc.line(Math.min(Math.max(1, block.from), doc.lines));
-      const end = doc.line(Math.min(Math.max(block.to, start.number), doc.lines));
-      view.dispatch({
-        changes: { from: start.from, to: end.to, insert: block.oldLines.join("\n") },
-        userEvent: "delete.revert",
-        scrollIntoView: false,
-      });
-    }
-    setChangePopup(null);
-  }, []);
+    const nextLine = block.from + block.newLines.length;
+    const insert = block.oldLines.join("\n");
+    // Keep the separator with the replaced lines, including changes at EOF.
+    const changes =
+      doc.length === 0
+        ? { from: 0, insert: normalizeDocumentText(popup.snapshot.base) }
+        : nextLine <= doc.lines
+          ? {
+              from: doc.line(block.from).from,
+              to: doc.line(nextLine).from,
+              insert: block.oldLines.length ? `${insert}\n` : "",
+            }
+          : {
+              from: block.from > 1 ? doc.line(block.from - 1).to : 0,
+              to: doc.length,
+              insert: block.oldLines.length && block.from > 1 ? `\n${insert}` : insert,
+            };
+    view.dispatch({ changes, userEvent: "delete.revert", scrollIntoView: false });
+    closeChangePopup(true);
+  };
+
+  const openComparison = (wrap: boolean) => {
+    const popup = currentChangePopup();
+    if (!popup) return;
+    const { doc, blocks } = popup.snapshot;
+    onOpenComparison?.({ doc, blocks, selected: blocks.indexOf(popup.block), wrap });
+    closeChangePopup();
+  };
 
   const save = useCallback(
     async (options?: { force?: boolean; forFileOperation?: boolean }): Promise<SaveResult> => {
@@ -1297,6 +1344,7 @@ export function CodeReader({
             const doc = view.state.doc;
             const clean = doc.length === baseline.length && doc.toString() === baseline;
             const nextDirty = !clean;
+            setChangePopup(null);
             setRecovery(null);
             if (dirtyRef.current !== nextDirty) {
               dirtyRef.current = nextDirty;
@@ -1476,23 +1524,8 @@ export function CodeReader({
   );
 
   useEffect(() => {
-    if (!changePopup) return;
-    const closeOnPointer = (event: MouseEvent) => {
-      const target = event.target;
-      if (target instanceof Element && target.closest(".git-change-popover, .cm-git-changes"))
-        return;
-      setChangePopup(null);
-    };
-    const closeOnKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setChangePopup(null);
-    };
-    document.addEventListener("mousedown", closeOnPointer);
-    document.addEventListener("keydown", closeOnKey);
-    return () => {
-      document.removeEventListener("mousedown", closeOnPointer);
-      document.removeEventListener("keydown", closeOnKey);
-    };
-  }, [changePopup]);
+    setChangePopup(null);
+  }, [active, gitBase, loaded, editorPopupsBlocked, gitLocked]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -1925,6 +1958,15 @@ export function CodeReader({
   };
 
   const text = documentRef.current ?? loaded.content;
+  const changeAtContext =
+    contextMenu &&
+    gitSnapshotRef.current?.doc === contextMenu.state.doc &&
+    gitSnapshotRef.current.base === gitBase
+      ? changeBlockAtLine(
+          contextMenu.view,
+          contextMenu.state.doc.lineAt(contextMenu.state.selection.main.head).number,
+        )
+      : undefined;
   return (
     <section
       className="reader"
@@ -2115,6 +2157,16 @@ export function CodeReader({
             canEdit={() => !gitLockedRef.current && !operationLockedRef.current}
             onNavigate={appNavigation}
             onCopyLocation={copyLocation}
+            onShowGitChange={
+              changeAtContext
+                ? () =>
+                    openChangePopup(
+                      changeAtContext,
+                      contextMenu.view.coordsAtPos(contextMenu.state.selection.main.head) ??
+                        contextMenu.view.dom,
+                    )
+                : undefined
+            }
             onSearchSelection={onSearchSelection}
             onError={(error) => onNoticeRef.current?.(errorMessage(error))}
           />
@@ -2161,52 +2213,22 @@ export function CodeReader({
           </div>
         )}
       </div>
-      {changePopup && (
-        <div
-          className="git-change-popover"
-          role="dialog"
-          aria-label={t("代码变更")}
-          style={{ left: changePopup.left, top: changePopup.top }}
-        >
-          <header>
-            <span>{changeLabel(changePopup.block)}</span>
-            {changePopup.block.oldLines.length > 0 && (
-              <span className="git-change-range">
-                {t("原第")}
-                {changePopup.block.oldStart}
-                {changePopup.block.oldLines.length > 1
-                  ? `–${changePopup.block.oldStart + changePopup.block.oldLines.length - 1}`
-                  : ""}{" "}
-                {t("行")}
-              </span>
-            )}
-          </header>
-          {changePopup.block.oldLines.length > 0 ? (
-            <div className="git-change-lines">
-              {changePopup.block.oldLines.map((line, index) => (
-                <div className="git-change-line" key={index}>
-                  <span className="git-change-number">{changePopup.block.oldStart + index}</span>
-                  <span className="git-change-code">{line || " "}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="git-change-empty">{t("这段代码为新增内容，没有更早的版本。")}</p>
-          )}
-          <footer>
-            <button
-              className="button button-small"
-              onClick={() => revertChange(changePopup.block)}
-              disabled={!text.editable}
-              data-tooltip={text.editable ? t("用原始代码替换此处内容") : t("只读文件无法撤销更改")}
-            >
-              {t("撤销此更改")}
-            </button>
-            <button className="button button-small" onClick={() => setChangePopup(null)}>
-              {t("关闭")}
-            </button>
-          </footer>
-        </div>
+      {changePopup && active && !editorPopupsBlocked && (
+        <Suspense fallback={null}>
+          <EditorChangePopover
+            block={changePopup.block}
+            anchor={changePopup.anchor}
+            pane={changePopup.view.dom}
+            scroll={changePopup.view.scrollDOM}
+            path={tab.path}
+            fontFamily={fontFamily}
+            tabSize={preferences.tabSize}
+            canRevert={text.editable && !gitLocked && !operationLockedRef.current}
+            onClose={closeChangePopup}
+            onRevert={revertChange}
+            onOpen={onOpenComparison ? openComparison : undefined}
+          />
+        </Suspense>
       )}
     </section>
   );

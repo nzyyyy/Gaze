@@ -1,12 +1,15 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Text } from "@codemirror/state";
 
 import type { FileOperation, FileOperationResult } from "./components/FileOperationDialog";
 import type { DirEntry, EditorStatus, Project } from "./lib/types";
 import type { NativeMenuAction, NativeMenuState } from "./lib/nativeMenu";
 import type { PrepareGitOperation } from "./git/editorOperations";
 import type { OperationRequest } from "./git/models";
+import type { EditorDiffSnapshot } from "./git/EditorDiff";
+import { computeChangeBlocks } from "./git/lineDiff";
 
 const gitPreparation = vi.hoisted(() => ({ current: null as PrepareGitOperation | null }));
 const openFileHandler = vi.hoisted(() => ({
@@ -230,6 +233,7 @@ vi.mock("./components/CodeReader", async () => {
       reveal?: { line: number; character: number; nonce: number } | null;
       onGoToDefinition?: (position: { line: number; character: number }) => void;
       onOpenMarkdownFile?: (projectId: string, path: string, fragment: string | null) => void;
+      onOpenComparison?: (snapshot: EditorDiffSnapshot) => void;
     },
     ref,
   ) {
@@ -286,6 +290,18 @@ vi.mock("./components/CodeReader", async () => {
         data-cursor-character={cursor.character}
       >
         {props.tab.name}
+        <button
+          onClick={() => {
+            const doc = Text.of(["first changed", "context", "middle unchanged", "other changed"]);
+            const blocks = computeChangeBlocks(
+              "first original\ncontext\nmiddle unchanged\nother original",
+              doc.toString(),
+            );
+            props.onOpenComparison?.({ doc, blocks, selected: 1, wrap: false });
+          }}
+        >
+          compare {props.tab.name}
+        </button>
         <button
           onClick={() => {
             setCursor({ line: 3, character: 7 });
@@ -448,6 +464,38 @@ describe("App editor panes", () => {
     );
     expect(screen.queryByText("gone.ts")).not.toBeInTheDocument();
     expect(screen.queryByText("outside.ts")).not.toBeInTheDocument();
+  });
+
+  it("opens a read-only comparison tab and closes it without closing the source", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "src/a.ts" }));
+    const source = await screen.findByRole("tab", { name: "a.ts" });
+    await user.click(screen.getByRole("button", { name: "compare a.ts" }));
+    const comparison = await screen.findByRole("tab", { name: "对比 · a.ts" });
+    expect(comparison).toHaveAttribute("aria-selected", "true");
+    expect(source).toHaveAttribute("aria-selected", "false");
+    const diff = await screen.findByRole("region", { name: "文件对比" });
+    expect(diff).toHaveTextContent("2 / 2 处改动");
+    expect(diff).toHaveTextContent("other original");
+    expect(diff).toHaveTextContent("other changed");
+    expect(diff).toHaveTextContent("middle unchanged");
+    expect(within(diff).getByRole("button", { name: "自动换行" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    await user.click(within(diff).getByRole("button", { name: "上下对比" }));
+    expect(diff.querySelector(".git-change-lines")).not.toHaveClass("is-split");
+    await user.click(within(diff).getByRole("button", { name: "上一处改动" }));
+    expect(diff).toHaveTextContent("1 / 2 处改动");
+    await user.click(source);
+    expect(diff).not.toBeVisible();
+    await user.click(comparison);
+    expect(diff).toBeVisible();
+    await menuAction("close-tab");
+    expect(screen.queryByRole("tab", { name: "对比 · a.ts" })).not.toBeInTheDocument();
+    expect(source).toHaveAttribute("aria-selected", "true");
+    expect(apiMock.writeFile).not.toHaveBeenCalled();
   });
 
   it("keeps file actions unavailable in an empty workspace and restores saved menu settings", async () => {

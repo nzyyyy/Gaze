@@ -28,6 +28,7 @@ interface EditorContextMenuProps {
   onClose: () => void;
   onNavigate: (target: NavigationTarget) => boolean;
   onCopyLocation: (view: EditorView) => boolean;
+  onShowGitChange?: () => void;
   onSearchSelection?: (text: string) => void;
   onError: (error: unknown) => void;
 }
@@ -45,6 +46,7 @@ export function EditorContextMenu({
   onClose,
   onNavigate,
   onCopyLocation,
+  onShowGitChange,
   onSearchSelection,
   onError,
 }: EditorContextMenuProps) {
@@ -156,6 +158,7 @@ export function EditorContextMenu({
         item(t("在工作区搜索选中文本"), () => onSearchSelection?.(selected))}
       <div role="separator" />
       {command("go-to-line", () => editorCommands["go-to-line"](view))}
+      {onShowGitChange && item(t("查看此处代码变更"), onShowGitChange)}
       {onSymbol && command("definition", () => onNavigate("definition"))}
       {onSymbol && canUseLanguage && command("references", () => onNavigate("references"))}
       {onSymbol && canUseLanguage && command("implementation", () => onNavigate("implementation"))}

@@ -100,6 +100,7 @@ import { basename, errorMessage, parentPath, tabKey } from "./lib/utils";
 import { fileDropTarget } from "./lib/fileDrop";
 import { useAutoHideScrollbars } from "./lib/useAutoHideScrollbars";
 import { useProjectBranch } from "./git/hooks/useProjectBranch";
+import type { EditorDiffSnapshot } from "./git/EditorDiff";
 import { useReplacement } from "./lib/useReplacement";
 import { useFileChanges } from "./lib/useFileChanges";
 
@@ -109,6 +110,9 @@ type LoadState =
   | { status: "error"; message: string };
 
 const GitWorkspace = lazy(() => import("./git/GitWorkspace"));
+const EditorComparison = lazy(() =>
+  import("./git/EditorDiff").then(({ EditorComparison }) => ({ default: EditorComparison })),
+);
 import {
   changesWorktree,
   insideWorktree,
@@ -215,6 +219,20 @@ export default function App() {
   const sessionRestoredRef = useRef(false);
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [tabs, setTabs] = useState<EditorTab[]>([]);
+  const comparisonId = useRef(0);
+  const [comparisons, setComparisons] = useState<
+    Partial<
+      Record<
+        EditorPane,
+        {
+          id: number;
+          sourceKey: string;
+          snapshot: EditorDiffSnapshot;
+          selected: boolean;
+        }
+      >
+    >
+  >({});
   const [dropHint, setDropHint] = useState<string | null>(null);
   const temporaryProjectsRef = useRef(new Map<string, Project>());
   const externalReleasesRef = useRef(Promise.resolve());
@@ -305,6 +323,22 @@ export default function App() {
     [preferences.shortcuts],
   );
   const activeTab = tabs.find((tab) => tab.key === activeKey) ?? null;
+  const isComparing = (pane: EditorPane, key: string | null) =>
+    comparisons[pane]?.selected === true && comparisons[pane]?.sourceKey === key;
+  const comparisonActive = !gitOpen && isComparing(activePane, activeKey);
+
+  useEffect(() => {
+    setComparisons((current) => {
+      const missing = (pane: EditorPane) =>
+        current[pane] &&
+        !tabs.some((tab) => tab.key === current[pane]?.sourceKey && paneOf(tab) === pane);
+      if (!missing("primary") && !missing("secondary")) return current;
+      const next = { ...current };
+      if (missing("primary")) delete next.primary;
+      if (missing("secondary")) delete next.secondary;
+      return next;
+    });
+  }, [tabs]);
 
   const resolvedTheme: ResolvedTheme = theme === "system" ? systemTheme : theme;
   const overlayGlassActive =
@@ -326,6 +360,12 @@ export default function App() {
   }, []);
 
   const setPaneActiveKey = useCallback((pane: EditorPane, key: string | null) => {
+    setComparisons((current) => {
+      const comparison = current[pane];
+      return comparison?.selected
+        ? { ...current, [pane]: { ...comparison, selected: false } }
+        : current;
+    });
     const next = { ...paneActiveRef.current, [pane]: key };
     paneActiveRef.current = next;
     setPaneActive(next);
@@ -1619,6 +1659,26 @@ export default function App() {
     [setPaneActiveKey, syncActiveProject],
   );
 
+  const openEditorComparison = (tab: EditorTab, snapshot: EditorDiffSnapshot) => {
+    const pane = paneOf(tab);
+    const id = ++comparisonId.current;
+    setComparisons((current) => ({
+      ...current,
+      [pane]: { id, sourceKey: tab.key, snapshot, selected: true },
+    }));
+  };
+
+  const closeEditorComparison = (pane: EditorPane) => {
+    const key = comparisons[pane]?.sourceKey;
+    const restoreFocus = key && isComparing(pane, paneActive[pane]);
+    setComparisons((current) => ({ ...current, [pane]: undefined }));
+    if (restoreFocus) {
+      requestAnimationFrame(() => {
+        if (activeKeyRef.current === key) editorsRef.current.get(key)?.focus();
+      });
+    }
+  };
+
   const handleCloseTabs = useCallback(
     async (requested: EditorTab[]) => {
       if (closingTabsRef.current) return;
@@ -2018,13 +2078,17 @@ export default function App() {
   const menuHasFile = activeTab !== null && !gitOpen;
   const menuCanSave =
     menuHasFile &&
+    !comparisonActive &&
     dirtyKeys.has(activeTab!.key) &&
     editorStatus !== null &&
     !editorStatus.readOnly &&
     !editorStatus.saving;
-  const menuCanNavigate = menuHasFile && editorStatus !== null && !navigationBusy;
-  const menuCanUseEditorActions = menuHasFile && !!editorStatus?.canUseEditorActions;
-  const menuCanShowQuickDocumentation = menuHasFile && !!editorStatus?.canShowQuickDocumentation;
+  const menuCanNavigate =
+    menuHasFile && !comparisonActive && editorStatus !== null && !navigationBusy;
+  const menuCanUseEditorActions =
+    menuHasFile && !comparisonActive && !!editorStatus?.canUseEditorActions;
+  const menuCanShowQuickDocumentation =
+    menuHasFile && !comparisonActive && !!editorStatus?.canShowQuickDocumentation;
   const menuState = useMemo<NativeMenuState>(
     () => ({
       language,
@@ -2108,13 +2172,14 @@ export default function App() {
           await handleImport();
           break;
         case "save":
-          if (fromShortcut || menuState.canSave) await saveActiveTab();
+          if (!comparisonActive && (fromShortcut || menuState.canSave)) await saveActiveTab();
           break;
         case "close-tab":
-          if (menuState.hasFile && activeTab) await handleCloseTabs([activeTab]);
+          if (comparisonActive) closeEditorComparison(activePane);
+          else if (menuState.hasFile && activeTab) await handleCloseTabs([activeTab]);
           break;
         case "find":
-          if (menuState.hasFile && activeTab)
+          if (!comparisonActive && menuState.hasFile && activeTab)
             editorsRef.current.get(activeTab.key)?.openFileSearch();
           break;
         case "search-workspace":
@@ -2154,7 +2219,8 @@ export default function App() {
         case "definition":
         case "references":
         case "implementation":
-          if (fromShortcut || menuState.canNavigate) await runNavigation(action);
+          if (!comparisonActive && (fromShortcut || menuState.canNavigate))
+            await runNavigation(action);
           break;
         case "quick-fix":
         case "organize-imports":
@@ -2175,6 +2241,11 @@ export default function App() {
         case "new-file":
         case "new-folder":
         case "rename": {
+          if (
+            comparisonActive &&
+            (action === "rename" || action === "delete-file" || action === "copy-file")
+          )
+            break;
           const project = snapshot?.projects.find(
             (item) => item.id === (activeTab?.projectId ?? snapshot.activeProjectId),
           );
@@ -2403,65 +2474,112 @@ export default function App() {
   const primaryTabs = tabs.filter((tab) => paneOf(tab) === "primary");
   const secondaryTabs = tabs.filter((tab) => paneOf(tab) === "secondary");
 
-  const renderEditorPane = (pane: EditorPane, paneTabs: EditorTab[]) => (
-    <Fragment key={pane}>
-      <section className="editor-pane" data-pane={pane} onPointerDown={() => activatePane(pane)}>
-        <TabBar
-          tabs={paneTabs}
-          activeKey={paneActive[pane]}
-          dirtyKeys={dirtyKeys}
-          onActivate={(tab) => handleActivateTab(tab, pane)}
-          onClose={handleCloseTab}
-          onCloseTabs={(closing) => void handleCloseTabs(closing)}
-          onNotice={notify}
-          onToggleSplit={pane === "primary" || primaryTabs.length === 0 ? toggleSplit : undefined}
-          splitOpen={splitOpen}
-          onMoveToOtherPane={moveTabToOtherPane}
-          onReorder={reorderTabs}
-        />
-      </section>
-      {paneTabs.length === 0 && (
-        <div
-          className="document-area editor-empty"
-          data-pane={pane}
-          onPointerDown={() => activatePane(pane)}
-        >
-          <div className="welcome">
-            <div className="welcome-mark">
+  const renderEditorPane = (pane: EditorPane, paneTabs: EditorTab[]) => {
+    const comparison = comparisons[pane];
+    const source = paneTabs.find((tab) => tab.key === comparison?.sourceKey);
+    const selected = isComparing(pane, paneActive[pane]);
+    return (
+      <Fragment key={pane}>
+        <section className="editor-pane" data-pane={pane} onPointerDown={() => activatePane(pane)}>
+          <TabBar
+            tabs={paneTabs}
+            activeKey={paneActive[pane]}
+            dirtyKeys={dirtyKeys}
+            onActivate={(tab) => handleActivateTab(tab, pane)}
+            onClose={handleCloseTab}
+            onCloseTabs={(closing) => void handleCloseTabs(closing)}
+            onNotice={notify}
+            onToggleSplit={pane === "primary" || primaryTabs.length === 0 ? toggleSplit : undefined}
+            splitOpen={splitOpen}
+            onMoveToOtherPane={moveTabToOtherPane}
+            onReorder={reorderTabs}
+            comparison={
+              comparison && source
+                ? {
+                    name: t("对比 · {0}", source.name),
+                    active: selected,
+                    onActivate: () => {
+                      if (gitOperationBusyRef.current || fileOperationBusyRef.current) return;
+                      handleActivateTab(source, pane);
+                      setComparisons((current) => ({
+                        ...current,
+                        [pane]: { ...comparison, selected: true },
+                      }));
+                    },
+                    onClose: () => closeEditorComparison(pane),
+                  }
+                : undefined
+            }
+          />
+        </section>
+        {comparison && source && (
+          <div
+            className="document-area document-panel editor-document"
+            data-pane={pane}
+            hidden={!selected || gitOpen}
+            onPointerDown={() => activatePane(pane)}
+          >
+            <Suspense
+              fallback={
+                <div className="reader-state" role="status">
+                  {t("正在加载文件对比…")}
+                </div>
+              }
+            >
+              <EditorComparison
+                key={comparison.id}
+                snapshot={comparison.snapshot}
+                path={source.path}
+                fontFamily={fontStack(fonts.editor, "editor")}
+                tabSize={preferences.tabSize}
+                onClose={() => closeEditorComparison(pane)}
+              />
+            </Suspense>
+          </div>
+        )}
+        {paneTabs.length === 0 && (
+          <div
+            className="document-area editor-empty"
+            data-pane={pane}
+            onPointerDown={() => activatePane(pane)}
+          >
+            <div className="welcome">
+              <div className="welcome-mark">
+                {pane === "primary" ? (
+                  <BookOpen size={34} strokeWidth={1.2} />
+                ) : (
+                  <PanelRight size={30} strokeWidth={1.2} />
+                )}
+              </div>
               {pane === "primary" ? (
-                <BookOpen size={34} strokeWidth={1.2} />
+                <button className="button button-primary" onClick={() => void handleImport()}>
+                  <FolderPlus size={15} />
+                  {t("导入项目")}
+                </button>
               ) : (
-                <PanelRight size={30} strokeWidth={1.2} />
+                <>
+                  <button
+                    className="button button-primary"
+                    onClick={() => {
+                      activatePane("secondary");
+                      setQuickOpen(true);
+                    }}
+                  >
+                    {t("在右侧打开文件")}
+                  </button>
+                  {primaryTabs.length === 0 && (
+                    <button className="button" onClick={toggleSplit}>
+                      {t("关闭右侧编辑区")}
+                    </button>
+                  )}
+                </>
               )}
             </div>
-            {pane === "primary" ? (
-              <button className="button button-primary" onClick={() => void handleImport()}>
-                <FolderPlus size={15} />
-                {t("导入项目")}
-              </button>
-            ) : (
-              <>
-                <button
-                  className="button button-primary"
-                  onClick={() => {
-                    activatePane("secondary");
-                    setQuickOpen(true);
-                  }}
-                >
-                  {t("在右侧打开文件")}
-                </button>
-                {primaryTabs.length === 0 && (
-                  <button className="button" onClick={toggleSplit}>
-                    {t("关闭右侧编辑区")}
-                  </button>
-                )}
-              </>
-            )}
           </div>
-        </div>
-      )}
-    </Fragment>
-  );
+        )}
+      </Fragment>
+    );
+  };
 
   const workspace = (
     <div className="app-shell">
@@ -2707,7 +2825,7 @@ export default function App() {
               const pane = paneOf(tab);
               const tabRoot =
                 snapshot?.projects.find((item) => item.id === tab.projectId)?.root ?? tab.root;
-              const visible = tab.key === paneActive[pane];
+              const visible = tab.key === paneActive[pane] && !isComparing(pane, tab.key);
               const isActive = visible && pane === activePane && !gitOpen;
               return (
                 <div
@@ -2758,6 +2876,7 @@ export default function App() {
                     onSearchSelection={searchSelectedText}
                     onOpenMarkdownFile={handleOpenMarkdownFile}
                     onNotice={notify}
+                    onOpenComparison={(snapshot) => openEditorComparison(tab, snapshot)}
                     onStatus={isActive ? setEditorStatus : noopStatus}
                     onDirtyChange={(value) => handleDirtyChange(tab.key, value)}
                     onSaved={() => handleSaved(tab.key)}

@@ -17,39 +17,7 @@ import type { CommitFileChange, DiffFile, DiffHunk, OperationRequest } from "./a
 import { useI18n } from "./i18n";
 import { ChangedFileList } from "./components/ChangedFileList";
 import type { OperationFinished } from "./types";
-import { useDiffTokens } from "./useDiffTokens";
-
-const languageForPath = (path: string) => {
-  const extension = path.toLowerCase().split(".").pop() ?? "";
-  return (
-    {
-      ts: "typescript",
-      mts: "typescript",
-      cts: "typescript",
-      tsx: "tsx",
-      js: "javascript",
-      jsx: "jsx",
-      mjs: "javascript",
-      cjs: "javascript",
-      json: "json",
-      html: "markup",
-      htm: "markup",
-      xml: "markup",
-      svg: "markup",
-      css: "css",
-      rs: "rust",
-      py: "python",
-      sh: "bash",
-      bash: "bash",
-      zsh: "bash",
-      md: "markdown",
-      markdown: "markdown",
-      yaml: "yaml",
-      yml: "yaml",
-      toml: "ini",
-    } as Record<string, string>
-  )[extension];
-};
+import { languageForPath, useDiffTokens } from "./useDiffTokens";
 
 const AT = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
@@ -255,7 +223,7 @@ function FileDiff({
     return start < 0 ? undefined : parseDiff(diff.patch.slice(start))[0];
   }, [diff.patch]);
   const language = languageForPath(diff.path);
-  const tokens = useDiffTokens(file, language);
+  const tokens = useDiffTokens(file?.hunks, language);
   const preamble = diff.patch.slice(0, diff.patch.indexOf("@@")).trimEnd();
   const islandStarts = useMemo(
     () => (file ? firstChangeHunks(file.hunks, diff.hunks) : new Map<string, DiffHunk>()),

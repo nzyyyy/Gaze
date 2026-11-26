@@ -52,6 +52,7 @@ beforeEach(() => {
 });
 
 import { CodeReader, type CodeReaderHandle, type EditorTab, type SaveResult } from "./CodeReader";
+import type { EditorDiffSnapshot } from "../git/EditorDiff";
 import type { TextFile } from "../lib/types";
 import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
 import type { RecoveryRecord } from "../lib/api";
@@ -104,6 +105,7 @@ function renderReader(
     withPlugins?: boolean;
     onGoToDefinition?: (position: { line: number; character: number }) => void;
     onNavigate?: (target: NavigationTarget) => boolean;
+    onOpenComparison?: (snapshot: EditorDiffSnapshot) => void;
   } = {},
 ) {
   const onDirtyChange = vi.fn();
@@ -138,6 +140,7 @@ function renderReader(
     externalChangeToken: 0,
     onGoToDefinition: overrides.onGoToDefinition,
     onNavigate: overrides.onNavigate,
+    onOpenComparison: overrides.onOpenComparison,
     onStatus,
     onDirtyChange,
     onSaved,
@@ -154,6 +157,19 @@ function renderReader(
 async function editorContent(): Promise<HTMLElement> {
   await waitFor(() => expect(document.querySelector(".cm-content")).not.toBeNull());
   return document.querySelector(".cm-content") as HTMLElement;
+}
+
+async function clickGitMarker(view: EditorView, kind: "added" | "deleted", line: number) {
+  const marker = await waitFor(() => {
+    const element = view.dom.querySelector<HTMLElement>(`.cm-git-line-${kind}`);
+    expect(element).not.toBeNull();
+    return element!;
+  });
+  const block = view.lineBlockAt(view.state.doc.line(line).from);
+  vi.spyOn(marker, "getBoundingClientRect").mockReturnValue(
+    new DOMRect(0, view.documentTop + block.top, 11, block.height),
+  );
+  fireEvent.mouseDown(marker, { button: 0 });
 }
 
 it("binds navigation and problem keys from the configured shortcuts", async () => {
@@ -1810,6 +1826,35 @@ describe("CodeReader editing", () => {
     expect(apiMock.writeFile).not.toHaveBeenCalled();
   });
 
+  it("highlights the entire hovered gutter block and clears it on leave", async () => {
+    gitApiMock.getFileBase.mockResolvedValue({
+      content: "start\nold a\nold b\nold c\ncontext\nold d\nold e\nend",
+      exists: true,
+    });
+    renderReader({ content: "start\nnew a\nnew b\nnew c\ncontext\nnew d\nnew e\nend" });
+    const view = EditorView.findFromDOM(await editorContent())!;
+    const gutter = view.dom.querySelector<HTMLElement>(".cm-git-changes")!;
+    const marks = () => Array.from(gutter.querySelectorAll<HTMLElement>(".cm-git-line-modified"));
+    const hovered = () => Array.from(gutter.querySelectorAll(".cm-git-line-hovered"));
+    await waitFor(() => expect(marks()).toHaveLength(5));
+
+    const moveOver = (index: number, line: number) => {
+      const marker = marks()[index]!;
+      const block = view.lineBlockAt(view.state.doc.line(line).from);
+      vi.spyOn(marker, "getBoundingClientRect").mockReturnValue(
+        new DOMRect(0, view.documentTop + block.top, 11, block.height),
+      );
+      fireEvent.mouseMove(marker);
+    };
+
+    moveOver(1, 3);
+    expect(hovered()).toEqual(marks().slice(0, 3));
+    moveOver(4, 7);
+    expect(hovered()).toEqual(marks().slice(3));
+    fireEvent.mouseLeave(gutter);
+    expect(hovered()).toHaveLength(0);
+  });
+
   it("paints local changes in the gutter and reverts a block from the popover", async () => {
     gitApiMock.getFileBase.mockResolvedValue({
       content: "const value = 1;\n",
@@ -1827,13 +1872,77 @@ describe("CodeReader editing", () => {
 
     await userEvent.click(marker);
     expect(await screen.findByText("修改 1 行（原 1 行）")).toBeInTheDocument();
-    expect(document.querySelector(".git-change-lines")?.textContent).toContain("const value = 1;");
+    const diff = screen.getByRole("dialog", { name: "代码变更" });
+    expect(diff).toHaveTextContent("const value = 1;");
+    expect(diff).toHaveTextContent("const value = 2;");
+    await waitFor(() =>
+      expect([...diff.querySelectorAll("mark")].map((mark) => mark.textContent)).toEqual([
+        "1",
+        "2",
+      ]),
+    );
 
     await userEvent.click(screen.getByRole("button", { name: "撤销此更改" }));
     expect(view.state.doc.toString()).toBe("const value = 1;\n");
     await waitFor(() => expect(document.querySelector(".cm-git-line-modified")).toBeNull());
     await waitFor(() => expect(document.querySelector(".git-change-tick-modified")).toBeNull());
   });
+
+  it("shows added lines, passes unsaved content to the full diff, and closes a stale popup", async () => {
+    const base = "const anchor = true;";
+    const added = '\nconst route = "/api/catalog?include=inventory,pricing,shipping,availability";';
+    gitApiMock.getFileBase.mockResolvedValue({ content: base, exists: true });
+    const onOpenComparison = vi.fn();
+    renderReader({ content: base, onOpenComparison });
+    const view = EditorView.findFromDOM(await editorContent())!;
+    act(() => view.dispatch({ changes: { from: view.state.doc.length, insert: added } }));
+    await waitFor(() => expect(view.dom.querySelector(".cm-git-line-added")).not.toBeNull());
+    act(() => view.dispatch({ selection: { anchor: view.state.doc.line(2).from } }));
+    view.focus();
+    fireEvent.keyDown(view.contentDOM, { key: "F10", shiftKey: true });
+    await userEvent.click(screen.getByRole("menuitem", { name: "查看此处代码变更" }));
+    const popup = await screen.findByRole("dialog", { name: "代码变更" });
+    expect(popup).toHaveTextContent(added.trim());
+    expect(popup).not.toHaveTextContent("修改前 · HEAD");
+    const wrap = within(popup).getByRole("button", { name: "自动换行", pressed: true });
+    await userEvent.click(wrap);
+    expect(popup.querySelector(".git-change-lines")).toHaveClass("no-wrap");
+    await userEvent.click(within(popup).getByRole("button", { name: "打开完整对比" }));
+    expect(onOpenComparison).toHaveBeenCalledWith(
+      expect.objectContaining({ doc: view.state.doc, selected: 0, wrap: false }),
+    );
+    expect(apiMock.writeFile).not.toHaveBeenCalled();
+
+    await clickGitMarker(view, "added", 2);
+    expect(await screen.findByRole("dialog", { name: "代码变更" })).toBeInTheDocument();
+    act(() => view.dispatch({ changes: { from: 0, insert: "// unsaved\n" } }));
+    expect(screen.queryByRole("dialog", { name: "代码变更" })).not.toBeInTheDocument();
+    expect(view.state.doc.toString()).toBe(`// unsaved\n${base}${added}`);
+  });
+
+  it.each([
+    ["a", "a\nextra", "新增 1 行", "added", 2],
+    ["a\n", "a\nextra\n", "新增 1 行", "added", 2],
+    ["a\nremoved", "a", "删除 1 行", "deleted", 1],
+    ["a\n", "", "删除 1 行", "deleted", 1],
+    ["a", "", "删除 1 行", "deleted", 1],
+    ["", "added", "新增 1 行", "added", 1],
+  ] as const)(
+    "reverts a boundary change from %j to %j without introducing line breaks",
+    async (base, current, label, kind, line) => {
+      gitApiMock.getFileBase.mockResolvedValue({ content: base, exists: !!base });
+      renderReader({ content: current });
+      const view = EditorView.findFromDOM(await editorContent())!;
+      await clickGitMarker(view, kind, line);
+      expect(await screen.findByText(label)).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "撤销此更改" }));
+      expect(view.state.doc.toString()).toBe(base);
+      act(() => {
+        undo(view);
+      });
+      expect(view.state.doc.toString()).toBe(current);
+    },
+  );
 
   it("keeps dirty contents and restores editing when preparation fails", async () => {
     const user = userEvent.setup();

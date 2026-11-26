@@ -1,0 +1,749 @@
+<div id="gaze-diff-draft" class="viz-dotted-background" lang="zh-CN">
+  <div class="demo-controls" aria-label="切换演示场景">
+    <span>示例</span>
+    <button type="button" data-case="0" aria-pressed="true">修改</button>
+    <button type="button" data-case="1" aria-pressed="false">新增</button>
+    <button type="button" data-case="2" aria-pressed="false">删除</button>
+  </div>
+  <section class="app-window" aria-label="Gaze 编辑器">
+    <div class="tab-strip" aria-label="编辑器标签页">
+      <button class="app-tab" type="button" data-action="editor" aria-current="page">
+        client.ts
+      </button>
+      <button class="app-tab" type="button" data-action="full" hidden>对比 · client.ts</button>
+    </div>
+    <div class="editor-pane">
+      <div class="file-path">src / <strong>client.ts</strong></div>
+      <div class="source" aria-label="当前文件"></div>
+      <section class="change-popover" aria-label="当前改动块">
+        <header class="diff-toolbar">
+          <div class="toolbar-title">
+            <span class="status-icon" aria-hidden="true"></span>
+            <strong data-field="title" aria-live="polite"></strong>
+          </div>
+          <div class="toolbar-actions">
+            <button class="quiet-btn" type="button" data-action="wrap" aria-pressed="true">
+              自动换行
+            </button>
+            <button class="icon-btn" type="button" data-action="close" aria-label="关闭浮层">
+              ×
+            </button>
+          </div>
+        </header>
+        <div class="preview-scroll" aria-label="改动内容"></div>
+        <footer class="diff-footer">
+          <button class="quiet-btn revert" type="button" disabled title="样式演示">
+            撤销此更改
+          </button>
+          <button class="open-btn" type="button" data-action="full">
+            打开完整对比 <span aria-hidden="true">↗</span>
+          </button>
+        </footer>
+      </section>
+    </div>
+    <section class="full-pane" aria-label="完整文件对比" hidden>
+      <header class="diff-toolbar full-toolbar">
+        <div class="toolbar-title">
+          <strong>src/client.ts</strong>
+          <span class="block-position" aria-live="polite"></span>
+        </div>
+        <div class="toolbar-actions">
+          <button class="quiet-btn" type="button" data-action="wrap" aria-pressed="true">
+            自动换行
+          </button>
+          <button class="quiet-btn" type="button" data-action="layout" aria-pressed="false">
+            上下对比
+          </button>
+          <button
+            class="icon-btn"
+            type="button"
+            data-action="prev"
+            aria-label="上一处改动"
+            title="上一处改动"
+          >
+            ↑
+          </button>
+          <button
+            class="icon-btn"
+            type="button"
+            data-action="next"
+            aria-label="下一处改动"
+            title="下一处改动"
+          >
+            ↓
+          </button>
+        </div>
+      </header>
+      <div class="full-scroll" aria-label="文件内容"></div>
+    </section>
+  </section>
+</div>
+
+<style>
+  #gaze-diff-draft {
+    color-scheme: light dark;
+    --editor-bg: light-dark(#fbfbfc, #1b1d21);
+    --surface: light-dark(#fff, #25282e);
+    --chrome: light-dark(#f1f2f5, #222429);
+    --overlay: light-dark(#e7eaf0, #30343c);
+    --border: light-dark(#d8dce3, #383d46);
+    --text: light-dark(#282e38, #e5e8ef);
+    --muted: light-dark(#5c6574, #a6aebb);
+    --insert: light-dark(#256449, #93cdb0);
+    --insert-row: light-dark(#e5f3eb, #233932);
+    --insert-word: light-dark(#b4dbc4, #365e4c);
+    --delete: light-dark(#974350, #eb9aa5);
+    --delete-row: light-dark(#faeaed, #3a292e);
+    --delete-word: light-dark(#f4c2cb, #663e48);
+    --modify: light-dark(#285f9c, #85aff2);
+    --modify-row: light-dark(#e5eefb, #253347);
+    --modify-word: light-dark(#bbd3f5, #3c5274);
+    --syntax: light-dark(#7350a2, #c5a5ec);
+    --literal: light-dark(#315e86, #a5c7ed);
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    padding: 14px;
+    color: var(--text);
+    font:
+      13px/1.45 -apple-system,
+      BlinkMacSystemFont,
+      "PingFang SC",
+      system-ui,
+      sans-serif;
+  }
+
+  #gaze-diff-draft * {
+    box-sizing: border-box;
+  }
+  #gaze-diff-draft [hidden] {
+    display: none !important;
+  }
+  #gaze-diff-draft button {
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  #gaze-diff-draft button:disabled {
+    cursor: default;
+  }
+  #gaze-diff-draft button:focus-visible {
+    outline: 2px solid var(--modify);
+    outline-offset: 2px;
+  }
+
+  #gaze-diff-draft .demo-controls,
+  #gaze-diff-draft .toolbar-title,
+  #gaze-diff-draft .toolbar-actions,
+  #gaze-diff-draft .diff-footer {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  #gaze-diff-draft .demo-controls {
+    margin: 0 0 10px;
+  }
+  #gaze-diff-draft .demo-controls span {
+    margin-right: 2px;
+    color: var(--muted);
+  }
+  #gaze-diff-draft .demo-controls button,
+  #gaze-diff-draft .quiet-btn,
+  #gaze-diff-draft .icon-btn,
+  #gaze-diff-draft .open-btn {
+    min-height: 28px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    padding: 3px 8px;
+    background: transparent;
+  }
+
+  #gaze-diff-draft .demo-controls button {
+    background: var(--surface);
+    border-color: var(--border);
+  }
+  #gaze-diff-draft button[aria-pressed="true"],
+  #gaze-diff-draft .open-btn {
+    background: var(--modify-row);
+    color: var(--modify);
+    border-color: var(--modify-word);
+  }
+  #gaze-diff-draft .quiet-btn:hover:not(:disabled),
+  #gaze-diff-draft .icon-btn:hover,
+  #gaze-diff-draft .open-btn:hover {
+    background: var(--overlay);
+  }
+  #gaze-diff-draft .icon-btn {
+    width: 28px;
+    padding: 0;
+    font-size: 16px;
+  }
+
+  #gaze-diff-draft .app-window {
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--editor-bg);
+  }
+
+  #gaze-diff-draft .tab-strip {
+    display: flex;
+    background: var(--chrome);
+    border-bottom: 1px solid var(--border);
+  }
+  #gaze-diff-draft .app-tab {
+    padding: 9px 14px;
+    background: transparent;
+    border: 0;
+    color: var(--muted);
+  }
+  #gaze-diff-draft .app-tab[aria-current="page"] {
+    color: var(--text);
+    background: var(--editor-bg);
+    box-shadow: inset 0 -2px var(--modify);
+  }
+  #gaze-diff-draft .file-path {
+    padding: 7px 14px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+  #gaze-diff-draft .file-path strong {
+    color: var(--text);
+    font-weight: 500;
+  }
+  #gaze-diff-draft .editor-pane {
+    position: relative;
+    min-height: 440px;
+  }
+  #gaze-diff-draft .source {
+    padding: 6px 0;
+    overflow: hidden;
+  }
+
+  #gaze-diff-draft .source-line,
+  #gaze-diff-draft .code-line {
+    display: grid;
+    grid-template-columns: 3.8ch 1.8ch minmax(0, 1fr);
+    align-items: baseline;
+    gap: 6px;
+    min-height: 23px;
+    padding: 2px 10px 2px 5px;
+    font: 13px/1.45 var(--mono);
+  }
+
+  #gaze-diff-draft .line-number {
+    color: var(--muted);
+    text-align: right;
+    user-select: none;
+  }
+  #gaze-diff-draft .marker {
+    text-align: center;
+    user-select: none;
+  }
+  #gaze-diff-draft .code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    tab-size: 4;
+  }
+  #gaze-diff-draft .source .code,
+  #gaze-diff-draft.no-wrap .code {
+    white-space: pre;
+    overflow-wrap: normal;
+  }
+  #gaze-diff-draft .keyword {
+    color: var(--syntax);
+  }
+  #gaze-diff-draft .literal {
+    color: var(--literal);
+  }
+
+  #gaze-diff-draft .source-line > button {
+    align-self: stretch;
+    width: 100%;
+    min-height: 18px;
+    padding: 0;
+    border: 0;
+    border-radius: 2px;
+    color: var(--tone);
+    background: linear-gradient(var(--tone), var(--tone)) center / 3px 100% no-repeat;
+  }
+
+  #gaze-diff-draft .source-line > button[data-case="2"] {
+    background: none;
+  }
+  #gaze-diff-draft .source-line > button:hover {
+    background-color: var(--overlay);
+  }
+  #gaze-diff-draft .source-line.is-current {
+    background-color: var(--row-bg);
+  }
+
+  #gaze-diff-draft .change-popover {
+    position: absolute;
+    z-index: 1;
+    inset: 116px auto auto 55px;
+    display: flex;
+    flex-direction: column;
+    width: min(670px, calc(100% - 68px));
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--surface);
+    box-shadow: 0 10px 28px light-dark(#38435529, #0008);
+  }
+
+  #gaze-diff-draft .diff-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 5px 12px;
+    padding: 7px 10px;
+  }
+  #gaze-diff-draft .toolbar-title strong {
+    font-weight: 600;
+  }
+  #gaze-diff-draft .status-icon {
+    min-width: 20px;
+    border-radius: 4px;
+    color: var(--tone);
+    background: var(--row-bg);
+    text-align: center;
+    font-family: var(--mono);
+  }
+  #gaze-diff-draft .preview-scroll {
+    max-height: 232px;
+    margin: 0 8px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--editor-bg);
+  }
+  #gaze-diff-draft .side-label,
+  #gaze-diff-draft .full-labels {
+    color: var(--muted);
+    background: var(--chrome);
+    font-size: 12px;
+  }
+  #gaze-diff-draft .side-label {
+    width: 100%;
+    padding: 3px 10px;
+  }
+  #gaze-diff-draft .preview-side + .preview-side .side-label {
+    border-top: 1px solid var(--border);
+  }
+  #gaze-diff-draft.no-wrap .preview-side {
+    min-width: max-content;
+  }
+  #gaze-diff-draft .diff-footer {
+    justify-content: space-between;
+    padding: 7px 10px;
+  }
+  #gaze-diff-draft .revert {
+    color: var(--muted);
+  }
+
+  #gaze-diff-draft .insert {
+    --tone: var(--insert);
+    --row-bg: var(--insert-row);
+    --word-bg: var(--insert-word);
+  }
+  #gaze-diff-draft .delete {
+    --tone: var(--delete);
+    --row-bg: var(--delete-row);
+    --word-bg: var(--delete-word);
+  }
+  #gaze-diff-draft .modify {
+    --tone: var(--modify);
+    --row-bg: var(--modify-row);
+    --word-bg: var(--modify-word);
+  }
+  #gaze-diff-draft .modify-old {
+    --tone: var(--modify);
+    --row-bg: var(--modify-row);
+    --word-bg: var(--delete-word);
+  }
+  #gaze-diff-draft .modify-new {
+    --tone: var(--modify);
+    --row-bg: var(--modify-row);
+    --word-bg: var(--insert-word);
+  }
+  #gaze-diff-draft .code-line {
+    color: var(--text);
+    background: var(--row-bg, var(--editor-bg));
+  }
+  #gaze-diff-draft .code-line .marker {
+    color: var(--tone, var(--muted));
+  }
+  #gaze-diff-draft mark {
+    padding: 1px 0;
+    border-radius: 2px;
+    color: var(--text);
+    background: var(--word-bg);
+  }
+
+  #gaze-diff-draft .full-toolbar {
+    background: var(--surface);
+  }
+  #gaze-diff-draft .block-position {
+    color: var(--muted);
+    font-size: 12px;
+  }
+  #gaze-diff-draft .full-scroll {
+    max-height: 360px;
+    overflow: auto;
+  }
+  #gaze-diff-draft .full-labels,
+  #gaze-diff-draft .compare-pair {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #gaze-diff-draft .full-labels {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  #gaze-diff-draft.no-wrap .split-comparison {
+    min-width: max(100%, 192ch);
+    font: 13px/1.45 var(--mono);
+  }
+  #gaze-diff-draft.no-wrap .unified-comparison {
+    min-width: max-content;
+  }
+  #gaze-diff-draft .full-labels span {
+    padding: 5px 10px;
+    border-block: 1px solid var(--border);
+  }
+  #gaze-diff-draft .full-labels span + span,
+  #gaze-diff-draft .compare-pair > :nth-child(2) {
+    border-left: 1px solid var(--border);
+  }
+  #gaze-diff-draft .compare-pair .gap {
+    background: var(--chrome);
+  }
+  #gaze-diff-draft .compare-block {
+    position: relative;
+  }
+  #gaze-diff-draft .compare-block.current::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 1px solid var(--tone);
+    pointer-events: none;
+  }
+  #gaze-diff-draft .unified-comparison {
+    display: none;
+  }
+  #gaze-diff-draft.is-unified .unified-comparison {
+    display: block;
+  }
+  #gaze-diff-draft.is-unified .split-comparison {
+    display: none;
+  }
+
+  @media (max-width: 600px) {
+    #gaze-diff-draft {
+      padding: 8px;
+    }
+    #gaze-diff-draft .editor-pane {
+      min-height: 434px;
+    }
+    #gaze-diff-draft .change-popover {
+      inset: 106px 7px auto;
+      width: auto;
+    }
+    #gaze-diff-draft .unified-comparison {
+      display: block;
+    }
+    #gaze-diff-draft .split-comparison,
+    #gaze-diff-draft [data-action="layout"] {
+      display: none;
+    }
+  }
+
+  @media (pointer: coarse) {
+    #gaze-diff-draft .demo-controls button,
+    #gaze-diff-draft .toolbar-actions button,
+    #gaze-diff-draft .diff-footer button {
+      min-height: 44px;
+    }
+    #gaze-diff-draft .icon-btn {
+      min-width: 44px;
+    }
+    #gaze-diff-draft .editor-pane {
+      min-height: 470px;
+    }
+  }
+</style>
+
+<script>
+  (() => {
+    const root = document.getElementById("gaze-diff-draft");
+    const find = (selector) => root.querySelector(selector);
+    const fileStart = [
+      'import { createClient } from "./http";',
+      "",
+      'const service = "catalog";',
+      "",
+      "export const requestOptions = {",
+      '  method: "GET",',
+      '  cache: "no-store",',
+    ];
+    const blocks = [
+      {
+        tone: "modify",
+        symbol: "~",
+        label: "修改",
+        oldStart: 8,
+        newStart: 8,
+        old: [
+          "  timeoutMs: [3000],",
+          "  retry: [1],",
+          '  route: "/api/[v1]/catalog/items?include=inventory,pricing,shipping,availability",',
+        ],
+        current: [
+          "  timeoutMs: [8000],",
+          "  retry: [3],",
+          '  route: "/api/[v2]/catalog/items?include=inventory,pricing,shipping,availability",',
+        ],
+        after: ['  headers: { accept: "application/json" },'],
+      },
+      {
+        tone: "insert",
+        symbol: "+",
+        label: "新增",
+        oldStart: 12,
+        newStart: 12,
+        old: [],
+        current: ["  telemetry: true,", "  maxConnections: 8,"],
+        after: ['  transport: "http1",'],
+      },
+      {
+        tone: "delete",
+        symbol: "−",
+        label: "删除",
+        oldStart: 13,
+        newStart: 15,
+        old: ["  legacyCache: true,"],
+        current: [],
+        after: ["};", "", "export const client = createClient(service, requestOptions);"],
+      },
+    ];
+    const popover = find(".change-popover");
+    const fullPane = find(".full-pane");
+    const fullScroll = find(".full-scroll");
+    const editor = find(".editor-pane");
+    const editorTab = find(".app-tab[data-action=editor]");
+    const fullTab = find(".app-tab[data-action=full]");
+    let selected = 0;
+    let opened = true;
+    let full = false;
+    let wrap = true;
+    let unified = false;
+
+    const escapeHtml = (text) =>
+      text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    function code(text, showMarks) {
+      return escapeHtml(text).replace(
+        /\[([^\]]+)\]|\b(export|import|from|const)\b|"[^"\[]*(?:\[[^\]]+\][^"\[]*)*"|\b(?:true|false|\d+)\b/g,
+        (token, range, keyword) => {
+          if (range) return showMarks ? `<mark>${range}</mark>` : range;
+          if (token.includes("[")) {
+            token = token.replace(/\[([^\]]+)\]/g, (_, part) =>
+              showMarks ? `<mark>${part}</mark>` : part,
+            );
+          }
+          return `<span class="${keyword ? "keyword" : "literal"}">${token}</span>`;
+        },
+      );
+    }
+
+    function line(number, text, { tone = "", sign = "", gutter = "" } = {}) {
+      return `<div class="${gutter ? "source-line" : "code-line"} ${tone}"><span class="line-number">${number}</span>${gutter || `<span class="marker">${sign}</span>`}<span class="code">${code(text, !gutter)}</span></div>`;
+    }
+
+    function changeLines(block, side) {
+      const old = side === "old";
+      return block[side].map((text, index) =>
+        line((old ? block.oldStart : block.newStart) + index, text, {
+          tone: block.tone === "modify" ? (old ? "modify-old" : "modify-new") : block.tone,
+          sign: old ? "−" : "+",
+        }),
+      );
+    }
+
+    function renderSource() {
+      const source = fileStart.map((text) => ({ text }));
+      blocks.forEach((block, index) => {
+        block.current.forEach((text) => source.push({ text, index }));
+        block.after.forEach((text, offset) =>
+          source.push({
+            text,
+            index: !block.current.length && offset === 0 ? index : undefined,
+          }),
+        );
+      });
+      find(".source").innerHTML = source
+        .map(({ text, index }, number) => {
+          const block = blocks[index];
+          const numberOnScreen = number + 1;
+          if (!block) return line(numberOnScreen, text);
+          const gutter = `<button type="button" data-case="${index}" title="查看${block.label}" aria-label="第 ${numberOnScreen} 行，查看${block.label}">${block.tone === "delete" ? "▸" : ""}</button>`;
+          return line(numberOnScreen, text, {
+            tone: `${block.tone}${opened && selected === index ? " is-current" : ""}`,
+            gutter,
+          });
+        })
+        .join("");
+    }
+
+    function renderPreview() {
+      const block = blocks[selected];
+      const title =
+        block.tone === "modify"
+          ? `修改 ${block.current.length} 行`
+          : `${block.label} ${Math.max(block.old.length, block.current.length)} 行`;
+      find('[data-field="title"]').textContent = title;
+      const icon = find(".status-icon");
+      icon.className = `status-icon ${block.tone}`;
+      icon.textContent = block.symbol;
+      find(".preview-scroll").innerHTML = [
+        ["old", "修改前 · HEAD"],
+        ["current", "修改后 · 当前编辑器"],
+      ]
+        .map(([side, label]) => {
+          const rows = changeLines(block, side);
+          return rows.length
+            ? `<div class="preview-side"><div class="side-label">${label}</div>${rows.join("")}</div>`
+            : "";
+        })
+        .join("");
+      find(".preview-scroll").scrollTop = 0;
+      find(".preview-scroll").scrollLeft = 0;
+    }
+
+    function renderFull() {
+      const pair = (before, after) =>
+        `<div class="compare-pair">${before || '<div class="gap"></div>'}${after || '<div class="gap"></div>'}</div>`;
+      const group = (html, index, css) =>
+        `<div class="compare-block ${css} ${selected === index ? "current" : ""}" data-block="${index}">${html}</div>`;
+      const context = (lines, before, after, split) =>
+        lines
+          .map((text, index) =>
+            split
+              ? pair(line(before + index, text), line(after + index, text))
+              : line(after + index, text),
+          )
+          .join("");
+      function file(split) {
+        return (
+          context(fileStart, 1, 1, split) +
+          blocks
+            .map((block, index) => {
+              const old = changeLines(block, "old");
+              const current = changeLines(block, "current");
+              const rows = split
+                ? Array.from({ length: Math.max(old.length, current.length) }, (_, row) =>
+                    pair(old[row], current[row]),
+                  )
+                : [...old, ...current];
+              return (
+                group(rows.join(""), index, block.tone) +
+                context(
+                  block.after,
+                  block.oldStart + old.length,
+                  block.newStart + current.length,
+                  split,
+                )
+              );
+            })
+            .join("")
+        );
+      }
+      fullScroll.innerHTML = `<div class="split-comparison"><div class="full-labels"><span>HEAD</span><span>当前编辑器</span></div>${file(true)}</div><div class="unified-comparison">${file(false)}</div>`;
+      find(".block-position").textContent = `${selected + 1} / ${blocks.length} 处改动`;
+      find('[data-action="prev"]').disabled = selected === 0;
+      find('[data-action="next"]').disabled = selected === blocks.length - 1;
+      const stack = unified || window.matchMedia?.("(max-width: 600px)").matches;
+      const target = find(`.${stack ? "unified" : "split"}-comparison .compare-block.current`);
+      fullScroll.scrollTop +=
+        target.getBoundingClientRect().top - fullScroll.getBoundingClientRect().top - 46;
+    }
+
+    function render() {
+      editor.hidden = full;
+      popover.hidden = !opened;
+      fullPane.hidden = !full;
+      fullTab.hidden = fullTab.hidden && !full;
+      editorTab.setAttribute("aria-current", full ? "false" : "page");
+      fullTab.setAttribute("aria-current", full ? "page" : "false");
+      root.classList.toggle("no-wrap", !wrap);
+      root.classList.toggle("is-unified", unified);
+      find('[data-action="layout"]').setAttribute("aria-pressed", String(unified));
+      root
+        .querySelectorAll('[data-action="wrap"]')
+        .forEach((button) => button.setAttribute("aria-pressed", String(wrap)));
+      root
+        .querySelectorAll(".demo-controls [data-case]")
+        .forEach((button) =>
+          button.setAttribute("aria-pressed", String(Number(button.dataset.case) === selected)),
+        );
+      if (full) renderFull();
+      else {
+        renderSource();
+        if (opened) renderPreview();
+      }
+    }
+
+    root.addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (!button) return;
+      if (button.dataset.case !== undefined) {
+        selected = Number(button.dataset.case);
+        opened = true;
+        render();
+        if (button.closest(".source")) find('.change-popover [data-action="wrap"]').focus();
+        return;
+      }
+      switch (button.dataset.action) {
+        case "editor":
+          full = false;
+          break;
+        case "full":
+          full = true;
+          opened = false;
+          break;
+        case "close":
+          opened = false;
+          break;
+        case "wrap":
+          wrap = !wrap;
+          break;
+        case "layout":
+          unified = !unified;
+          break;
+        case "prev":
+          selected -= 1;
+          break;
+        case "next":
+          selected += 1;
+          break;
+        default:
+          return;
+      }
+      render();
+      if (button.dataset.action === "full") fullTab.focus();
+      if (button.dataset.action === "editor") editorTab.focus();
+      if (button.dataset.action === "close") find(`.source [data-case="${selected}"]`)?.focus();
+      if (button.disabled) fullTab.focus();
+    });
+
+    root.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      if (full) editorTab.click();
+      else if (opened) find('[data-action="close"]').click();
+    });
+
+    render();
+  })();
+</script>

@@ -1,25 +1,31 @@
 import { useEffect, useState } from "react";
-import type { FileData, HunkTokens } from "react-diff-view";
+import type { HunkData, HunkTokens } from "react-diff-view";
 
-export function useDiffTokens(file: FileData | undefined, language: string | undefined) {
+export function useDiffTokens(
+  hunks: HunkData[] | undefined,
+  language: string | undefined,
+  inlineEdits = false,
+) {
   const [result, setResult] = useState<{
-    file: FileData;
-    language: string;
+    hunks: HunkData[];
+    language?: string;
+    inlineEdits: boolean;
     tokens: HunkTokens;
   } | null>(null);
 
   useEffect(() => {
-    if (!file || !language) return;
+    if (!hunks || (!language && !inlineEdits)) return;
     let cancelled = false;
     let worker: Worker | null = null;
     const apply = (tokens: HunkTokens) => {
-      if (!cancelled) setResult({ file, language, tokens });
+      if (!cancelled) setResult({ hunks, language, inlineEdits, tokens });
     };
     const fallback = () => {
-      void import("./diffTokens").then(
-        ({ tokenizeDiff }) => apply(tokenizeDiff(file.hunks, language)),
-        () => undefined,
-      );
+      void import("./diffTokens")
+        .then(({ tokenizeDiff }) => {
+          if (!cancelled) apply(tokenizeDiff(hunks, language, inlineEdits));
+        })
+        .catch(() => undefined);
     };
 
     if (typeof Worker === "undefined") {
@@ -34,7 +40,7 @@ export function useDiffTokens(file: FileData | undefined, language: string | und
           else fallback();
         };
         worker.onerror = fallback;
-        worker.postMessage({ hunks: file.hunks, language });
+        worker.postMessage({ hunks, language, inlineEdits });
       } catch {
         fallback();
       }
@@ -43,7 +49,43 @@ export function useDiffTokens(file: FileData | undefined, language: string | und
       cancelled = true;
       worker?.terminate();
     };
-  }, [file, language]);
+  }, [hunks, language, inlineEdits]);
 
-  return result && result.file === file && result.language === language ? result.tokens : null;
+  return result?.hunks === hunks &&
+    result?.language === language &&
+    result?.inlineEdits === inlineEdits
+    ? result.tokens
+    : null;
 }
+
+export const languageForPath = (path: string) => {
+  const extension = path.toLowerCase().split(".").pop() ?? "";
+  return (
+    {
+      ts: "typescript",
+      mts: "typescript",
+      cts: "typescript",
+      tsx: "tsx",
+      js: "javascript",
+      jsx: "jsx",
+      mjs: "javascript",
+      cjs: "javascript",
+      json: "json",
+      html: "markup",
+      htm: "markup",
+      xml: "markup",
+      svg: "markup",
+      css: "css",
+      rs: "rust",
+      py: "python",
+      sh: "bash",
+      bash: "bash",
+      zsh: "bash",
+      md: "markdown",
+      markdown: "markdown",
+      yaml: "yaml",
+      yml: "yaml",
+      toml: "ini",
+    } as Record<string, string>
+  )[extension];
+};
