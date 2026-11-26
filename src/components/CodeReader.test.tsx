@@ -363,6 +363,68 @@ it("adds and removes mouse carets and clones the primary caret with a double Opt
   expect(view.state.selection.main.head).toBe(4);
 });
 
+it.each([true, false])(
+  "keeps a single caret on a double-click in plain indentation (guides: %s)",
+  async (showIndentGuides) => {
+    renderReader({
+      filename: "data.json",
+      content: '{\n    "first": 1,\n    "second": 2\n}',
+      preferences: { ...DEFAULT_PREFERENCES, showIndentGuides },
+    });
+    const content = await editorContent();
+    const view = EditorView.findFromDOM(content)!;
+    view.focus();
+    const pos = view.state.doc.line(2).from + 2;
+    vi.spyOn(view, "posAtCoords").mockReturnValue(pos);
+    vi.spyOn(view, "posAndSideAtCoords").mockReturnValue({ pos, assoc: 1 });
+    fireEvent.mouseDown(content, { button: 0, detail: 2, clientX: 20, clientY: 35 });
+    fireEvent.mouseUp(document);
+    expect(view.state.selection.ranges).toHaveLength(1);
+    expect(view.state.selection.main).toMatchObject({ anchor: pos, head: pos });
+    expect(content.querySelector(".cm-selectionMatch")).toBeNull();
+  },
+);
+
+it("restores the viewport before resolving the first mouse selection after blur", async () => {
+  renderReader({
+    content: Array.from({ length: 100 }, (_, i) => `const line${i} = ${i};`).join("\n"),
+  });
+  const content = await editorContent();
+  const view = EditorView.findFromDOM(content)!;
+  const { scrollDOM } = view;
+  view.focus();
+  content.blur();
+  scrollDOM.scrollTop = 400;
+  scrollDOM.scrollLeft = 32;
+  content.addEventListener(
+    "focus",
+    () => {
+      scrollDOM.scrollTop = 1200;
+      scrollDOM.scrollLeft = 0;
+    },
+    { once: true },
+  );
+  const anchor = view.state.doc.line(21).from + 6;
+  const dragEnd = view.state.doc.line(22).from + 6;
+  vi.spyOn(view, "posAndSideAtCoords").mockImplementation(({ y }) => ({
+    pos: scrollDOM.scrollTop === 400 ? (y === 40 ? anchor : dragEnd) : view.state.doc.line(61).from,
+    assoc: 1,
+  }));
+
+  const pointer = new MouseEvent("pointerdown", { bubbles: true, button: 0, clientY: 40 });
+  Object.defineProperty(pointer, "pointerType", { value: "mouse" });
+  fireEvent(content, pointer);
+  expect(content).toHaveFocus();
+  expect(scrollDOM).toMatchObject({ scrollTop: 400, scrollLeft: 32 });
+  fireEvent.mouseDown(content, { button: 0, buttons: 1, detail: 1, clientY: 40 });
+  fireEvent.mouseUp(document, { button: 0, clientY: 40 });
+  expect(view.state.selection.main).toMatchObject({ anchor, head: anchor });
+  fireEvent.mouseDown(content, { button: 0, buttons: 1, detail: 1, clientY: 40 });
+  fireEvent.mouseMove(document, { buttons: 1, clientY: 60 });
+  fireEvent.mouseUp(document, { button: 0, clientY: 60 });
+  expect(view.state.selection.main).toMatchObject({ anchor, head: dragEnd });
+});
+
 it("copies virtual columns and pads paste and IME input in a single undoable edit", async () => {
   const original = "\tab\nx\n";
   const user = userEvent.setup();

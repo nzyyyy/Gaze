@@ -1,4 +1,4 @@
-import type { EditorPane } from "./types";
+import type { EditorPane, TextPosition } from "./types";
 import { tabKey } from "./utils";
 
 const KEY = "gaze:session";
@@ -15,6 +15,14 @@ export interface EditorViewState {
   scrollTop: number;
 }
 
+export interface RecentFile {
+  projectId: string;
+  path: string;
+  position?: TextPosition;
+}
+
+export const RECENT_FILE_LIMIT = 50;
+
 export interface WorkspaceSession {
   version: 1;
   tabs: SessionTab[];
@@ -23,6 +31,7 @@ export interface WorkspaceSession {
   activePane: EditorPane;
   splitOpen: boolean;
   views: Record<string, EditorViewState>;
+  recentFiles: RecentFile[];
   tree: {
     openProjects: string[];
     expandedDirectories: string[];
@@ -37,6 +46,7 @@ export const EMPTY_SESSION: WorkspaceSession = {
   activePane: "primary",
   splitOpen: false,
   views: {},
+  recentFiles: [],
   tree: { openProjects: [], expandedDirectories: [] },
 };
 
@@ -69,6 +79,23 @@ function storedView(value: unknown): EditorViewState | null {
     : null;
 }
 
+function storedRecentFile(value: unknown): RecentFile[] {
+  const tab = storedTab(value);
+  if (!tab) return [];
+  const position = (value as Partial<RecentFile>).position;
+  return [
+    {
+      projectId: tab.projectId,
+      path: tab.path,
+      position:
+        position &&
+        [position.line, position.character].every((part) => Number.isSafeInteger(part) && part >= 0)
+          ? { line: position.line, character: position.character }
+          : undefined,
+    },
+  ];
+}
+
 export function readSession(): WorkspaceSession {
   try {
     const stored = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<WorkspaceSession>;
@@ -91,6 +118,9 @@ export function readSession(): WorkspaceSession {
           .map(([key, value]) => [key, storedView(value)] as const)
           .filter((entry): entry is [string, EditorViewState] => entry[1] !== null),
       ),
+      recentFiles: Array.isArray(stored.recentFiles)
+        ? stored.recentFiles.slice(0, RECENT_FILE_LIMIT).flatMap(storedRecentFile)
+        : [],
       tree: {
         openProjects: strings(tree?.openProjects),
         expandedDirectories: strings(tree?.expandedDirectories),

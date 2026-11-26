@@ -15,6 +15,7 @@ interface LocationPickerProps {
   anchor?: { x: number; top: number; bottom: number } | null;
   onClose: () => void;
   onSelect: (location: SymbolLocation) => void;
+  onShowInSidebar?: () => void;
 }
 
 export function LocationPicker({
@@ -24,6 +25,7 @@ export function LocationPicker({
   anchor,
   onClose,
   onSelect,
+  onShowInSidebar,
 }: LocationPickerProps) {
   useLanguage();
   const id = useId();
@@ -200,6 +202,11 @@ export function LocationPicker({
               <kbd>↓</kbd> {t("导航")}
               <kbd>↵</kbd> {t("打开")}
               <kbd>Esc</kbd> {t("关闭")}
+              {onShowInSidebar && (
+                <button className="button button-small" onClick={onShowInSidebar}>
+                  {t("在侧栏查看")}
+                </button>
+              )}
             </div>
           </>
         )}

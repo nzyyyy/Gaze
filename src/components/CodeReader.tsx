@@ -88,7 +88,7 @@ import {
   runEditorLanguageAction,
   type EditorLanguageAction,
 } from "../lib/editorLanguageTools";
-import { indentGuides } from "../lib/indentGuides";
+import { indentDoubleClick, indentGuides } from "../lib/indentGuides";
 import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
 import { rainbowBrackets } from "../lib/rainbowBrackets";
 import { stickyScroll, syntaxSelection } from "../lib/readingTools";
@@ -461,6 +461,28 @@ function initialExtensions(
     matchSelection,
     syntaxSelection,
     rectangularSelection(),
+    indentDoubleClick,
+    EditorView.domEventObservers({
+      pointerdown(event, view) {
+        if (
+          event.pointerType !== "mouse" ||
+          event.button !== 0 ||
+          event.shiftKey ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.altKey ||
+          view.hasFocus ||
+          view.compositionStarted
+        )
+          return;
+        // WebView focus can scroll to the old caret. Settle it before mousedown hit-tests.
+        const { scrollDOM } = view;
+        const { scrollTop, scrollLeft } = scrollDOM;
+        view.focus();
+        if (scrollDOM.scrollTop !== scrollTop) scrollDOM.scrollTop = scrollTop;
+        if (scrollDOM.scrollLeft !== scrollLeft) scrollDOM.scrollLeft = scrollLeft;
+      },
+    }),
     ...(editable ? [closeBrackets()] : []),
     history(),
     EditorState.readOnly.of(!editable),

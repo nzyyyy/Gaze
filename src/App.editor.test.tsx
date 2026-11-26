@@ -283,6 +283,7 @@ vi.mock("./components/CodeReader", async () => {
         data-initial-line={props.initialView?.line}
         data-initial-scroll={props.initialView?.scrollTop}
         data-cursor-line={cursor.line}
+        data-cursor-character={cursor.character}
       >
         {props.tab.name}
         <button
@@ -1176,6 +1177,137 @@ describe("App editor panes", () => {
     expect(nativeMenu.state!.blocked).toBe(true);
     await menuAction("settings");
     expect(screen.queryByRole("dialog", { name: "设置" })).not.toBeInTheDocument();
+  });
+
+  it("uses one palette for location suffixes, recently closed files, symbols and configured actions", async () => {
+    apiMock.bootstrapWorkspace.mockResolvedValueOnce({
+      projects: [{ id: "p1", name: "Demo", root: "/demo" }],
+      activeProjectId: "p1",
+      theme: "system",
+      fonts: DEFAULT_FONT_SETTINGS,
+      preferences: { ...DEFAULT_PREFERENCES, shortcuts: { "search-workspace": "F8" } },
+    });
+    apiMock.searchPaths.mockResolvedValue({
+      hits: [{ projectId: "p1", projectName: "Demo", path: "src/a.ts", score: 1 }],
+      indexing: false,
+      message: null,
+    });
+    apiMock.searchSymbols.mockResolvedValueOnce({
+      symbols: [
+        {
+          projectId: "p1",
+          path: "src/b.ts",
+          name: "findValue",
+          kind: "function",
+          line: 6,
+          character: 2,
+          endLine: 6,
+          endCharacter: 11,
+          source: "ctags",
+        },
+      ],
+      indexing: false,
+      message: null,
+    });
+    const dimensions = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(220);
+    try {
+      render(<App />);
+      await screen.findByRole("button", { name: "设置" });
+      await menuAction("quick-open");
+      const input = screen.getByRole("combobox", { name: "输入文件名、路径或路径:行:列" });
+      await within(screen.getByRole("dialog")).findByText("src/a.ts");
+      fireEvent.change(input, { target: { value: "src/a.ts:5:3" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      await within(screen.getByRole("dialog")).findByText("src/a.ts");
+      expect(apiMock.searchPaths).toHaveBeenLastCalledWith("src/a.ts");
+      fireEvent.keyDown(input, { key: "Enter" });
+      const id = "editor-p1\u0000src/a.ts";
+      expect(await screen.findByTestId(id)).toHaveAttribute("data-cursor-line", "4");
+      expect(screen.getByTestId(id)).toHaveAttribute("data-cursor-character", "2");
+      await menuAction("close-tab");
+      expect(screen.queryByTestId(id)).not.toBeInTheDocument();
+      await menuAction("quick-open");
+      await within(screen.getByRole("dialog")).findByText("src/a.ts:5");
+      fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+      expect(await screen.findByTestId(id)).toHaveAttribute("data-cursor-character", "2");
+
+      await menuAction("quick-open");
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "符号" }));
+      const symbols = screen.getByRole("combobox", { name: "搜索项目符号" });
+      fireEvent.change(symbols, { target: { value: "findValue" } });
+      await within(screen.getByRole("dialog")).findByText("src/b.ts:7");
+      expect(apiMock.searchSymbols).toHaveBeenCalledWith("p1", "findValue");
+      fireEvent.keyDown(symbols, { key: "Enter" });
+      expect(await screen.findByTestId("editor-p1\u0000src/b.ts")).toHaveAttribute(
+        "data-cursor-line",
+        "6",
+      );
+
+      await menuAction("quick-open");
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "最近位置" }));
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: "a.ts" } });
+      await within(screen.getByRole("dialog")).findByText("src/a.ts:5");
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "操作" }));
+      const actions = screen.getByRole("combobox", { name: "搜索操作" });
+      fireEvent.change(actions, { target: { value: "工作区搜索" } });
+      const action = await within(screen.getByRole("dialog")).findByText("工作区搜索");
+      expect(action.closest('[role="option"]')).toHaveTextContent("F8");
+      fireEvent.keyDown(actions, { key: "Enter" });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(nativeMenu.state?.sidebarView).toBe("search");
+    } finally {
+      dimensions.mockRestore();
+    }
+  });
+
+  it("retains grouped reference results and previews their code while moving between files", async () => {
+    const location = {
+      projectId: "p1",
+      name: "findValue",
+      kind: "function",
+      source: "lsp",
+      character: 0,
+      endLine: 1,
+      endCharacter: 9,
+    };
+    apiMock.findReferences.mockResolvedValueOnce({
+      source: "lsp",
+      message: null,
+      locations: [
+        { ...location, path: "src/a.ts", line: 1 },
+        { ...location, path: "src/b.ts", line: 1 },
+      ],
+    });
+    apiMock.readFile.mockImplementation(async (_projectId, path: string) => ({
+      kind: "text",
+      mode: "normal",
+      content: "// context\r\nfindValue(" + JSON.stringify(path) + ");\r\n// end",
+    }));
+    const dimensions = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(220);
+    try {
+      render(<App />);
+      fireEvent.click(await screen.findByText("README.md"));
+      act(() => editorStatusHandler.current!(editableStatus));
+      await menuAction("references");
+      fireEvent.click(await screen.findByRole("button", { name: "在侧栏查看" }));
+      const results = screen.getByRole("listbox", { name: "引用结果" });
+      expect(within(results).getByText("Demo / src/a.ts")).toBeInTheDocument();
+      expect(within(results).getByText("Demo / src/b.ts")).toBeInTheDocument();
+      expect(await screen.findByText('findValue("src/a.ts");')).toBeVisible();
+      fireEvent.keyDown(results, { key: "ArrowDown" });
+      expect(await screen.findByText('findValue("src/b.ts");')).toBeVisible();
+      fireEvent.keyDown(results, { key: "Enter" });
+      expect(await screen.findByTestId("editor-p1\u0000src/b.ts")).toHaveAttribute(
+        "data-cursor-line",
+        "1",
+      );
+      expect(screen.getByRole("listbox", { name: "引用结果" })).toBeVisible();
+      expect(apiMock.findReferences).toHaveBeenCalledTimes(1);
+    } finally {
+      dimensions.mockRestore();
+      apiMock.readFile.mockReset();
+    }
   });
 
   it("keeps the terminal mounted and open when plugin preferences change", async () => {

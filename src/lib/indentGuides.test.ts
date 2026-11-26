@@ -2,7 +2,7 @@ import { codeFolding, foldEffect } from "@codemirror/language";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView, type BlockInfo } from "@codemirror/view";
 import { afterEach, expect, it, vi } from "vitest";
-import { indentGuides } from "./indentGuides";
+import { indentDoubleClick, indentGuides } from "./indentGuides";
 import { matchLanguage } from "./language";
 
 let view: EditorView;
@@ -22,6 +22,7 @@ function editor(doc: string, extensions: Extension[] = [], wrappedLine = 0) {
     doc,
     extensions: [
       indentGuides,
+      indentDoubleClick,
       EditorView.theme({ ".cm-line": { paddingLeft: "12px" } }),
       ...extensions,
     ],

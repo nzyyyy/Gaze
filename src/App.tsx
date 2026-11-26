@@ -50,7 +50,8 @@ import {
   type BatchFileOperationResult,
 } from "./components/FileOperationDialog";
 import { LocationPicker } from "./components/LocationPicker";
-import { QuickOpen } from "./components/QuickOpen";
+import { QuickOpen, type PaletteAction } from "./components/QuickOpen";
+import { ReferencePanel } from "./components/ReferencePanel";
 import { SearchPanel } from "./components/SearchPanel";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { SidebarLayout, type SidebarLayoutHandle } from "./components/SidebarLayout";
@@ -66,12 +67,19 @@ import { useNativeMenu, type NativeMenuAction, type NativeMenuState } from "./li
 import {
   matchShortcut,
   resolveShortcuts,
+  shortcutCommandLabel,
   shortcutFromEvent,
   shortcutLabel,
   type NavigationTarget,
 } from "./lib/shortcuts";
 import { saveLayout } from "./lib/layout";
-import { readSession, saveSession, type WorkspaceSession } from "./lib/session";
+import {
+  readSession,
+  saveSession,
+  RECENT_FILE_LIMIT,
+  type RecentFile,
+  type WorkspaceSession,
+} from "./lib/session";
 import { colorSchemeVariables, DEFAULT_COLOR_SCHEMES, type ColorSchemes } from "./lib/colorSchemes";
 import { DEFAULT_FONT_SETTINGS, fontStack, type FontSettings } from "./lib/fonts";
 import { isMarkdownFile, isPythonFile } from "./lib/language";
@@ -80,7 +88,6 @@ import type {
   EditorPane,
   EditorStatus,
   NavigationResult,
-  PathSearchHit,
   Project,
   ResolvedTheme,
   SymbolLocation,
@@ -112,6 +119,9 @@ import {
 
 type WorkspaceCommand =
   | NativeMenuAction
+  | "sidebar-files"
+  | "sidebar-search"
+  | "sidebar-symbols"
   | "copy-file"
   | "paste-file"
   | "delete-file"
@@ -130,6 +140,7 @@ interface NavigationDialog {
   title: string;
   result: NavigationResult;
   anchor: { x: number; top: number; bottom: number } | null;
+  references?: boolean;
 }
 
 type PendingAction =
@@ -248,6 +259,9 @@ export default function App() {
   const [quickOpen, setQuickOpen] = useState(false);
   const [navigationBusy, setNavigationBusy] = useState(false);
   const [navigationDialog, setNavigationDialog] = useState<NavigationDialog | null>(null);
+  const [referenceResults, setReferenceResults] = useState<NavigationResult | null>(null);
+  const [showReferences, setShowReferences] = useState(false);
+  const recentFilesRef = useRef(initialSession.recentFiles);
   const navigationBackRef = useRef<NavigationHistoryEntry[]>([]);
   const navigationForwardRef = useRef<NavigationHistoryEntry[]>([]);
   const [navigationHistory, setNavigationHistory] = useState({ back: 0, forward: 0 });
@@ -513,6 +527,16 @@ export default function App() {
     if (snapshot.theme !== theme) setTheme(snapshot.theme);
   };
 
+  const updateRecentPositions = useCallback(
+    () =>
+      recentFilesRef.current.map((file) => ({
+        ...file,
+        position:
+          editorsRef.current.get(tabKey(file.projectId, file.path))?.getCursor() ?? file.position,
+      })),
+    [],
+  );
+
   const removeTabs = useCallback((closing: EditorTab[]) => {
     const keys = new Set(closing.map((tab) => tab.key));
     if (keys.size === 0) return;
@@ -598,6 +622,7 @@ export default function App() {
 
   const closeTabs = useCallback(
     (closing: EditorTab[]) => {
+      recentFilesRef.current = updateRecentPositions();
       const next = removeTabs(closing) ?? tabsRef.current;
       for (const tab of closing) {
         forgetTabState(tab.key);
@@ -612,7 +637,7 @@ export default function App() {
           temporaryProjectsRef.current.delete(tab.projectId);
       }
     },
-    [forgetTabState, notify, removeTabs],
+    [forgetTabState, notify, removeTabs, updateRecentPositions],
   );
 
   const handleImport = useCallback(async () => {
@@ -901,6 +926,23 @@ export default function App() {
     const previous = readSession();
     const tabs = tabsRef.current.filter((tab) => !temporaryProjectsRef.current.has(tab.projectId));
     const active = tabs.find((tab) => tab.key === activeKeyRef.current);
+    const current = loadStateRef.current;
+    if (current.status !== "ready") return;
+    const projectIds = new Set(current.snapshot.projects.map(({ id }) => id));
+    let recent = updateRecentPositions().filter((file) => projectIds.has(file.projectId));
+    if (active && projectIds.has(active.projectId)) {
+      const previous = recent.find((file) => tabKey(file.projectId, file.path) === active.key);
+      recent = [
+        {
+          projectId: active.projectId,
+          path: active.path,
+          position:
+            previous?.position ?? editorsRef.current.get(active.key)?.getCursor() ?? undefined,
+        },
+        ...recent.filter((file) => tabKey(file.projectId, file.path) !== active.key),
+      ].slice(0, RECENT_FILE_LIMIT);
+    }
+    recentFilesRef.current = recent;
     const paneActive: WorkspaceSession["paneActive"] = { primary: null, secondary: null };
     for (const pane of ["primary", "secondary"] as const) {
       const tab = tabs.find((tab) => tab.key === paneActiveRef.current[pane]);
@@ -925,12 +967,13 @@ export default function App() {
       activePane: activePaneRef.current,
       splitOpen: splitOpenRef.current,
       views,
+      recentFiles: recent,
     });
-  }, []);
+  }, [updateRecentPositions]);
 
   useEffect(() => {
     persistSession();
-  }, [tabs, activeKey, paneActive, activePane, splitOpen, persistSession]);
+  }, [tabs, activeKey, paneActive, activePane, splitOpen, loadState, persistSession]);
 
   const handleTreeExpansion = useCallback(
     (openProjects: ReadonlySet<string>, expandedDirectories: ReadonlySet<string>) => {
@@ -1085,6 +1128,13 @@ export default function App() {
               );
             }
             if (!entry || entry.path !== sourceEntry.path) {
+              recentFilesRef.current = recentFilesRef.current.filter((file) => {
+                const owner = snapshot?.projects.find(({ id }) => id === file.projectId);
+                if (!owner) return false;
+                const path = `${root(owner.root)}/${file.path}`;
+                return path !== source && !path.startsWith(source + "/");
+              });
+              saveSession({ recentFiles: recentFilesRef.current });
               const remapped = new Map<string, EditorTab>();
               for (const tab of affected) {
                 if (!entry) continue;
@@ -1323,12 +1373,30 @@ export default function App() {
     };
   }, [workspaceReady, notify]);
 
-  const handleOpenPathHit = useCallback(
-    (hit: PathSearchHit) => {
-      openLocation(hit.projectId, hit.path);
+  const openRecentLocation = useCallback(
+    ({ projectId, path, position }: RecentFile) => {
+      openLocation(
+        projectId,
+        path,
+        position && {
+          ...position,
+          endLine: position.line,
+          endCharacter: position.character,
+        },
+      );
     },
     [openLocation],
   );
+
+  const readPreviewText = useCallback(async (projectId: string, path: string) => {
+    const current = loadStateRef.current;
+    if (current.status !== "ready" || !current.snapshot.projects.some(({ id }) => id === projectId))
+      return null;
+    const text = editorsRef.current.get(tabKey(projectId, path))?.getText();
+    if (text != null) return text.length <= 2 * 1024 * 1024 ? text : null;
+    const file = await api.readFile(projectId, path);
+    return file.kind === "text" && file.mode === "normal" ? file.content : null;
+  }, []);
 
   const focusGlobalSearch = useCallback(() => {
     sidebarLayoutRef.current?.open();
@@ -1454,7 +1522,7 @@ export default function App() {
             // the declaration, matching IDEA's Show Usages behavior).
             result = await api.findReferences(tab.projectId, tab.path, position, false);
             if (result.locations.length > 0) {
-              setNavigationDialog({ title: t("引用"), result, anchor });
+              setNavigationDialog({ title: t("引用"), result, anchor, references: true });
             } else {
               notify(t("没有找到引用。"));
             }
@@ -1473,7 +1541,7 @@ export default function App() {
           openNavigationLocation(result.locations[0]!);
           return;
         }
-        setNavigationDialog({ title, result, anchor });
+        setNavigationDialog({ title, result, anchor, references: kind === "references" });
       } catch (error) {
         notify(errorMessage(error));
       } finally {
@@ -2011,8 +2079,11 @@ export default function App() {
     !gitOperationBusyRef.current &&
     !closingTabsRef.current;
 
-  const runWorkspaceCommand = async (action: WorkspaceCommand, fromShortcut = false) => {
-    if (!canRunWorkspaceCommand(fromShortcut && action === "quick-open")) return;
+  const runWorkspaceCommand = async (action: WorkspaceCommand, origin?: "shortcut" | "palette") => {
+    const fromShortcut = origin === "shortcut";
+    if (!canRunWorkspaceCommand(origin === "palette" || (fromShortcut && action === "quick-open")))
+      return;
+    if (origin === "palette") flushSync(() => setQuickOpen(false));
     const lock =
       !fromShortcut || action === "open-file" || action === "import-project" || action === "quit";
     if (lock) {
@@ -2050,12 +2121,18 @@ export default function App() {
           focusGlobalSearch();
           break;
         case "search":
-          if (fromShortcut) await selectSidebarView("search");
-          else focusGlobalSearch();
+          focusGlobalSearch();
+          break;
+        case "sidebar-search":
+          selectSidebarView("search");
           break;
         case "files":
+        case "sidebar-files":
+          selectSidebarView("files");
+          break;
         case "symbols":
-          await selectSidebarView(action);
+        case "sidebar-symbols":
+          selectSidebarView("symbols");
           break;
         case "git":
           openGit();
@@ -2164,6 +2241,70 @@ export default function App() {
 
   useNativeMenu(menuState, runWorkspaceCommand, (error) => notify(errorMessage(error)));
 
+  const paletteEntries: [WorkspaceCommand, boolean?][] = [
+    ["settings"],
+    ["open-file"],
+    ["import-project"],
+    ["search-workspace"],
+    ["sidebar-files"],
+    ["sidebar-search"],
+    ["sidebar-symbols"],
+    ["git"],
+    ["terminal"],
+    ["toggle-split"],
+    ["save", menuCanSave],
+    ["close-tab", menuHasFile],
+    ["find", menuHasFile],
+    ["back", menuState.canGoBack],
+    ["forward", menuState.canGoForward],
+    ["definition", menuCanNavigate],
+    ["references", menuCanNavigate],
+    ["implementation", menuCanNavigate],
+    ["quick-fix", menuCanUseEditorActions],
+    ["format-code", menuCanUseEditorActions],
+    ["organize-imports", menuCanUseEditorActions],
+    ["parameter-info", menuCanUseEditorActions],
+    ["quick-documentation", menuCanShowQuickDocumentation],
+  ];
+  const paletteActions: PaletteAction[] = quickOpen
+    ? paletteEntries.flatMap(([action, enabled = true]) =>
+        enabled
+          ? [
+              {
+                label: shortcutCommandLabel(action),
+                shortcut: shortcutBindings[action],
+                run: () => {
+                  void runWorkspaceCommand(action, "palette").catch((error) =>
+                    notify(errorMessage(error)),
+                  );
+                },
+              },
+            ]
+          : [],
+      )
+    : [];
+
+  const recentLocations: RecentFile[] = [];
+  if (quickOpen) {
+    const seen = new Set<string>();
+    for (const entry of [
+      currentNavigationEntry(),
+      ...[...navigationBackRef.current].reverse(),
+      ...[...navigationForwardRef.current].reverse(),
+    ]) {
+      if (!entry?.request || !snapshot?.projects.some(({ id }) => id === entry.projectId)) continue;
+      const {
+        projectId,
+        path,
+        request: { line, character },
+      } = entry;
+      const key = JSON.stringify([projectId, path, line, character]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      recentLocations.push({ projectId, path, position: { line, character } });
+    }
+  }
+
   const handleShortcut = useEffectEvent((event: KeyboardEvent, capture: boolean) => {
     if (fileOperationBusyRef.current) {
       if (!capture && shouldBlockKeyboard()) event.preventDefault();
@@ -2182,22 +2323,7 @@ export default function App() {
       event.target instanceof HTMLInputElement ||
       event.target instanceof HTMLTextAreaElement ||
       (event.target instanceof HTMLElement && event.target.isContentEditable);
-    let action: WorkspaceCommand;
     switch (command) {
-      case "sidebar-files":
-        action = "files";
-        break;
-      case "sidebar-search":
-        action = "search";
-        break;
-      case "sidebar-symbols":
-        action = "symbols";
-        break;
-      default:
-        action = command;
-        break;
-    }
-    switch (action) {
       case "save":
       case "close-tab":
         if (!activeTab) return;
@@ -2222,12 +2348,12 @@ export default function App() {
           !(window.getSelection()?.isCollapsed ?? true)
         )
           return;
-        if (!activeTab && (action === "copy-file" || action === "delete-file")) return;
+        if (!activeTab && (command === "copy-file" || command === "delete-file")) return;
         break;
     }
     event.preventDefault();
     if (capture) event.stopPropagation();
-    void runWorkspaceCommand(action, true).catch((error) => notify(errorMessage(error)));
+    void runWorkspaceCommand(command, "shortcut").catch((error) => notify(errorMessage(error)));
   });
 
   useEffect(() => {
@@ -2530,17 +2656,44 @@ export default function App() {
             <section className="sidebar-view" hidden={sidebarView !== "git"}>
               <div className="git-sidebar-target" ref={setGitSidebar} />
             </section>
-            <section className="sidebar-view" hidden={sidebarView !== "symbols"}>
-              <SymbolPanel
-                active={sidebarView === "symbols"}
-                project={currentProject}
-                activeTab={activeTab}
-                refreshToken={refreshToken + symbolRefreshToken}
-                navigationBusy={navigationBusy}
-                onOpenLocation={openLocation}
-                onFindImplementations={() => void runNavigation("implementation")}
-                onNotice={notify}
-              />
+            <section className="sidebar-view symbols-view" hidden={sidebarView !== "symbols"}>
+              {referenceResults && (
+                <div className="navigation-modes" role="group" aria-label={t("符号侧栏视图")}>
+                  <button aria-pressed={!showReferences} onClick={() => setShowReferences(false)}>
+                    {t("符号")}
+                  </button>
+                  <button aria-pressed={showReferences} onClick={() => setShowReferences(true)}>
+                    {t("引用")}
+                  </button>
+                </div>
+              )}
+              <div className="symbols-view-content" hidden={showReferences}>
+                <SymbolPanel
+                  active={sidebarView === "symbols" && !showReferences}
+                  project={currentProject}
+                  activeTab={activeTab}
+                  refreshToken={refreshToken + symbolRefreshToken}
+                  navigationBusy={navigationBusy}
+                  onOpenLocation={openLocation}
+                  onFindImplementations={() => void runNavigation("implementation")}
+                  onNotice={notify}
+                />
+              </div>
+              {referenceResults && (
+                <div className="symbols-view-content" hidden={!showReferences}>
+                  <ReferencePanel
+                    active={sidebarView === "symbols" && showReferences}
+                    result={referenceResults}
+                    projects={snapshot?.projects ?? []}
+                    readText={readPreviewText}
+                    onOpen={openNavigationLocation}
+                    onClose={() => {
+                      setShowReferences(false);
+                      setReferenceResults(null);
+                    }}
+                  />
+                </div>
+              )}
             </section>
           </div>
         }
@@ -2596,7 +2749,7 @@ export default function App() {
                     }
                     onNavigate={(target: NavigationTarget) => {
                       if (!canRunWorkspaceCommand() || navigationBusy) return false;
-                      void runWorkspaceCommand(target, true).catch((error) =>
+                      void runWorkspaceCommand(target, "shortcut").catch((error) =>
                         notify(errorMessage(error)),
                       );
                       return true;
@@ -2726,10 +2879,23 @@ export default function App() {
 
       {quickOpen && (
         <QuickOpen
-          open={quickOpen}
-          hasProjects={(snapshot?.projects.length ?? 0) > 0}
+          projects={snapshot?.projects ?? []}
+          project={
+            snapshot?.projects.find(
+              ({ id }) => id === (currentProject?.id ?? snapshot.activeProjectId),
+            ) ??
+            snapshot?.projects[0] ??
+            null
+          }
+          recentFiles={updateRecentPositions().filter((file) =>
+            snapshot?.projects.some(({ id }) => id === file.projectId),
+          )}
+          locations={recentLocations}
+          actions={paletteActions}
+          readText={readPreviewText}
           onClose={() => setQuickOpen(false)}
-          onOpen={handleOpenPathHit}
+          onOpen={openRecentLocation}
+          onOpenSymbol={openNavigationLocation}
           onImport={() => void handleImport()}
         />
       )}
@@ -2742,6 +2908,16 @@ export default function App() {
           projects={snapshot?.projects ?? []}
           onClose={() => setNavigationDialog(null)}
           onSelect={openNavigationLocation}
+          onShowInSidebar={
+            navigationDialog.references && navigationDialog.result.locations.length > 0
+              ? () => {
+                  setReferenceResults(navigationDialog.result);
+                  setShowReferences(true);
+                  setNavigationDialog(null);
+                  selectSidebarView("symbols");
+                }
+              : undefined
+          }
         />
       )}
 

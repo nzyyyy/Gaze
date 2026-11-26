@@ -35,9 +35,24 @@ it("merges valid session patches and filters unsafe or invalid entries", () => {
     activePane: "primary",
     splitOpen: false,
     views: { "p1\u0000src/a.ts": { line: 2, character: 4, scrollTop: 30 } },
+    recentFiles: [],
     tree: { openProjects: ["p1"], expandedDirectories: ["p1\u0000src"] },
   });
   expect(sessionTabKey(tabs[0]!)).toBe("p1\u0000src/a.ts");
+});
+
+it("restores recent project files and discards invalid stored positions", () => {
+  saveSession({
+    recentFiles: [
+      { projectId: "p1", path: "src/a.ts", position: { line: 2, character: 4 } },
+      { projectId: "p1", path: "b.ts", position: { line: -1, character: 0 } },
+      { projectId: "external:temp", path: "outside.ts" },
+    ],
+  });
+  expect(readSession().recentFiles).toEqual([
+    { projectId: "p1", path: "src/a.ts", position: { line: 2, character: 4 } },
+    { projectId: "p1", path: "b.ts" },
+  ]);
 });
 
 it("validates each pane selection and reads older sessions without pane selections", () => {

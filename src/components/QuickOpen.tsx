@@ -1,132 +1,223 @@
 import { t, useLanguage } from "../lib/i18n";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { FileSearch, LoaderCircle, SearchX } from "lucide-react";
 
 import { api } from "../lib/api";
-import type { PathSearchHit } from "../lib/types";
+import { matchesNavigationQuery, parseFileQuery } from "../lib/navigationSearch";
+import type { RecentFile } from "../lib/session";
+import { shortcutLabel } from "../lib/shortcuts";
+import type { Project, SymbolLocation } from "../lib/types";
 import { useModalFocus } from "../lib/useModalFocus";
-import { basename, errorMessage, parentPath } from "../lib/utils";
+import { basename, errorMessage } from "../lib/utils";
+import { CodeLocationPreview, type ReadPreviewText } from "./CodeLocationPreview";
 import { FileIcon } from "./FileIcon";
 
+const MODES = ["files", "symbols", "actions", "locations"] as const;
+type Mode = (typeof MODES)[number];
+
+export interface PaletteAction {
+  label: string;
+  shortcut?: string | null;
+  run: () => void;
+}
+
+type Result =
+  | { type: "file"; location: RecentFile; projectName: string }
+  | { type: "symbol"; location: SymbolLocation; projectName: string }
+  | { type: "action"; action: PaletteAction };
+
+interface SearchResult {
+  key: string;
+  rows: Result[];
+  message?: string | null;
+  indexing?: boolean;
+  error?: string;
+}
+
 interface QuickOpenProps {
-  open: boolean;
-  hasProjects: boolean;
+  projects: readonly Project[];
+  project: Project | null;
+  recentFiles: readonly RecentFile[];
+  locations: readonly RecentFile[];
+  actions: readonly PaletteAction[];
+  readText: ReadPreviewText;
   onClose: () => void;
-  onOpen: (hit: PathSearchHit) => void;
+  onOpen: (location: RecentFile) => void;
+  onOpenSymbol: (location: SymbolLocation) => void;
   onImport: () => void;
 }
 
-export function QuickOpen({ open, hasProjects, onClose, onOpen, onImport }: QuickOpenProps) {
+export function QuickOpen({
+  projects,
+  project,
+  recentFiles,
+  locations,
+  actions,
+  readText,
+  onClose,
+  onOpen,
+  onOpenSymbol,
+  onImport,
+}: QuickOpenProps) {
   useLanguage();
+  const id = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const [mode, setMode] = useState<Mode>("files");
   const [query, setQuery] = useState("");
-  const [hits, setHits] = useState<PathSearchHit[]>([]);
   const [selected, setSelected] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [indexing, setIndexing] = useState(false);
-  const [indexMessage, setIndexMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [reloadToken, setReloadToken] = useState(0);
+  const [search, setSearch] = useState<SearchResult | null>(null);
+  const [indexRevision, setIndexRevision] = useState(0);
+  const fileQuery = parseFileQuery(query);
+  const projectId = project?.id;
+  const projectName = project?.name;
+  const showRecent = mode === "files" && !query.trim() && recentFiles.length > 0;
+  const pathQuery = mode === "files" && !showRecent && projects.length > 0 ? fileQuery.path : null;
+  const symbolQuery = mode === "symbols" && projectId ? query.trim() : "";
+  const searchKey =
+    pathQuery !== null
+      ? JSON.stringify(["files", pathQuery, indexRevision])
+      : symbolQuery
+        ? JSON.stringify(["symbols", projectId, symbolQuery])
+        : null;
+  const response = search?.key === searchKey ? search : null;
+  const loading = searchKey !== null && !response;
 
-  const virtualizer = useVirtualizer({
-    count: hits.length,
-    getScrollElement: () => listRef.current,
-    estimateSize: () => 36,
-    overscan: 10,
-  });
-
-  useModalFocus(dialogRef, inputRef, open);
-
-  useEffect(() => {
-    if (!open) return;
-    setQuery("");
-    setSelected(0);
-  }, [open]);
+  useModalFocus(dialogRef, inputRef);
 
   useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, open]);
-
-  useEffect(() => {
-    if (!open) return;
+    if (mode !== "files" || projects.length === 0) return;
     let disposed = false;
-    let unlisten: (() => void) | null = null;
-    api
+    let unlisten: (() => void) | undefined;
+    void api
       .onPathIndexStatus((status) => {
-        if (disposed) return;
-        setIndexing(status.indexing);
-        if (!status.indexing) setReloadToken((value) => value + 1);
+        if (!disposed && !status.indexing) setIndexRevision((value) => value + 1);
       })
-      .then((fn) => {
-        if (disposed) fn();
-        else unlisten = fn;
+      .then((stop) => {
+        if (disposed) stop();
+        else unlisten = stop;
       })
       .catch(() => undefined);
     return () => {
       disposed = true;
       unlisten?.();
     };
-  }, [open]);
+  }, [mode, projects.length]);
 
   useEffect(() => {
-    if (!open || !hasProjects) {
-      setHits([]);
-      return;
-    }
+    if (searchKey === null) return;
     let disposed = false;
-    setLoading(true);
-    setError(null);
     const timer = window.setTimeout(
-      () => {
-        api
-          .searchPaths(query)
-          .then((response) => {
-            if (disposed) return;
-            setHits(response.hits);
-            setIndexing(response.indexing);
-            setIndexMessage(response.message);
-            setSelected(0);
-            setLoading(false);
-          })
-          .catch((reason: unknown) => {
-            if (disposed) return;
-            setError(errorMessage(reason));
-            setLoading(false);
-          });
+      async () => {
+        try {
+          if (pathQuery !== null) {
+            const result = await api.searchPaths(pathQuery);
+            if (!disposed)
+              setSearch({
+                key: searchKey,
+                rows: result.hits.map((location) => ({
+                  type: "file",
+                  location,
+                  projectName: location.projectName,
+                })),
+                message: result.message,
+                indexing: result.indexing,
+              });
+          } else if (projectId) {
+            const result = await api.searchSymbols(projectId, symbolQuery);
+            if (!disposed)
+              setSearch({
+                key: searchKey,
+                rows: result.symbols.map((location) => ({
+                  type: "symbol",
+                  location,
+                  projectName: projectName ?? "",
+                })),
+                message: result.message,
+                indexing: result.indexing,
+              });
+          }
+        } catch (reason) {
+          if (!disposed) setSearch({ key: searchKey, rows: [], error: errorMessage(reason) });
+        }
       },
-      query.length === 0 ? 0 : 80,
+      pathQuery === "" ? 0 : 100,
     );
     return () => {
       disposed = true;
       window.clearTimeout(timer);
     };
-  }, [hasProjects, open, query, reloadToken]);
+  }, [pathQuery, projectId, projectName, searchKey, symbolQuery]);
+
+  const recentRows = (items: readonly RecentFile[]) =>
+    items.flatMap((location): Result[] => {
+      const project = projects.find(({ id }) => id === location.projectId);
+      return project && matchesNavigationQuery(`${project.name} ${location.path}`, query.trim())
+        ? [{ type: "file", location, projectName: project.name }]
+        : [];
+    });
+  const results: Result[] =
+    mode === "actions"
+      ? actions
+          .filter(({ label, shortcut }) =>
+            matchesNavigationQuery(
+              `${label} ${shortcut ? shortcutLabel(shortcut) : ""}`,
+              query.trim(),
+            ),
+          )
+          .map((action) => ({ type: "action", action }))
+      : mode === "locations"
+        ? recentRows(locations)
+        : showRecent
+          ? recentRows(recentFiles)
+          : (response?.rows ?? []);
+  const activeIndex = Math.min(selected, Math.max(0, results.length - 1));
+  const active = results[activeIndex];
+  const virtualizer = useVirtualizer({
+    count: results.length,
+    getScrollElement: () => listRef.current,
+    estimateSize: () => 36,
+    overscan: 8,
+  });
+  const rows = virtualizer.getVirtualItems();
 
   useEffect(() => {
-    if (hits.length > 0) {
-      virtualizer.scrollToIndex(selected, { align: "auto" });
-    }
-  }, [selected, hits.length, virtualizer]);
+    if (results.length > 0) virtualizer.scrollToIndex(activeIndex, { align: "auto" });
+  }, [activeIndex, results.length, virtualizer]);
 
-  if (!open) return null;
-
-  const openSelected = (index = selected) => {
-    const hit = hits[index];
-    if (!hit) return;
-    onClose();
-    onOpen(hit);
+  const selectMode = (next: Mode) => {
+    setMode(next);
+    setSelected(0);
+    inputRef.current?.focus();
   };
+  const choose = (row: Result | undefined) => {
+    if (!row) return;
+    if (row.type === "action") {
+      row.action.run();
+      return;
+    }
+    onClose();
+    if (row.type === "symbol") onOpenSymbol(row.location);
+    else
+      onOpen({
+        ...row.location,
+        position: (mode === "files" && fileQuery.position) || row.location.position,
+      });
+  };
+  const labels = {
+    files: t("文件"),
+    symbols: t("符号"),
+    actions: t("操作"),
+    locations: t("最近位置"),
+  };
+  const placeholder = {
+    files: t("输入文件名、路径或路径:行:列"),
+    symbols: t("搜索项目符号"),
+    actions: t("搜索操作"),
+    locations: t("筛选最近位置"),
+  }[mode];
 
   return (
     <div
@@ -139,119 +230,167 @@ export function QuickOpen({ open, hasProjects, onClose, onOpen, onImport }: Quic
         className="quick-open"
         role="dialog"
         aria-modal="true"
-        aria-label={t("快速打开文件")}
+        aria-label={t("快速打开")}
         tabIndex={-1}
         ref={dialogRef}
         onKeyDown={(event) => {
-          if (event.key === "Escape") {
+          if (event.key === "Escape" && !event.nativeEvent.isComposing) {
             event.preventDefault();
             onClose();
           }
         }}
       >
         <div className="quick-open-input-row">
-          <FileSearch size={17} className="quick-open-icon" />
+          <FileSearch size={17} className="quick-open-icon" aria-hidden="true" />
           <input
             ref={inputRef}
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setSelected(0);
+            }}
             onKeyDown={(event) => {
-              if (event.key === "ArrowDown") {
+              if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                 event.preventDefault();
-                setSelected((value) => Math.min(value + 1, Math.max(0, hits.length - 1)));
-              } else if (event.key === "ArrowUp") {
-                event.preventDefault();
-                setSelected((value) => Math.max(0, value - 1));
+                setSelected(
+                  Math.min(
+                    Math.max(0, activeIndex + (event.key === "ArrowDown" ? 1 : -1)),
+                    Math.max(0, results.length - 1),
+                  ),
+                );
               } else if (event.key === "Enter") {
                 event.preventDefault();
-                openSelected();
+                choose(active);
               }
             }}
-            placeholder={t("输入文件名或路径")}
-            aria-label={t("输入文件名或路径")}
+            placeholder={placeholder}
+            aria-label={placeholder}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={results.length > 0}
+            aria-controls={results.length > 0 ? `${id}-results` : undefined}
+            aria-activedescendant={
+              rows.some((row) => row.index === activeIndex) ? `${id}-row-${activeIndex}` : undefined
+            }
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
-            disabled={!hasProjects}
           />
-          {(loading || indexing) && <LoaderCircle size={14} className="spin" />}
+          {(loading || response?.indexing) && (
+            <LoaderCircle size={14} className="spin" aria-hidden="true" />
+          )}
           <kbd className="palette-key">Esc</kbd>
         </div>
 
-        {!hasProjects ? (
-          <div className="palette-empty">
-            <SearchX size={24} strokeWidth={1.4} />
-            <p>{t("工作区中还没有项目")}</p>
-            <button
-              className="button button-small"
-              onClick={() => {
-                onClose();
-                onImport();
-              }}
-            >
-              {t("导入项目")}
+        <div className="navigation-modes" role="group" aria-label={t("搜索类别")}>
+          {MODES.map((item) => (
+            <button key={item} aria-pressed={item === mode} onClick={() => selectMode(item)}>
+              {labels[item]}
             </button>
-          </div>
-        ) : error ? (
-          <div className="palette-empty palette-error">{error}</div>
-        ) : hits.length === 0 ? (
-          <div className="palette-empty">
-            {indexing ? (
-              <>
-                <LoaderCircle size={22} className="spin" />
-                <p>{t("正在建立文件索引…")}</p>
-              </>
-            ) : (
-              <>
-                <SearchX size={22} strokeWidth={1.4} />
-                <p>{query ? t("没有匹配的文件") : t("尚未发现可打开的文件")}</p>
-              </>
-            )}
-          </div>
-        ) : (
+          ))}
+        </div>
+
+        {results.length > 0 ? (
           <div
             className="palette-results"
             ref={listRef}
+            id={`${id}-results`}
             role="listbox"
-            aria-label={t("文件匹配结果")}
+            aria-label={labels[mode]}
           >
             <div className="palette-results-virtual" style={{ height: virtualizer.getTotalSize() }}>
-              {virtualizer.getVirtualItems().map((row) => {
-                const hit = hits[row.index];
-                if (!hit) return null;
-                const directory = parentPath(hit.path);
-                const isSelected = selected === row.index;
+              {rows.map((row) => {
+                const item = results[row.index]!;
+                const location = item.type === "action" ? null : item.location;
+                const detail =
+                  item.type === "symbol"
+                    ? `${item.location.path}:${item.location.line + 1}`
+                    : item.type === "file"
+                      ? item.location.path +
+                        (item.location.position ? `:${item.location.position.line + 1}` : "")
+                      : null;
                 return (
                   <button
-                    className={`palette-result ${isSelected ? "is-selected" : ""}`}
-                    key={`${hit.projectId}:${hit.path}`}
+                    className={`palette-result ${activeIndex === row.index ? "is-selected" : ""}`}
+                    key={row.key}
+                    id={`${id}-row-${row.index}`}
+                    tabIndex={-1}
                     style={{ transform: `translateY(${row.start}px)` }}
                     role="option"
-                    aria-selected={isSelected}
+                    aria-selected={activeIndex === row.index}
+                    title={detail ?? undefined}
                     onMouseEnter={() => setSelected(row.index)}
-                    onClick={() => openSelected(row.index)}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => choose(item)}
                   >
-                    <FileIcon name={basename(hit.path)} size={15} />
-                    <span className="palette-project">{hit.projectName}</span>
-                    <span className="palette-path">
-                      {directory && <span className="palette-dir">{directory}/</span>}
-                      <span className="palette-basename">{basename(hit.path)}</span>
-                    </span>
+                    {location && <FileIcon name={basename(location.path)} size={15} />}
+                    {item.type !== "action" && (
+                      <span className="palette-project">{item.projectName}</span>
+                    )}
+                    {(item.type === "symbol" || item.type === "action") && (
+                      <span className="palette-label">
+                        {item.type === "symbol" ? item.location.name : item.action.label}
+                      </span>
+                    )}
+                    {detail && <span className="palette-path">{detail}</span>}
+                    {item.type === "action" && item.action.shortcut && (
+                      <kbd className="palette-key">{shortcutLabel(item.action.shortcut)}</kbd>
+                    )}
                   </button>
                 );
               })}
             </div>
           </div>
+        ) : (
+          <div className={`palette-empty${response?.error ? " palette-error" : ""}`} role="status">
+            {loading || response?.indexing ? (
+              <p>{mode === "symbols" ? t("正在读取符号…") : t("正在搜索文件…")}</p>
+            ) : mode === "files" && projects.length === 0 ? (
+              <>
+                <SearchX size={24} strokeWidth={1.4} />
+                <p>{t("工作区中还没有项目")}</p>
+                <button
+                  className="button button-small"
+                  onClick={() => {
+                    onClose();
+                    onImport();
+                  }}
+                >
+                  {t("导入项目")}
+                </button>
+              </>
+            ) : (
+              <p>
+                {response?.error ??
+                  response?.message ??
+                  (mode === "symbols" && !project
+                    ? t("工作区中还没有项目")
+                    : mode === "symbols" && !query.trim()
+                      ? t("输入符号名称")
+                      : mode === "locations" && !query.trim()
+                        ? t("尚无最近位置")
+                        : t("没有匹配的结果"))}
+              </p>
+            )}
+          </div>
         )}
 
+        {mode === "locations" && active?.type === "file" && active.location.position && (
+          <CodeLocationPreview
+            key={JSON.stringify([active.location.projectId, active.location.path])}
+            location={active.location}
+            readText={readText}
+          />
+        )}
         <div className="quick-open-footer">
           <span>
-            {indexMessage ?? (indexing ? t("文件索引仍在后台更新") : t("{0} 个结果", hits.length))}
+            {(mode === "symbols" && projectName) ||
+              (showRecent ? t("最近文件") : (response?.message ?? t("{0} 个结果", results.length)))}
           </span>
           <span className="palette-hints">
             <kbd>↑</kbd>
-            <kbd>↓</kbd> {t("导航")}
-            <kbd>↵</kbd> {t("打开")}
+            <kbd>↓</kbd> {t("导航")} <kbd>↵</kbd> {mode === "actions" ? t("执行") : t("打开")}
           </span>
         </div>
       </div>

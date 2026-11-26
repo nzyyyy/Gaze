@@ -176,47 +176,50 @@ function guideSelectionEnd(state: EditorState, guide: GuideSegment) {
   return close + spaces === next.to ? Math.min(next.to + 1, doc.length) : close + spaces;
 }
 
+export const indentDoubleClick = EditorView.mouseSelectionStyle.of((view, event) => {
+  if (
+    event.detail !== 2 ||
+    event.button !== 0 ||
+    event.shiftKey ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.altKey
+  ) {
+    return null;
+  }
+
+  const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+  if (pos === null) return null;
+  const line = view.state.doc.lineAt(pos);
+  const indent = leadingIndent.exec(line.text)![0].length;
+  if (!indent) return null;
+  const indentEnd = line.from + indent;
+  if (indent < line.length && pos >= indentEnd) {
+    // A click in the last half of a tab can resolve to the offset after it.
+    const edge = pos === indentEnd ? view.coordsAtPos(indentEnd, -1) : null;
+    if (!edge || event.clientX >= edge.left) return null;
+  }
+
+  const rect = view.scrollDOM.getBoundingClientRect();
+  const x = event.clientX - rect.left + view.scrollDOM.scrollLeft * view.scaleX;
+  const y = event.clientY - rect.top + view.scrollDOM.scrollTop * view.scaleY;
+  const guide = guideSegments(view).find(
+    (segment) => Math.abs(x - (segment.x + 0.5)) <= 2 && y >= segment.top && y < segment.bottom,
+  );
+  // A whitespace selection would mark every matching indent in the viewport.
+  let selection = guide
+    ? EditorSelection.single(guide.from, guideSelectionEnd(view.state, guide))
+    : EditorSelection.single(pos);
+  return {
+    get: () => selection,
+    update: (update) => {
+      if (update.docChanged) selection = selection.map(update.changes);
+    },
+  };
+});
+
 export const indentGuides = [
   guideCache,
-  EditorView.mouseSelectionStyle.of((view, event) => {
-    if (
-      event.detail !== 2 ||
-      event.button !== 0 ||
-      event.shiftKey ||
-      event.metaKey ||
-      event.ctrlKey ||
-      event.altKey
-    ) {
-      return null;
-    }
-
-    const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
-    if (pos === null) return null;
-    const line = view.state.doc.lineAt(pos);
-    const indent = leadingIndent.exec(line.text)![0].length;
-    const indentEnd = line.from + indent;
-    if (indent < line.length && pos >= indentEnd) {
-      // A click in the last half of a tab can resolve to the offset after it.
-      const edge = pos === indentEnd ? view.coordsAtPos(indentEnd, -1) : null;
-      if (!edge || event.clientX >= edge.left) return null;
-    }
-
-    const rect = view.scrollDOM.getBoundingClientRect();
-    const x = event.clientX - rect.left + view.scrollDOM.scrollLeft * view.scaleX;
-    const y = event.clientY - rect.top + view.scrollDOM.scrollTop * view.scaleY;
-    const guide = guideSegments(view).find(
-      (segment) => Math.abs(x - (segment.x + 0.5)) <= 2 && y >= segment.top && y < segment.bottom,
-    );
-    if (!guide) return null;
-
-    let selection = EditorSelection.single(guide.from, guideSelectionEnd(view.state, guide));
-    return {
-      get: () => selection,
-      update: (update) => {
-        if (update.docChanged) selection = selection.map(update.changes);
-      },
-    };
-  }),
   layer({
     above: false,
     class: "cm-indent-guides",
