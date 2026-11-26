@@ -1,4 +1,4 @@
-import { lintGutter, setDiagnostics, type Diagnostic } from "@codemirror/lint";
+import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 import type { Text } from "@codemirror/state";
 import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { api, type DiagnosticSnapshot } from "./api";
@@ -62,7 +62,6 @@ function sameVersion(a: DiagnosticSnapshot | null, b: DiagnosticSnapshot | null)
 
 export function codeDiagnostics(projectId: string, path: string) {
   return [
-    lintGutter(),
     ViewPlugin.fromClass(
       class {
         private disposed = false;

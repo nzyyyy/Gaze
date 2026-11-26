@@ -41,6 +41,7 @@ it("shows diagnostics for the unsaved snapshot and drops old results after editi
     expect(diagnosticCount(view.state)).toBe(0);
     publish(wrong);
     expect(diagnosticCount(view.state)).toBe(1);
+    expect(view.dom.querySelector(".cm-gutter-lint")).toBeNull();
     expect(view.dom.querySelector(".cm-lintRange-error")).toHaveTextContent("'wrong'");
 
     view.dispatch({ changes: { from: 3, to: 10, insert: "42" } });

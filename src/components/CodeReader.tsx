@@ -249,17 +249,7 @@ function editorTheme(
         paddingLeft: "4px",
         "&.cm-gutters-before": { borderRight: "1px solid var(--border)" },
       },
-      ".cm-gutter-lint": {
-        width: "14px",
-        "& .cm-gutterElement": {
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "0 2px",
-        },
-      },
-      ".cm-lint-marker": { width: "10px", height: "10px", flexShrink: 0 },
-      ".cm-lineNumbers .cm-gutterElement": { minWidth: "32px", padding: "0 6px 0 4px" },
+      ".cm-lineNumbers .cm-gutterElement": { minWidth: "32px", padding: "0 8px 0 4px" },
       ".cm-activeLine": { backgroundColor: "var(--active-line)" },
       ".cm-activeLineGutter": {
         backgroundColor: "var(--active-line)",
@@ -599,16 +589,18 @@ function preferenceExtensions(
     if (preferences.matchBrackets) extensions.push(bracketMatching());
     if (preferences.codeFolding)
       extensions.push(
-        foldGutter({
-          markerDOM(open) {
-            const marker = document.createElement("span");
-            marker.dataset.tooltip = open ? t("折叠代码") : t("展开代码");
-            marker.setAttribute("aria-label", marker.dataset.tooltip);
-            const path = open ? "m3 4.5 3 3 3-3" : "m4.5 3 3 3-3 3";
-            marker.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="${path}"/></svg>`;
-            return marker;
-          },
-        }),
+        Prec.low(
+          foldGutter({
+            markerDOM(open) {
+              const marker = document.createElement("span");
+              marker.dataset.tooltip = open ? t("折叠代码") : t("展开代码");
+              marker.setAttribute("aria-label", marker.dataset.tooltip);
+              const path = open ? "m3 4.5 3 3 3-3" : "m4.5 3 3 3-3 3";
+              marker.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="${path}"/></svg>`;
+              return marker;
+            },
+          }),
+        ),
       );
   }
   return extensions;
@@ -1341,7 +1333,7 @@ export function CodeReader({
         localeCompartment.current.of([]),
         diagnosticsCompartment.current.of([]),
         autoImportCompartment.current.of([]),
-        gitChangeGutter((block, element) => gitSelectRef.current(block, element)),
+        Prec.lowest(gitChangeGutter((block, element) => gitSelectRef.current(block, element))),
         initialExtensions(
           theme,
           content.editable,

@@ -1622,7 +1622,12 @@ describe("CodeReader editing", () => {
 
   it("centers graphic fold markers and keeps folding and unfolding available", async () => {
     renderReader({ content: "function example() {\n  return 1;\n}\n" });
-    await editorContent();
+    const view = EditorView.findFromDOM(await editorContent())!;
+    const gutters = Array.from(view.dom.querySelectorAll(".cm-gutters-before > .cm-gutter"));
+    const order = ["cm-lineNumbers", "cm-foldGutter", "cm-git-changes"].map((className) =>
+      gutters.findIndex((gutter) => gutter.classList.contains(className)),
+    );
+    expect(order).toEqual([0, 1, 2]);
     const marker = await screen.findByLabelText("折叠代码");
     const style = window.getComputedStyle(marker);
     expect(style.display).toBe("inline-flex");

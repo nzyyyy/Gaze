@@ -1975,40 +1975,72 @@ button:focus-visible,
 }
 
 .cm-git-changes {
-  width: 11px;
+  width: 7px;
+  margin-left: 1px;
 }
 
 .cm-git-changes .cm-gutterElement {
+  --git-change-color: transparent;
   position: relative;
   cursor: pointer;
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: 3px 100%;
 }
 
 .cm-git-changes .cm-gutterElement.cm-git-line-added {
-  background-image: linear-gradient(var(--icon-code), var(--icon-code));
+  --git-change-color: var(--icon-code);
 }
 
 .cm-git-changes .cm-gutterElement.cm-git-line-modified {
-  background-image: linear-gradient(var(--icon-image), var(--icon-image));
+  --git-change-color: var(--icon-image);
 }
 
 .cm-git-changes .cm-gutterElement.cm-git-line-deleted {
-  background-image: none;
+  --git-change-color: var(--danger);
 }
 
-.cm-git-changes .cm-gutterElement.cm-git-line-deleted::before {
+.cm-git-changes .cm-gutterElement::before {
   position: absolute;
-  top: 2px;
-  left: 2px;
-  border-block: 4px solid transparent;
-  border-left: 6px solid var(--danger);
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--git-change-color);
   content: "";
 }
 
-.cm-git-changes .cm-gutterElement.cm-git-line-hovered {
-  background-color: var(--hover);
+.cm-git-changes .cm-gutterElement.cm-git-line-only::before {
+  top: 1px;
+  bottom: 1px;
+  border-radius: 4px;
+}
+
+.cm-git-changes .cm-gutterElement.cm-git-line-first::before {
+  top: 1px;
+  border-radius: 4px 4px 0 0;
+}
+
+.cm-git-changes .cm-gutterElement.cm-git-line-last::before {
+  bottom: 1px;
+  border-radius: 0 0 4px 4px;
+}
+
+.cm-git-changes .cm-gutterElement.cm-git-line-deleted::before {
+  top: 2px;
+  bottom: auto;
+  width: 0;
+  height: 0;
+  border-block: 4px solid transparent;
+  border-left: 4px solid var(--git-change-color);
+  border-radius: 0;
+  background: none;
+}
+
+.cm-git-changes .cm-gutterElement.cm-git-line-hovered::before {
+  width: 7px;
+}
+
+.cm-git-changes .cm-gutterElement.cm-git-line-deleted.cm-git-line-hovered::before {
+  width: 0;
+  border-left-width: 7px;
 }
 
 .editor-surface-wrap {
