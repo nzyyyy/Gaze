@@ -256,6 +256,8 @@ function editorTheme(
         color: "var(--text-muted)",
       },
       ".cm-foldGutter .cm-gutterElement": { color: "var(--text-faint)", padding: "0 2px" },
+      ".cm-foldGutter .cm-fold-on-hover": { opacity: 0 },
+      ".cm-foldGutter .cm-fold-on-hover:hover": { opacity: 1 },
       ".cm-foldGutter span": {
         display: "inline-flex",
         alignItems: "center",
@@ -593,6 +595,7 @@ function preferenceExtensions(
           foldGutter({
             markerDOM(open) {
               const marker = document.createElement("span");
+              marker.className = open ? "cm-fold-open cm-fold-on-hover" : "cm-fold-closed";
               marker.dataset.tooltip = open ? t("折叠代码") : t("展开代码");
               marker.setAttribute("aria-label", marker.dataset.tooltip);
               const path = open ? "m3 4.5 3 3 3-3" : "m4.5 3 3 3-3 3";

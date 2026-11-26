@@ -1629,6 +1629,7 @@ describe("CodeReader editing", () => {
     );
     expect(order).toEqual([0, 1, 2]);
     const marker = await screen.findByLabelText("折叠代码");
+    expect(marker).toHaveClass("cm-fold-on-hover");
     const style = window.getComputedStyle(marker);
     expect(style.display).toBe("inline-flex");
     expect(style.alignItems).toBe("center");
@@ -1642,6 +1643,8 @@ describe("CodeReader editing", () => {
     const closedMarker = screen
       .getAllByLabelText("展开代码")
       .find((element) => element.parentElement?.style.visibility !== "hidden")!;
+    expect(closedMarker).toHaveClass("cm-fold-closed");
+    expect(closedMarker).not.toHaveClass("cm-fold-on-hover");
     expect(closedMarker.querySelector("path")).toHaveAttribute("d", "m4.5 3 3 3-3 3");
     fireEvent.click(closedMarker);
     await waitFor(() => expect(document.querySelector(".cm-foldPlaceholder")).toBeNull());
