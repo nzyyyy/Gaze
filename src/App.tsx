@@ -1,4 +1,4 @@
-import { PluginProvider, useBuiltinFeature } from "./plugins/runtime";
+import { PluginProvider } from "./plugins/runtime";
 import { t, useLanguage, setLanguage, DEFAULT_LANGUAGE } from "./lib/i18n";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -8,21 +8,17 @@ import {
   GitBranch,
   FileSearch,
   Files,
-  FolderPlus,
   LoaderCircle,
   Monitor,
   Moon,
-  PanelRight,
   RotateCcw,
   Search,
   Settings,
   Sun,
-  Terminal,
   X,
   Boxes,
 } from "lucide-react";
 import {
-  Fragment,
   lazy,
   Suspense,
   useCallback,
@@ -36,6 +32,8 @@ import { flushSync } from "react-dom";
 import type { DragDropEvent } from "@tauri-apps/api/webview";
 
 import { CodeReader } from "./components/CodeReader";
+import { EditorPaneView } from "./components/EditorPane";
+import { WorkspaceStatusBar } from "./components/WorkspaceStatusBar";
 import type {
   CodeReaderHandle,
   EditorTab,
@@ -57,7 +55,6 @@ import { SettingsDialog } from "./components/SettingsDialog";
 import { SidebarLayout, type SidebarLayoutHandle } from "./components/SidebarLayout";
 import { EditorSplitResizer } from "./components/EditorSplitResizer";
 import { SymbolPanel } from "./components/SymbolPanel";
-import { TabBar } from "./components/TabBar";
 import { TerminalPanel } from "./components/terminal/TerminalPanel";
 import { Tooltip } from "./components/Tooltip";
 import { UnsavedDialog } from "./components/UnsavedDialog";
@@ -96,6 +93,8 @@ import type {
   TextPosition,
 } from "./lib/types";
 import type { WorkspaceSnapshot } from "./lib/workspace";
+import { paneOf, useEditorPanes } from "./editor/useEditorPanes";
+import { useEditorNavigation } from "./editor/useEditorNavigation";
 import { basename, errorMessage, normalizePath, parentPath, tabKey } from "./lib/utils";
 import { fileDropTarget } from "./lib/fileDrop";
 import { useAutoHideScrollbars } from "./lib/useAutoHideScrollbars";
@@ -110,9 +109,6 @@ type LoadState =
   | { status: "error"; message: string };
 
 const GitWorkspace = lazy(() => import("./git/GitWorkspace"));
-const EditorComparison = lazy(() =>
-  import("./git/EditorDiff").then(({ EditorComparison }) => ({ default: EditorComparison })),
-);
 import {
   changesWorktree,
   insideWorktree,
@@ -152,15 +148,8 @@ type PendingAction =
   | { kind: "removeProject"; project: Project }
   | { kind: "quit" };
 
-interface NavigationHistoryEntry {
-  projectId: string;
-  path: string;
-  request?: Omit<RevealRequest, "nonce">;
-}
-
 const THEME_CYCLE: ThemePreference[] = ["system", "light", "dark"];
 const noopStatus = () => undefined;
-const paneOf = (tab: EditorTab): EditorPane => tab.pane ?? "primary";
 
 function dialogCopy(action: PendingAction) {
   if (action.kind === "closeTabs") {
@@ -188,37 +177,12 @@ function dialogCopy(action: PendingAction) {
   };
 }
 
-function DocumentLanguageStatus({
-  tab,
-  label,
-  onChange,
-  onNotice,
-}: {
-  tab: EditorTab | null;
-  label: string;
-  onChange: (projectId: string) => void;
-  onNotice: (message: string) => void;
-}) {
-  const python = useBuiltinFeature("pythonEnabled", false);
-  return python && tab && python.matches(tab.name) && !tab.projectId.startsWith("external:") ? (
-    <python.Status
-      key={tab.projectId}
-      projectId={tab.projectId}
-      onChange={onChange}
-      onNotice={onNotice}
-    />
-  ) : (
-    <span>{label}</span>
-  );
-}
-
 export default function App() {
   const language = useLanguage();
   useAutoHideScrollbars();
   const [initialSession] = useState(readSession);
   const sessionRestoredRef = useRef(false);
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
-  const [tabs, setTabs] = useState<EditorTab[]>([]);
   const comparisonId = useRef(0);
   const [comparisons, setComparisons] = useState<
     Partial<
@@ -236,15 +200,6 @@ export default function App() {
   const [dropHint, setDropHint] = useState<string | null>(null);
   const temporaryProjectsRef = useRef(new Map<string, Project>());
   const externalReleasesRef = useRef(Promise.resolve());
-  const [activeKey, setActiveKey] = useState<string | null>(null);
-  const [activePane, setActivePane] = useState<EditorPane>(initialSession.activePane);
-  const [splitOpen, setSplitOpen] = useState(
-    initialSession.splitOpen || initialSession.tabs.some((tab) => tab.pane === "secondary"),
-  );
-  const [paneActive, setPaneActive] = useState<Record<EditorPane, string | null>>({
-    primary: null,
-    secondary: null,
-  });
   const [reveal, setReveal] = useState<RevealRequest | null>(null);
   const [markdownNavigation, setMarkdownNavigation] = useState<{
     key: string;
@@ -280,10 +235,6 @@ export default function App() {
   const [referenceResults, setReferenceResults] = useState<NavigationResult | null>(null);
   const [showReferences, setShowReferences] = useState(false);
   const recentFilesRef = useRef(initialSession.recentFiles);
-  const navigationBackRef = useRef<NavigationHistoryEntry[]>([]);
-  const navigationForwardRef = useRef<NavigationHistoryEntry[]>([]);
-  const [navigationHistory, setNavigationHistory] = useState({ back: 0, forward: 0 });
-  const revealNonceRef = useRef(0);
   const [dirtyKeys, setDirtyKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [dialogBusy, setDialogBusy] = useState(false);
@@ -305,41 +256,13 @@ export default function App() {
   const gitLockedRootsRef = useRef(new Set<string>());
   const [gitLockedRoots, setGitLockedRoots] = useState<string[]>([]);
   const fileTreeRef = useRef<FileTreeHandle>(null);
-  const tabsRef = useRef(tabs);
-  const activeKeyRef = useRef(activeKey);
-  const activePaneRef = useRef(activePane);
-  const splitOpenRef = useRef(splitOpen);
-  const paneActiveRef = useRef(paneActive);
   const loadStateRef = useRef(loadState);
-  tabsRef.current = tabs;
-  activeKeyRef.current = activeKey;
-  activePaneRef.current = activePane;
-  splitOpenRef.current = splitOpen;
-  paneActiveRef.current = paneActive;
   loadStateRef.current = loadState;
   const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent);
   const shortcutBindings = useMemo(
     () => resolveShortcuts(preferences.shortcuts),
     [preferences.shortcuts],
   );
-  const activeTab = tabs.find((tab) => tab.key === activeKey) ?? null;
-  const isComparing = (pane: EditorPane, key: string | null) =>
-    comparisons[pane]?.selected === true && comparisons[pane]?.sourceKey === key;
-  const comparisonActive = !gitOpen && isComparing(activePane, activeKey);
-
-  useEffect(() => {
-    setComparisons((current) => {
-      const missing = (pane: EditorPane) =>
-        current[pane] &&
-        !tabs.some((tab) => tab.key === current[pane]?.sourceKey && paneOf(tab) === pane);
-      if (!missing("primary") && !missing("secondary")) return current;
-      const next = { ...current };
-      if (missing("primary")) delete next.primary;
-      if (missing("secondary")) delete next.secondary;
-      return next;
-    });
-  }, [tabs]);
-
   const resolvedTheme: ResolvedTheme = theme === "system" ? systemTheme : theme;
   const overlayGlassActive =
     isMac && loadState.status === "ready" && preferences.windowGlassEnabled;
@@ -359,22 +282,6 @@ export default function App() {
     else editorsRef.current.delete(key);
   }, []);
 
-  const setPaneActiveKey = useCallback((pane: EditorPane, key: string | null) => {
-    setComparisons((current) => {
-      const comparison = current[pane];
-      return comparison?.selected
-        ? { ...current, [pane]: { ...comparison, selected: false } }
-        : current;
-    });
-    const next = { ...paneActiveRef.current, [pane]: key };
-    paneActiveRef.current = next;
-    setPaneActive(next);
-    if (activePaneRef.current === pane) {
-      activeKeyRef.current = key;
-      setActiveKey(key);
-    }
-  }, []);
-
   const syncActiveProject = useCallback((projectId: string) => {
     const current = loadStateRef.current;
     if (
@@ -392,21 +299,6 @@ export default function App() {
     void api.setActiveProject(projectId).catch(() => undefined);
   }, []);
 
-  const activatePane = useCallback(
-    (pane: EditorPane) => {
-      if (fileOperationBusyRef.current || gitOperationBusyRef.current) return;
-      activePaneRef.current = pane;
-      setActivePane(pane);
-      const key = paneActiveRef.current[pane];
-      activeKeyRef.current = key;
-      setActiveKey(key);
-      setReveal(null);
-      const tab = tabsRef.current.find((item) => item.key === key);
-      if (tab) syncActiveProject(tab.projectId);
-    },
-    [syncActiveProject],
-  );
-
   const handleDirtyChange = useCallback((key: string, isDirty: boolean) => {
     const current = dirtyKeysRef.current;
     if (isDirty === current.has(key)) return;
@@ -420,7 +312,113 @@ export default function App() {
     return handle ? handle.isDirty() : dirtyKeysRef.current.has(key);
   }, []);
 
+  const onPaneActiveChange = useCallback((pane: EditorPane) => {
+    setComparisons((current) => {
+      const comparison = current[pane];
+      return comparison?.selected
+        ? { ...current, [pane]: { ...comparison, selected: false } }
+        : current;
+    });
+  }, []);
+  const clearReveal = useCallback(() => setReveal(null), []);
+  const leaveGit = useCallback(
+    () => setSidebarView((view) => (view === "git" ? "files" : view)),
+    [],
+  );
+  const openQuickOpen = useCallback(() => setQuickOpen(true), []);
+  const {
+    tabs,
+    activeKey,
+    activePane,
+    splitOpen,
+    paneActive,
+    activeTab,
+    tabsRef,
+    activeKeyRef,
+    activePaneRef,
+    splitOpenRef,
+    paneActiveRef,
+    setTabs,
+    setActiveKey,
+    setActivePane,
+    setSplitOpen,
+    setPaneActive,
+    setPaneActiveKey,
+    activatePane,
+    removeTabs,
+    toggleSplit,
+    reorderTabs,
+    handleActivateTab,
+  } = useEditorPanes({
+    initialSession,
+    fileOperationBusyRef,
+    gitOperationBusyRef,
+    editorsRef,
+    isTabDirty,
+    notify,
+    syncActiveProject,
+    onPaneActiveChange,
+    clearReveal,
+    leaveGit,
+    openQuickOpen,
+  });
+  const isComparing = (pane: EditorPane, key: string | null) =>
+    comparisons[pane]?.selected === true && comparisons[pane]?.sourceKey === key;
+  const comparisonActive = !gitOpen && isComparing(activePane, activeKey);
+
+  useEffect(() => {
+    setComparisons((current) => {
+      const missing = (pane: EditorPane) =>
+        current[pane] &&
+        !tabs.some((tab) => tab.key === current[pane]?.sourceKey && paneOf(tab) === pane);
+      if (!missing("primary") && !missing("secondary")) return current;
+      const next = { ...current };
+      if (missing("primary")) delete next.primary;
+      if (missing("secondary")) delete next.secondary;
+      return next;
+    });
+  }, [tabs]);
+
   const isWorkspaceReady = useCallback(() => loadStateRef.current.status === "ready", []);
+  const resolveProject = useCallback((projectId: string) => {
+    const current = loadStateRef.current;
+    if (current.status !== "ready") return undefined;
+    return (
+      current.snapshot.projects.find((item) => item.id === projectId) ??
+      temporaryProjectsRef.current.get(projectId)
+    );
+  }, []);
+  const clearMarkdownNavigation = useCallback(() => setMarkdownNavigation(null), []);
+  const {
+    navigationHistory,
+    currentNavigationEntry,
+    openLocation,
+    navigateHistory,
+    moveTabToOtherPane,
+    openRecentLocation,
+    getNavigationEntries,
+  } = useEditorNavigation({
+    tabsRef,
+    activeKeyRef,
+    activePaneRef,
+    splitOpenRef,
+    paneActiveRef,
+    editorsRef,
+    gitOperationBusyRef,
+    setTabs,
+    setActivePane,
+    setSplitOpen,
+    setPaneActiveKey,
+    isWorkspaceReady,
+    resolveProject,
+    isTabDirty,
+    notify,
+    syncActiveProject,
+    leaveGit,
+    clearMarkdownNavigation,
+    setReveal,
+  });
+
   const gitBlocksPath = useCallback(
     (path: string) =>
       [...gitLockedRootsRef.current].some(
@@ -577,56 +575,6 @@ export default function App() {
     [],
   );
 
-  const removeTabs = useCallback((closing: EditorTab[]) => {
-    const keys = new Set(closing.map((tab) => tab.key));
-    if (keys.size === 0) return;
-    const current = tabsRef.current;
-    const next = current.filter((tab) => !keys.has(tab.key));
-    const nextPaneActive = { ...paneActiveRef.current };
-    for (const pane of ["primary", "secondary"] as const) {
-      const key = nextPaneActive[pane];
-      if (!key || !keys.has(key)) continue;
-      const paneTabs = current.filter((tab) => paneOf(tab) === pane);
-      const index = paneTabs.findIndex((tab) => tab.key === key);
-      const remaining = paneTabs.filter((tab) => !keys.has(tab.key));
-      nextPaneActive[pane] = remaining[Math.min(index, remaining.length - 1)]?.key ?? null;
-    }
-    paneActiveRef.current = nextPaneActive;
-    setPaneActive(nextPaneActive);
-
-    const collapseSplit =
-      splitOpenRef.current &&
-      closing.some((tab) => paneOf(tab) === "secondary") &&
-      !next.some((tab) => paneOf(tab) === "secondary");
-    if (collapseSplit) {
-      splitOpenRef.current = false;
-      setSplitOpen(false);
-      if (activePaneRef.current === "secondary") {
-        activePaneRef.current = "primary";
-        setActivePane("primary");
-      }
-    }
-
-    const active = activeKeyRef.current;
-    if (active && keys.has(active)) {
-      let pane = activePaneRef.current;
-      if (!nextPaneActive[pane]) {
-        const other = pane === "primary" ? "secondary" : "primary";
-        if (nextPaneActive[other]) {
-          pane = other;
-          activePaneRef.current = other;
-          setActivePane(other);
-        }
-      }
-      activeKeyRef.current = nextPaneActive[pane];
-      setActiveKey(nextPaneActive[pane]);
-      setReveal(null);
-    }
-    tabsRef.current = next;
-    setTabs(next);
-    return next;
-  }, []);
-
   const discardTabRecovery = useCallback(
     async (closing: EditorTab[]) => {
       // A clean tab may still hold a crash draft awaiting the user's decision.
@@ -718,209 +666,6 @@ export default function App() {
     },
     [loadState, notify],
   );
-
-  const syncNavigationHistory = useCallback(() => {
-    setNavigationHistory({
-      back: navigationBackRef.current.length,
-      forward: navigationForwardRef.current.length,
-    });
-  }, []);
-
-  const currentNavigationEntry = useCallback((): NavigationHistoryEntry | null => {
-    const key = activeKeyRef.current;
-    const tab = tabsRef.current.find((item) => item.key === key);
-    if (!tab) return null;
-    const cursor = editorsRef.current.get(tab.key)?.getCursor();
-    return {
-      projectId: tab.projectId,
-      path: tab.path,
-      request: cursor
-        ? {
-            line: cursor.line,
-            character: cursor.character,
-            endLine: cursor.line,
-            endCharacter: cursor.character,
-          }
-        : undefined,
-    };
-  }, []);
-
-  const openLocation = useCallback(
-    (
-      projectId: string,
-      path: string,
-      request?: Omit<RevealRequest, "nonce">,
-      options?: { trackHistory?: boolean; pane?: EditorPane },
-    ) => {
-      if (gitOperationBusyRef.current) {
-        notify(t("Git 操作进行中，请稍候。"));
-        return;
-      }
-      setSidebarView((view) => (view === "git" ? "files" : view));
-      const current = loadStateRef.current;
-      if (current.status !== "ready") return;
-      const workspaceProject = current.snapshot.projects.find((item) => item.id === projectId);
-      const project = workspaceProject ?? temporaryProjectsRef.current.get(projectId);
-      if (!project) {
-        notify(t("该项目已不在工作区中。"));
-        return;
-      }
-      const existing = tabsRef.current.find(
-        (tab) =>
-          tab.key === tabKey(projectId, path) ||
-          (tab.root &&
-            `${tab.root}/${tab.path}`.replaceAll("\\", "/") ===
-              `${project.root}/${path}`.replaceAll("\\", "/")),
-      );
-      const key = existing?.key ?? tabKey(projectId, path);
-      const targetPane = options?.pane ?? activePaneRef.current;
-      const previousKey = activeKeyRef.current;
-      const previousLocation = currentNavigationEntry();
-      setMarkdownNavigation(null);
-      if (!existing) {
-        const tab: EditorTab = {
-          key,
-          projectId,
-          projectName: project.name,
-          path,
-          name: basename(path),
-          root: project.root,
-          pane: targetPane,
-        };
-        tabsRef.current = [...tabsRef.current, tab];
-        setTabs(tabsRef.current);
-      } else if ((existing.pane ?? "primary") !== targetPane) {
-        const previousPane = existing.pane ?? "primary";
-        tabsRef.current = tabsRef.current.map((tab) =>
-          tab.key === key ? { ...tab, pane: targetPane } : tab,
-        );
-        setTabs(tabsRef.current);
-        const remaining = tabsRef.current.filter((tab) => paneOf(tab) === previousPane);
-        if (paneActiveRef.current[previousPane] === key)
-          setPaneActiveKey(previousPane, remaining[remaining.length - 1]?.key ?? null);
-        if (previousPane === "secondary" && remaining.length === 0) {
-          splitOpenRef.current = false;
-          setSplitOpen(false);
-        }
-      }
-      if (targetPane === "secondary") {
-        splitOpenRef.current = true;
-        setSplitOpen(true);
-      }
-      if (previousKey && previousKey !== key && isTabDirty(previousKey)) {
-        void editorsRef.current.get(previousKey)?.save();
-      }
-      if (options?.trackHistory !== false && previousKey && (previousKey !== key || request)) {
-        const entry = previousLocation;
-        if (entry) {
-          const back = navigationBackRef.current;
-          if (JSON.stringify(back[back.length - 1]) !== JSON.stringify(entry)) back.push(entry);
-          if (back.length > 100) back.shift();
-          navigationForwardRef.current = [];
-          syncNavigationHistory();
-        }
-      }
-      activePaneRef.current = targetPane;
-      setActivePane(targetPane);
-      setPaneActiveKey(targetPane, key);
-      syncActiveProject(existing?.projectId ?? projectId);
-      if (request) {
-        setReveal({ ...request, nonce: ++revealNonceRef.current });
-      } else {
-        setReveal(null);
-      }
-      return key;
-    },
-    [
-      notify,
-      isTabDirty,
-      currentNavigationEntry,
-      syncNavigationHistory,
-      setPaneActiveKey,
-      syncActiveProject,
-    ],
-  );
-
-  const navigateHistory = useCallback(
-    (direction: "back" | "forward") => {
-      if (gitOperationBusyRef.current) return;
-      const source = direction === "back" ? navigationBackRef : navigationForwardRef;
-      const destination = direction === "back" ? navigationForwardRef : navigationBackRef;
-      const current = currentNavigationEntry();
-      while (source.current.length > 0) {
-        const target = source.current.pop()!;
-        const key = openLocation(target.projectId, target.path, target.request, {
-          trackHistory: false,
-        });
-        if (!key) continue;
-        if (current) {
-          destination.current.push(current);
-          if (destination.current.length > 100) destination.current.shift();
-        }
-        break;
-      }
-      syncNavigationHistory();
-    },
-    [currentNavigationEntry, openLocation, syncNavigationHistory],
-  );
-
-  const toggleSplit = useCallback(() => {
-    if (gitOperationBusyRef.current) return;
-    if (splitOpenRef.current) {
-      const secondary = tabsRef.current.filter((tab) => paneOf(tab) === "secondary");
-      const nextPrimary =
-        activePaneRef.current === "secondary"
-          ? (paneActiveRef.current.secondary ?? paneActiveRef.current.primary)
-          : (paneActiveRef.current.primary ?? paneActiveRef.current.secondary);
-      if (secondary.length > 0) {
-        tabsRef.current = tabsRef.current.map((tab) =>
-          paneOf(tab) === "secondary" ? { ...tab, pane: "primary" } : tab,
-        );
-        setTabs(tabsRef.current);
-      }
-      const nextPaneActive = { ...paneActiveRef.current, primary: nextPrimary, secondary: null };
-      paneActiveRef.current = nextPaneActive;
-      setPaneActive(nextPaneActive);
-      activePaneRef.current = "primary";
-      setActivePane("primary");
-      activeKeyRef.current = nextPrimary;
-      setActiveKey(nextPrimary);
-      splitOpenRef.current = false;
-      setSplitOpen(false);
-      setReveal(null);
-      return;
-    }
-    splitOpenRef.current = true;
-    setSplitOpen(true);
-    activePaneRef.current = "secondary";
-    setActivePane("secondary");
-    setPaneActiveKey("secondary", null);
-    setQuickOpen(true);
-  }, [setPaneActiveKey]);
-
-  const moveTabToOtherPane = useCallback(
-    (tab: EditorTab) => {
-      const target: EditorPane = paneOf(tab) === "primary" ? "secondary" : "primary";
-      openLocation(tab.projectId, tab.path, undefined, {
-        trackHistory: false,
-        pane: target,
-      });
-    },
-    [openLocation],
-  );
-
-  const reorderTabs = useCallback((sourceKey: string, targetKey: string, after: boolean) => {
-    if (fileOperationBusyRef.current || gitOperationBusyRef.current || sourceKey === targetKey)
-      return;
-    const current = tabsRef.current;
-    const source = current.find((tab) => tab.key === sourceKey);
-    const target = current.find((tab) => tab.key === targetKey);
-    if (!source || !target || paneOf(source) !== paneOf(target)) return;
-    const next = current.filter((tab) => tab.key !== sourceKey);
-    next.splice(next.indexOf(target) + (after ? 1 : 0), 0, source);
-    tabsRef.current = next;
-    setTabs(next);
-  }, []);
 
   useEffect(() => {
     if (loadState.status !== "ready" || sessionRestoredRef.current) return;
@@ -1413,21 +1158,6 @@ export default function App() {
     };
   }, [workspaceReady, notify]);
 
-  const openRecentLocation = useCallback(
-    ({ projectId, path, position }: RecentFile) => {
-      openLocation(
-        projectId,
-        path,
-        position && {
-          ...position,
-          endLine: position.line,
-          endCharacter: position.character,
-        },
-      );
-    },
-    [openLocation],
-  );
-
   const readPreviewText = useCallback(async (projectId: string, path: string) => {
     const current = loadStateRef.current;
     if (current.status !== "ready" || !current.snapshot.projects.some(({ id }) => id === projectId))
@@ -1637,26 +1367,6 @@ export default function App() {
       })();
     },
     [performRemoveProject, gitBlocksPath],
-  );
-
-  const handleActivateTab = useCallback(
-    (tab: EditorTab, pane: EditorPane = paneOf(tab)) => {
-      if (gitOperationBusyRef.current) {
-        notify(t("Git 操作进行中，请稍候。"));
-        return;
-      }
-      const previous = activeKeyRef.current;
-      if (previous && previous !== tab.key && isTabDirty(previous)) {
-        void editorsRef.current.get(previous)?.save();
-      }
-      setSidebarView((view) => (view === "git" ? "files" : view));
-      activePaneRef.current = pane;
-      setActivePane(pane);
-      setPaneActiveKey(pane, tab.key);
-      setReveal(null);
-      syncActiveProject(tab.projectId);
-    },
-    [setPaneActiveKey, syncActiveProject],
   );
 
   const openEditorComparison = (tab: EditorTab, snapshot: EditorDiffSnapshot) => {
@@ -2358,11 +2068,7 @@ export default function App() {
   const recentLocations: RecentFile[] = [];
   if (quickOpen) {
     const seen = new Set<string>();
-    for (const entry of [
-      currentNavigationEntry(),
-      ...[...navigationBackRef.current].reverse(),
-      ...[...navigationForwardRef.current].reverse(),
-    ]) {
+    for (const entry of [currentNavigationEntry(), ...getNavigationEntries()]) {
       if (!entry?.request || !snapshot?.projects.some(({ id }) => id === entry.projectId)) continue;
       const {
         projectId,
@@ -2477,107 +2183,52 @@ export default function App() {
   const renderEditorPane = (pane: EditorPane, paneTabs: EditorTab[]) => {
     const comparison = comparisons[pane];
     const source = paneTabs.find((tab) => tab.key === comparison?.sourceKey);
-    const selected = isComparing(pane, paneActive[pane]);
     return (
-      <Fragment key={pane}>
-        <section className="editor-pane" data-pane={pane} onPointerDown={() => activatePane(pane)}>
-          <TabBar
-            tabs={paneTabs}
-            activeKey={paneActive[pane]}
-            dirtyKeys={dirtyKeys}
-            onActivate={(tab) => handleActivateTab(tab, pane)}
-            onClose={handleCloseTab}
-            onCloseTabs={(closing) => void handleCloseTabs(closing)}
-            onNotice={notify}
-            onToggleSplit={pane === "primary" || primaryTabs.length === 0 ? toggleSplit : undefined}
-            splitOpen={splitOpen}
-            onMoveToOtherPane={moveTabToOtherPane}
-            onReorder={reorderTabs}
-            comparison={
-              comparison && source
-                ? {
-                    name: t("对比 · {0}", source.name),
-                    active: selected,
-                    onActivate: () => {
-                      if (gitOperationBusyRef.current || fileOperationBusyRef.current) return;
-                      handleActivateTab(source, pane);
-                      setComparisons((current) => ({
-                        ...current,
-                        [pane]: { ...comparison, selected: true },
-                      }));
-                    },
-                    onClose: () => closeEditorComparison(pane),
-                  }
-                : undefined
-            }
-          />
-        </section>
-        {comparison && source && (
-          <div
-            className="document-area document-panel editor-document"
-            data-pane={pane}
-            hidden={!selected || gitOpen}
-            onPointerDown={() => activatePane(pane)}
-          >
-            <Suspense
-              fallback={
-                <div className="reader-state" role="status">
-                  {t("正在加载文件对比…")}
-                </div>
+      <EditorPaneView
+        key={pane}
+        pane={pane}
+        tabs={paneTabs}
+        activeKey={paneActive[pane]}
+        dirtyKeys={dirtyKeys}
+        splitOpen={splitOpen}
+        gitOpen={gitOpen}
+        hasPrimaryTabs={primaryTabs.length > 0}
+        comparison={
+          comparison && source
+            ? {
+                id: comparison.id,
+                source,
+                snapshot: comparison.snapshot,
+                selected: isComparing(pane, paneActive[pane]),
               }
-            >
-              <EditorComparison
-                key={comparison.id}
-                snapshot={comparison.snapshot}
-                path={source.path}
-                fontFamily={fontStack(fonts.editor, "editor")}
-                tabSize={preferences.tabSize}
-                onClose={() => closeEditorComparison(pane)}
-              />
-            </Suspense>
-          </div>
-        )}
-        {paneTabs.length === 0 && (
-          <div
-            className="document-area editor-empty"
-            data-pane={pane}
-            onPointerDown={() => activatePane(pane)}
-          >
-            <div className="welcome">
-              <div className="welcome-mark">
-                {pane === "primary" ? (
-                  <BookOpen size={34} strokeWidth={1.2} />
-                ) : (
-                  <PanelRight size={30} strokeWidth={1.2} />
-                )}
-              </div>
-              {pane === "primary" ? (
-                <button className="button button-primary" onClick={() => void handleImport()}>
-                  <FolderPlus size={15} />
-                  {t("导入项目")}
-                </button>
-              ) : (
-                <>
-                  <button
-                    className="button button-primary"
-                    onClick={() => {
-                      activatePane("secondary");
-                      setQuickOpen(true);
-                    }}
-                  >
-                    {t("在右侧打开文件")}
-                  </button>
-                  {primaryTabs.length === 0 && (
-                    <button className="button" onClick={toggleSplit}>
-                      {t("关闭右侧编辑区")}
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-        )}
-      </Fragment>
+            : undefined
+        }
+        editorFontFamily={fontStack(fonts.editor, "editor")}
+        tabSize={preferences.tabSize}
+        onActivatePane={() => activatePane(pane)}
+        onActivateTab={(tab) => handleActivateTab(tab, pane)}
+        onCloseTab={handleCloseTab}
+        onCloseTabs={handleCloseTabs}
+        onNotice={notify}
+        onToggleSplit={pane === "primary" || primaryTabs.length === 0 ? toggleSplit : undefined}
+        onMoveToOtherPane={moveTabToOtherPane}
+        onReorder={reorderTabs}
+        onActivateComparison={() => {
+          if (!comparison || !source || gitOperationBusyRef.current || fileOperationBusyRef.current)
+            return;
+          handleActivateTab(source, pane);
+          setComparisons((current) => ({
+            ...current,
+            [pane]: { ...comparison, selected: true },
+          }));
+        }}
+        onCloseComparison={() => closeEditorComparison(pane)}
+        onImport={handleImport}
+        onOpenSecondary={() => {
+          activatePane("secondary");
+          setQuickOpen(true);
+        }}
+      />
     );
   };
 
@@ -2922,65 +2573,18 @@ export default function App() {
             onHide={() => setTerminalOpen(false)}
             onNotice={notify}
           />
-          <footer className="statusbar" hidden={!preferences.showStatusBar}>
-            <div className="status-left">
-              {editorStatus?.readOnly && <span className="readonly-badge">{t("只读")}</span>}
-              {editorStatus?.saving ? (
-                <span className="status-warning">{t("保存中…")}</span>
-              ) : editorStatus?.autoSavePaused ? (
-                <span className="status-warning">{t("自动保存已暂停")}</span>
-              ) : editorStatus?.dirty ? (
-                <span className="status-dirty">{t("未保存")}</span>
-              ) : null}
-              {navigationBusy ? (
-                <span className="status-warning">{t("正在请求符号服务…")}</span>
-              ) : editorStatus ? (
-                <>
-                  {preferences.showLanguage && (
-                    <DocumentLanguageStatus
-                      tab={activeTab}
-                      label={editorStatus.language}
-                      onChange={refreshPython}
-                      onNotice={notify}
-                    />
-                  )}
-                  {preferences.showEncoding && <span>{editorStatus.encoding}</span>}
-                  {editorStatus.mode !== "normal" && (
-                    <span className="status-warning">{t("大文件纯文本模式")}</span>
-                  )}
-                </>
-              ) : (
-                <span>{snapshot?.projects.length ? t("选择文件以开始") : t("未导入项目")}</span>
-              )}
-            </div>
-            <div className="status-right">
-              {preferences.showTerminalButton && (
-                <button
-                  className="status-terminal"
-                  onClick={toggleTerminal}
-                  aria-pressed={terminalOpen}
-                  data-tooltip={
-                    shortcutBindings.terminal
-                      ? t("终端（{0}）", shortcutLabel(shortcutBindings["terminal"]))
-                      : t("终端")
-                  }
-                  aria-label={
-                    shortcutBindings.terminal
-                      ? t("终端（{0}）", shortcutLabel(shortcutBindings["terminal"]))
-                      : t("终端")
-                  }
-                >
-                  <Terminal size={12} />
-                  <span>{t("终端")}</span>
-                </button>
-              )}
-              {preferences.showLineCount && editorStatus && (
-                <span>
-                  {editorStatus.lines.toLocaleString()} {t("行")}
-                </span>
-              )}
-            </div>
-          </footer>
+          <WorkspaceStatusBar
+            status={editorStatus}
+            activeTab={activeTab}
+            navigationBusy={navigationBusy}
+            preferences={preferences}
+            hasProjects={!!snapshot?.projects.length}
+            terminalOpen={terminalOpen}
+            terminalShortcut={shortcutBindings.terminal}
+            onToggleTerminal={toggleTerminal}
+            onPythonChange={refreshPython}
+            onNotice={notify}
+          />
         </main>
       </SidebarLayout>
 

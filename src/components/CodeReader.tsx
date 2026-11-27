@@ -13,7 +13,7 @@ import {
   type Ref,
 } from "react";
 import { flushSync } from "react-dom";
-import { closeBrackets, closeBracketsKeymap, closeCompletion } from "@codemirror/autocomplete";
+import { closeCompletion } from "@codemirror/autocomplete";
 import {
   forEachDiagnostic,
   nextDiagnostic,
@@ -21,85 +21,32 @@ import {
   setDiagnostics,
   setDiagnosticsEffect,
 } from "@codemirror/lint";
-import {
-  addCursorAbove,
-  addCursorBelow,
-  copyLineDown,
-  copyLineUp,
-  defaultKeymap,
-  deleteLine,
-  deleteLineBoundaryBackward,
-  history,
-  historyKeymap,
-  indentWithTab,
-  isolateHistory,
-  moveLineDown,
-  moveLineUp,
-} from "@codemirror/commands";
-import {
-  bracketMatching,
-  indentUnit,
-  defaultHighlightStyle,
-  foldGutter,
-  foldKeymap,
-  syntaxHighlighting,
-} from "@codemirror/language";
-import {
-  gotoLine,
-  highlightSelectionMatches,
-  openSearchPanel,
-  search,
-  searchKeymap,
-  selectNextOccurrence,
-  selectSelectionMatches,
-} from "@codemirror/search";
-import { Compartment, EditorState, Prec, type Extension, type Text } from "@codemirror/state";
+import { isolateHistory } from "@codemirror/commands";
+import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { EditorState, type Text } from "@codemirror/state";
 import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
-import {
-  closeHoverTooltips,
-  drawSelection,
-  EditorView,
-  highlightActiveLine,
-  highlightActiveLineGutter,
-  highlightSpecialChars,
-  keymap,
-  lineNumbers,
-  rectangularSelection,
-  tooltips,
-} from "@codemirror/view";
+import { closeHoverTooltips, EditorView } from "@codemirror/view";
 import { AlertCircle, FileQuestion, LoaderCircle, RotateCcw } from "lucide-react";
 
-import { changeBlockAtLine, gitChangeGutter, setChangeBlocks } from "../git/editorChanges";
-import type { EditorDiffAnchor, EditorDiffSnapshot } from "../git/EditorDiff";
-import { useFileBase } from "../git/hooks/useFileBase";
-import { computeChangeBlocksAsync } from "../git/lineDiffClient";
-import type { ChangeBlock } from "../git/lineDiff";
+import type { EditorDiffSnapshot } from "../git/EditorDiff";
 import type {
   CodeReaderHandle,
   EditorTab,
   MarkdownPreviewRequest,
   RevealRequest,
-  SaveResult,
 } from "../editor/types";
-import { api, type RecoveryRecord } from "../lib/api";
 import { codeDiagnostics } from "../lib/diagnostics";
-import { columnSelection, isWithinEditorSelection } from "../lib/columnSelection";
+import { isWithinEditorSelection } from "../lib/columnSelection";
 import { writeEditorClipboard } from "../lib/editorClipboard";
-import { editorCommands, matchSelection } from "../lib/editorCommands";
 import { autoImportExtension } from "../lib/autoImport";
 import { codeCompletion } from "../lib/completion";
-import { definitionLink } from "../lib/definitionLink";
-import { detectIndentation } from "../lib/indentation";
 import {
   dismissEditorLanguageTooltip,
   editorLanguageTools,
   runEditorLanguageAction,
 } from "../lib/editorLanguageTools";
-import { indentDoubleClick, indentGuides } from "../lib/indentGuides";
 import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
-import { rainbowBrackets } from "../lib/rainbowBrackets";
-import { stickyScroll, syntaxSelection } from "../lib/readingTools";
-import { resolveShortcuts, shortcutKeymap, type NavigationTarget } from "../lib/shortcuts";
+import { resolveShortcuts, type NavigationTarget } from "../lib/shortcuts";
 import type { EditorViewState } from "../lib/session";
 import { isMarkdownFile, matchLanguage } from "../lib/language";
 import {
@@ -112,23 +59,26 @@ import { EditorProblems, type EditorProblem } from "./EditorProblems";
 import { EditorContextMenu } from "./EditorContextMenu";
 import type { MenuTarget } from "./ContextMenu";
 import { Select } from "./Select";
+import {
+  createCodeReaderCompartments,
+  createCodeReaderExtensions,
+  editorTheme,
+  openEditorSearch,
+  preferenceExtensions,
+} from "./codeReader/codeMirrorExtensions";
+import type { LoadedState } from "./codeReader/documentModel";
+import { useDocumentLifecycle } from "./codeReader/useDocumentLifecycle";
+import { useGitChangeBlocks } from "./codeReader/useGitChangeBlocks";
 import type {
   EditorStatus,
-  FileContent,
   ResolvedTheme,
   PositionEncoding,
   NavigationResult,
-  TextFile,
   TextPosition,
 } from "../lib/types";
-import { errorCode, errorMessage } from "../lib/utils";
+import { errorMessage } from "../lib/utils";
 
-const AUTO_SAVE_MIN_INTERVAL_MS = 1500;
-const RECOVERY_SAVE_DELAY_MS = 500;
-const GIT_DIFF_DELAY_MS = 300;
 const MARKDOWN_PREVIEW_DELAY_MS = 120;
-const GIT_DIFF_MAX_BYTES = 1024 * 1024;
-const GIT_DIFF_MAX_LINES = 20_000;
 
 const EditorChangePopover = lazy(() =>
   import("../git/EditorDiff").then(({ EditorChangePopover }) => ({ default: EditorChangePopover })),
@@ -171,191 +121,6 @@ interface EditorSurfaceProps {
   ref?: Ref<CodeReaderHandle>;
 }
 
-interface LoadedState {
-  content: FileContent;
-  revision: number;
-}
-
-type PauseReason = "conflict" | "external" | "error" | null;
-
-function editorTheme(
-  dark: boolean,
-  fontFamily = "var(--font-mono)",
-  preferences = DEFAULT_PREFERENCES,
-) {
-  return EditorView.theme(
-    {
-      "&": {
-        height: "100%",
-        color: "var(--text)",
-        backgroundColor: "var(--editor-bg)",
-        fontSize: `${preferences.editorFontSize}px`,
-        "--editor-text-inset": "6px",
-      },
-      "&.cm-focused": { outline: "none" },
-      ".cm-scroller": {
-        fontFamily,
-        lineHeight: String(preferences.editorLineHeight),
-        overflow: "auto",
-      },
-      ".cm-content": { padding: "12px 0 20px", caretColor: "var(--accent)" },
-      ".cm-line": { padding: "0 18px 0 var(--editor-text-inset)" },
-      ".cm-gutters": {
-        backgroundColor: "var(--editor-bg)",
-        color: "var(--text-faint)",
-        border: "none",
-        paddingLeft: "4px",
-        "&.cm-gutters-before": { borderRight: "1px solid var(--border)" },
-      },
-      ".cm-lineNumbers .cm-gutterElement": { minWidth: "32px", padding: "0 8px 0 4px" },
-      ".cm-activeLine": { backgroundColor: "var(--active-line)" },
-      ".cm-activeLineGutter": {
-        backgroundColor: "var(--active-line)",
-        color: "var(--text-muted)",
-      },
-      ".cm-foldGutter .cm-gutterElement": { color: "var(--text-faint)", padding: "0 2px" },
-      ".cm-foldGutter .cm-fold-on-hover": { opacity: 0 },
-      ".cm-foldGutter .cm-fold-on-hover:hover": { opacity: 1 },
-      ".cm-foldGutter span": {
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        height: "1.65em",
-        verticalAlign: "top",
-      },
-      ".cm-foldPlaceholder": {
-        backgroundColor: "var(--hover)",
-        color: "var(--text-muted)",
-        border: "1px solid var(--border-strong)",
-        borderRadius: "var(--radius-small)",
-        margin: "0 3px",
-        padding: "0 5px",
-      },
-      ".cm-foldPlaceholder:hover": {
-        backgroundColor: "var(--accent-soft)",
-        color: "var(--accent)",
-        borderColor: "var(--accent)",
-      },
-      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
-        backgroundColor: "var(--selection) !important",
-      },
-      ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--accent)" },
-      ".cm-matchingBracket, &.cm-focused .cm-matchingBracket": {
-        backgroundColor: "var(--bracket-match)",
-        outline: "1px solid var(--accent-soft)",
-      },
-      ".cm-searchMatch": { backgroundColor: "var(--search-match)" },
-      ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "var(--search-selected)" },
-      ".cm-selectionMatch": { backgroundColor: "var(--selection-match)" },
-      ".cm-panels": {
-        backgroundColor: "var(--surface-raised)",
-        color: "var(--text)",
-        borderColor: "var(--border)",
-      },
-      ".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--border)" },
-      ".cm-search": { padding: "8px 12px", fontFamily: "var(--font-ui)" },
-      ".cm-search label": { color: "var(--text-muted)", fontSize: "12px" },
-      ".cm-textfield": {
-        backgroundColor: "var(--input-bg)",
-        color: "var(--text)",
-        border: "1px solid var(--border-strong)",
-        borderRadius: "var(--radius-control)",
-        padding: "4px 7px",
-        outline: "none",
-      },
-      ".cm-textfield:focus": { borderColor: "var(--accent)" },
-      ".cm-button": {
-        backgroundImage: "none",
-        backgroundColor: "var(--surface-raised)",
-        color: "var(--text-muted)",
-        border: "1px solid var(--border-strong)",
-        borderRadius: "var(--radius-control)",
-        padding: "3px 8px",
-        fontSize: "12px",
-      },
-      ".cm-button:hover": { backgroundColor: "var(--hover)" },
-      ".cm-tooltip": {
-        backgroundColor: "var(--surface-raised)",
-        border: "1px solid var(--border)",
-        color: "var(--text)",
-        borderRadius: "var(--radius-control)",
-        boxShadow: "var(--shadow-panel)",
-      },
-      ".cm-tooltip-autocomplete > ul": {
-        padding: "4px",
-        maxWidth: "min(580px, 72vw)",
-        maxHeight: "min(280px, 45vh)",
-        minWidth: "min(280px, 60vw)",
-        fontFamily: "var(--font-mono)",
-        fontSize: "12px",
-      },
-      ".cm-tooltip-autocomplete > ul > li": {
-        display: "flex",
-        alignItems: "center",
-        gap: "7px",
-        minHeight: "25px",
-        padding: "0 7px",
-        borderRadius: "4px",
-      },
-      ".cm-tooltip-autocomplete > ul > li[aria-selected]": {
-        backgroundColor: "var(--accent-soft)",
-        color: "var(--text)",
-      },
-      ".cm-completionIcon": {
-        flex: "0 0 16px",
-        width: "16px",
-        height: "16px",
-        padding: "0",
-        textAlign: "center",
-        fontSize: "13px",
-        lineHeight: "16px",
-        opacity: "1",
-        borderRadius: "3px",
-        color: "var(--icon-data)",
-        background: "color-mix(in srgb, currentColor 8%, transparent)",
-      },
-      ".cm-completionIcon-function, .cm-completionIcon-method, .cm-completionIcon-constructor": {
-        color: "var(--accent)",
-      },
-      ".cm-completionIcon-variable, .cm-completionIcon-property, .cm-completionIcon-constant": {
-        color: "var(--icon-code)",
-      },
-      ".cm-completionLabel, .cm-completionDetail, .completion-origin": {
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
-        minWidth: "0",
-      },
-      ".cm-completionLabel": { flex: "0 0 auto", maxWidth: "58%" },
-      ".cm-completionMatchedText": {
-        color: "var(--accent)",
-        fontWeight: "bold",
-        textDecoration: "none",
-      },
-      ".cm-completionDetail, .completion-origin": {
-        color: "var(--text-muted)",
-        fontSize: "11px",
-        fontStyle: "normal",
-      },
-      ".completion-origin": { marginLeft: "auto", maxWidth: "40%" },
-      ".cm-completionInfo": {
-        maxWidth: "min(375px, 72vw)",
-        maxHeight: "min(220px, 38vh)",
-        overflow: "auto",
-        padding: "8px 10px",
-        fontSize: "12px",
-        lineHeight: "1.5",
-      },
-      ".completion-documentation": { whiteSpace: "pre-wrap", overflowWrap: "anywhere" },
-    },
-    { dark },
-  );
-}
-
-function normalizeDocumentText(text: string): string {
-  return text.replace(/\r\n?/g, "\n");
-}
-
 function offsetAt(
   doc: EditorState["doc"],
   line: number,
@@ -375,196 +140,6 @@ function offsetAt(
     offset += char.length;
   }
   return offset;
-}
-
-function openEditorSearch(view: EditorView) {
-  openSearchPanel(view);
-  // Selecting the default panel's input does not guarantee focus.
-  view.dom.querySelector<HTMLInputElement>('.cm-search input[name="search"]')?.focus();
-  return true;
-}
-
-function initialExtensions(
-  theme: ResolvedTheme,
-  editable: boolean,
-  language: Compartment,
-  themeCompartment: Compartment,
-  highlightCompartment: Compartment,
-  fileName: string,
-  onDocumentChanged: (view: EditorView) => void,
-) {
-  const keyBindings = [
-    ...searchKeymap.filter(
-      ({ key, run }) =>
-        key !== "Mod-f" &&
-        run !== gotoLine &&
-        run !== selectNextOccurrence &&
-        run !== selectSelectionMatches,
-    ),
-    ...foldKeymap,
-    ...(editable ? closeBracketsKeymap : []),
-    ...defaultKeymap.filter(
-      ({ run }) =>
-        ![
-          moveLineUp,
-          moveLineDown,
-          copyLineUp,
-          copyLineDown,
-          deleteLine,
-          deleteLineBoundaryBackward,
-          addCursorAbove,
-          addCursorBelow,
-        ].some((command) => command === run),
-    ),
-    ...historyKeymap,
-  ];
-  const extensions = [
-    highlightSpecialChars(),
-    drawSelection(),
-    EditorState.allowMultipleSelections.of(true),
-    columnSelection,
-    matchSelection,
-    syntaxSelection,
-    rectangularSelection(),
-    indentDoubleClick,
-    EditorView.domEventObservers({
-      pointerdown(event, view) {
-        if (
-          event.pointerType !== "mouse" ||
-          event.button !== 0 ||
-          event.shiftKey ||
-          event.metaKey ||
-          event.ctrlKey ||
-          event.altKey ||
-          view.hasFocus ||
-          view.compositionStarted
-        )
-          return;
-        // WebView focus can scroll to the old caret. Settle it before mousedown hit-tests.
-        const { scrollDOM } = view;
-        const { scrollTop, scrollLeft } = scrollDOM;
-        view.focus();
-        if (scrollDOM.scrollTop !== scrollTop) scrollDOM.scrollTop = scrollTop;
-        if (scrollDOM.scrollLeft !== scrollLeft) scrollDOM.scrollLeft = scrollLeft;
-      },
-    }),
-    ...(editable ? [closeBrackets()] : []),
-    history(),
-    EditorState.readOnly.of(!editable),
-    EditorView.editable.of(editable),
-    EditorView.contentAttributes.of(() => ({
-      "aria-label": t("{0}代码文件 {1}", editable ? "" : t("只读"), fileName),
-      tabindex: "0",
-      spellcheck: "false",
-      autocapitalize: "off",
-      autocorrect: "off",
-    })),
-    EditorView.updateListener.of((update) => {
-      if (update.docChanged) onDocumentChanged(update.view);
-    }),
-    search({ top: true }),
-    tooltips({ tooltipSpace: (view) => view.scrollDOM.getBoundingClientRect() }),
-    highlightSelectionMatches(),
-    keymap.of(keyBindings),
-    themeCompartment.of(editorTheme(theme === "dark")),
-    highlightCompartment.of(
-      syntaxHighlighting(theme === "dark" ? oneDarkHighlightStyle : defaultHighlightStyle, {
-        fallback: true,
-      }),
-    ),
-    language.of([]),
-  ];
-  return extensions;
-}
-
-function preferenceExtensions(
-  preferences: Preferences,
-  mode: TextFile["mode"],
-  editable: boolean,
-  text: string,
-  fileName: string,
-  onNavigate: ((target: NavigationTarget) => boolean) | undefined,
-  onCopyLocation: (view: EditorView) => boolean,
-) {
-  const shortcuts = resolveShortcuts(preferences.shortcuts);
-  const plainText = mode !== "normal" || !matchLanguage(fileName).description;
-  const navigate = (view: EditorView, target: NavigationTarget) => {
-    if (!onNavigate?.(target)) return false;
-    view.focus();
-    return true;
-  };
-  const extensions: Extension[] = [
-    Prec.high(shortcutKeymap(shortcuts, { find: openEditorSearch }, "editor search-panel")),
-    Prec.high(
-      shortcutKeymap(
-        shortcuts,
-        {
-          "replace-in-file": editorCommands["replace-in-file"],
-        },
-        "search-panel",
-      ),
-    ),
-    Prec.high(
-      shortcutKeymap(shortcuts, {
-        ...editorCommands,
-        "move-statement-up": plainText
-          ? editorCommands["move-line-up"]
-          : editorCommands["move-statement-up"],
-        "move-statement-down": plainText
-          ? editorCommands["move-line-down"]
-          : editorCommands["move-statement-down"],
-        "copy-location": onCopyLocation,
-      }),
-    ),
-    EditorState.tabSize.of(preferences.tabSize),
-    indentUnit.of(
-      mode === "normal"
-        ? detectIndentation(text, preferences.tabSize)
-        : " ".repeat(preferences.tabSize),
-    ),
-  ];
-  if (preferences.lineNumbers) extensions.push(lineNumbers());
-  if (preferences.highlightActiveLine)
-    extensions.push(highlightActiveLine(), highlightActiveLineGutter());
-  if (preferences.indentWithTab && editable) extensions.push(keymap.of([indentWithTab]));
-  if (mode === "normal") {
-    // Runs before the default keymaps, which bind the same keys to other commands.
-    extensions.push(
-      Prec.high(
-        shortcutKeymap(shortcuts, {
-          "next-problem": nextDiagnostic,
-          "prev-problem": previousDiagnostic,
-          back: (view) => navigate(view, "back"),
-          forward: (view) => navigate(view, "forward"),
-          definition: (view) => navigate(view, "definition"),
-          references: (view) => navigate(view, "references"),
-          implementation: (view) => navigate(view, "implementation"),
-        }),
-      ),
-      rainbowBrackets,
-    );
-    if (preferences.showStickyScroll) extensions.push(stickyScroll);
-    if (preferences.showIndentGuides) extensions.push(indentGuides);
-    if (preferences.wordWrap) extensions.push(EditorView.lineWrapping);
-    if (preferences.matchBrackets) extensions.push(bracketMatching());
-    if (preferences.codeFolding)
-      extensions.push(
-        Prec.low(
-          foldGutter({
-            markerDOM(open) {
-              const marker = document.createElement("span");
-              marker.className = open ? "cm-fold-open cm-fold-on-hover" : "cm-fold-closed";
-              marker.dataset.tooltip = open ? t("折叠代码") : t("展开代码");
-              marker.setAttribute("aria-label", marker.dataset.tooltip);
-              const path = open ? "m3 4.5 3 3 3-3" : "m4.5 3 3 3-3 3";
-              marker.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="${path}"/></svg>`;
-              return marker;
-            },
-          }),
-        ),
-      );
-  }
-  return extensions;
 }
 
 export function CodeReader({
@@ -602,24 +177,10 @@ export function CodeReader({
     state: EditorState;
   } | null>(null);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
-  const diagnosticsCompartment = useRef(new Compartment());
-  const autoImportCompartment = useRef(new Compartment());
-  const languageToolsCompartment = useRef(new Compartment());
-  const aiCompletionCompartment = useRef(new Compartment());
+  const compartments = useRef(createCodeReaderCompartments());
   const previousPythonRevision = useRef(pythonRevision);
-  const localeCompartment = useRef(new Compartment());
-  const themeCompartment = useRef(new Compartment());
-  const preferencesCompartment = useRef(new Compartment());
-  const minimapCompartment = useRef(new Compartment());
   const preferencesRef = useRef(preferences);
   preferencesRef.current = preferences;
-  const highlightCompartment = useRef(new Compartment());
-  const languageCompartment = useRef(new Compartment());
-  const operationCompartment = useRef(new Compartment());
-  const operationLockedRef = useRef(false);
-  const gitLockedRef = useRef(gitLocked);
-  gitLockedRef.current = gitLocked;
-  const operationCursorRef = useRef<number | null>(null);
   const initialViewRef = useRef(initialView);
   const initialViewDocumentRef = useRef<LoadedState | null>(null);
   const revealRef = useRef(reveal);
@@ -638,8 +199,6 @@ export function CodeReader({
     [tab.path],
   );
   onNoticeRef.current = onNotice;
-  const onDirtyChangeRef = useRef(onDirtyChange);
-  const onSavedRef = useRef(onSaved);
   const onOpenFileLinkRef = useRef(onOpenMarkdownFile);
   onOpenFileLinkRef.current = onOpenMarkdownFile;
   const onGoToDefinitionRef = useRef(onGoToDefinition);
@@ -650,41 +209,45 @@ export function CodeReader({
     (target: NavigationTarget) => onNavigateRef.current?.(target) === true,
     [],
   );
-  const documentRef = useRef<TextFile | null>(null);
-  const baselineRef = useRef("");
-  const dirtyRef = useRef(false);
-  const savingRef = useRef(false);
-  const inFlightRef = useRef<Promise<SaveResult> | null>(null);
-  const autoSaveTimerRef = useRef<number | null>(null);
-  const recoveryTimerRef = useRef<number | null>(null);
-  const recoveryQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const ignoreRecoveryRef = useRef(false);
-  const lastSavedAtRef = useRef(0);
-  const pauseReasonRef = useRef<PauseReason>(null);
-  const generationRef = useRef(0);
-  const saveRef = useRef<(options?: { force?: boolean }) => Promise<SaveResult>>(async () => ({
-    status: "clean",
-  }));
-  const scheduleAutoSaveRef = useRef<() => void>(() => undefined);
-  const gitBase = useFileBase(tab.projectId, tab.path, active);
-  const gitBaseRef = useRef<string | null>(null);
-  const gitSnapshotRef = useRef<{ doc: Text; base: string; blocks: ChangeBlock[] } | null>(null);
-  const gitDiffTimerRef = useRef<number | null>(null);
-  const gitDiffRequestRef = useRef(0);
-  const gitSelectRef = useRef<(block: ChangeBlock, element: HTMLElement) => void>(() => undefined);
-
-  const [loaded, setLoaded] = useState<LoadedState | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [retryToken, setRetryToken] = useState(0);
-  const [localReload, setLocalReload] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const {
+    documentRef,
+    dirtyRef,
+    operationLockedRef,
+    gitLockedRef,
+    operationCursorRef,
+    loaded,
+    loading,
+    error,
+    dirty,
+    saving,
+    pauseReason,
+    saveError,
+    recovery,
+    lineCount,
+    resetEditorDocument,
+    onDocumentChanged: onLifecycleDocumentChanged,
+    save,
+    discardRecovery,
+    reloadFromDisk,
+    restoreRecovery,
+    retryLoad,
+    prepareFileOperation,
+    finishFileOperation,
+    clearAutoSaveTimer,
+    resumeAutoSave,
+  } = useDocumentLifecycle({
+    projectId: tab.projectId,
+    path: tab.path,
+    reloadToken,
+    externalChangeToken,
+    gitLocked,
+    preferences,
+    viewRef,
+    operationCompartment: compartments.current.operation,
+    onSaved,
+    onDirtyChange,
+  });
   const [languageLabel, setLanguageLabel] = useState("Plain Text");
-  const [dirty, setDirty] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [pauseReason, setPauseReason] = useState<PauseReason>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [recovery, setRecovery] = useState<RecoveryRecord | null>(null);
-  const [lineCount, setLineCount] = useState(1);
   const [problems, setProblems] = useState<{ doc: Text; items: EditorProblem[] }>();
   const [preview, setPreview] = useState(false);
   const [previewText, setPreviewText] = useState("");
@@ -733,363 +296,9 @@ export function CodeReader({
   const previewRef = useRef(false);
   const lastPreviewRequestRef = useRef<MarkdownPreviewRequest | null>(null);
   previewRef.current = previewVisible;
-  const [gitBlocks, setGitBlocks] = useState<ChangeBlock[]>([]);
-  const [changePopup, setChangePopup] = useState<{
-    block: ChangeBlock;
-    anchor: EditorDiffAnchor;
-    view: EditorView;
-    snapshot: NonNullable<typeof gitSnapshotRef.current>;
-  } | null>(null);
 
   revealRef.current = reveal;
   activeRef.current = active;
-  gitBaseRef.current = gitBase;
-  onDirtyChangeRef.current = onDirtyChange;
-  onSavedRef.current = onSaved;
-
-  const clearAutoSaveTimer = useCallback(() => {
-    if (autoSaveTimerRef.current !== null) {
-      window.clearTimeout(autoSaveTimerRef.current);
-      autoSaveTimerRef.current = null;
-    }
-  }, []);
-
-  const clearRecoveryTimer = useCallback(() => {
-    if (recoveryTimerRef.current !== null) {
-      window.clearTimeout(recoveryTimerRef.current);
-      recoveryTimerRef.current = null;
-    }
-  }, []);
-
-  const enqueueRecovery = useCallback((operation: () => Promise<unknown>) => {
-    const pending = recoveryQueueRef.current.then(operation).then(
-      () => undefined,
-      () => undefined,
-    );
-    recoveryQueueRef.current = pending;
-    return pending;
-  }, []);
-
-  const deleteRecovery = useCallback(() => {
-    clearRecoveryTimer();
-    return enqueueRecovery(() => api.deleteRecovery(tab.projectId, tab.path));
-  }, [clearRecoveryTimer, enqueueRecovery, tab.path, tab.projectId]);
-
-  const discardRecovery = useCallback(() => {
-    setRecovery(null);
-    return deleteRecovery();
-  }, [deleteRecovery]);
-
-  const scheduleRecovery = useCallback(
-    (view: EditorView) => {
-      clearRecoveryTimer();
-      if (!dirtyRef.current) return;
-      recoveryTimerRef.current = window.setTimeout(() => {
-        recoveryTimerRef.current = null;
-        if (viewRef.current !== view || !dirtyRef.current) return;
-        const fingerprint = documentRef.current?.fingerprint;
-        if (!fingerprint) return;
-        const content = view.state.doc.toString();
-        void enqueueRecovery(() =>
-          api.writeRecovery(tab.projectId, tab.path, content, fingerprint),
-        );
-      }, RECOVERY_SAVE_DELAY_MS);
-    },
-    [clearRecoveryTimer, enqueueRecovery, tab.path, tab.projectId],
-  );
-  const scheduleRecoveryRef = useRef(scheduleRecovery);
-  const deleteRecoveryRef = useRef(deleteRecovery);
-  scheduleRecoveryRef.current = scheduleRecovery;
-  deleteRecoveryRef.current = deleteRecovery;
-
-  const pauseAutoSave = useCallback(
-    (reason: Exclude<PauseReason, null>, message: string | null) => {
-      pauseReasonRef.current = reason;
-      setPauseReason(reason);
-      setSaveError(message);
-      clearAutoSaveTimer();
-    },
-    [clearAutoSaveTimer],
-  );
-
-  const resumeAutoSave = useCallback(() => {
-    pauseReasonRef.current = null;
-    setPauseReason(null);
-    setSaveError(null);
-  }, []);
-
-  const scheduleAutoSave = useCallback(() => {
-    clearAutoSaveTimer();
-    if (
-      !preferencesRef.current.autoSave ||
-      !documentRef.current?.editable ||
-      pauseReasonRef.current ||
-      operationLockedRef.current ||
-      gitLockedRef.current
-    )
-      return;
-    const wait = Math.max(
-      preferencesRef.current.autoSaveDelay,
-      AUTO_SAVE_MIN_INTERVAL_MS - (Date.now() - lastSavedAtRef.current),
-    );
-    autoSaveTimerRef.current = window.setTimeout(() => {
-      autoSaveTimerRef.current = null;
-      if (viewRef.current?.composing) {
-        scheduleAutoSaveRef.current();
-        return;
-      }
-      if (dirtyRef.current && !pauseReasonRef.current && !savingRef.current) {
-        void saveRef.current();
-      }
-    }, wait);
-  }, [clearAutoSaveTimer]);
-
-  scheduleAutoSaveRef.current = scheduleAutoSave;
-
-  useEffect(() => {
-    const locked = gitLocked || operationLockedRef.current;
-    if (locked) clearAutoSaveTimer();
-    viewRef.current?.dispatch({
-      effects: operationCompartment.current.reconfigure(
-        locked ? Prec.highest([EditorState.readOnly.of(true), EditorView.editable.of(false)]) : [],
-      ),
-    });
-    if (!locked && dirtyRef.current) scheduleAutoSaveRef.current();
-  }, [gitLocked, clearAutoSaveTimer]);
-
-  const refreshGitChanges = useCallback((view: EditorView) => {
-    const request = ++gitDiffRequestRef.current;
-    if (!activeRef.current) return;
-    const base = gitBaseRef.current;
-    const doc = view.state.doc;
-    const tooLarge = doc.length > GIT_DIFF_MAX_BYTES || doc.lines > GIT_DIFF_MAX_LINES;
-    const apply = (blocks: ChangeBlock[]) => {
-      if (
-        request !== gitDiffRequestRef.current ||
-        viewRef.current !== view ||
-        !activeRef.current ||
-        view.state.doc !== doc ||
-        gitBaseRef.current !== base
-      )
-        return;
-      gitSnapshotRef.current = base === null ? null : { doc, base, blocks };
-      setGitBlocks(blocks);
-      view.dispatch({ effects: setChangeBlocks.of(blocks) });
-    };
-    if (base == null || tooLarge) {
-      apply([]);
-      return;
-    }
-    void computeChangeBlocksAsync(base, doc.toString()).then(apply, () => apply([]));
-  }, []);
-
-  const jumpToChange = useCallback((block: ChangeBlock) => {
-    const view = viewRef.current;
-    if (!view) return;
-    const doc = view.state.doc;
-    const line = doc.line(Math.min(Math.max(1, block.from), doc.lines));
-    view.dispatch({ effects: EditorView.scrollIntoView(line.from, { y: "center" }) });
-    view.focus();
-  }, []);
-
-  const scheduleGitDiff = useCallback(
-    (view: EditorView) => {
-      if (gitBaseRef.current === null) return;
-      if (gitDiffTimerRef.current !== null) window.clearTimeout(gitDiffTimerRef.current);
-      gitDiffTimerRef.current = window.setTimeout(() => {
-        gitDiffTimerRef.current = null;
-        if (viewRef.current === view) refreshGitChanges(view);
-      }, GIT_DIFF_DELAY_MS);
-    },
-    [refreshGitChanges],
-  );
-  const scheduleGitDiffRef = useRef(scheduleGitDiff);
-  scheduleGitDiffRef.current = scheduleGitDiff;
-
-  const openChangePopup = useCallback((block: ChangeBlock, anchor: EditorDiffAnchor) => {
-    const view = viewRef.current;
-    const snapshot = gitSnapshotRef.current;
-    if (
-      !view ||
-      !snapshot ||
-      snapshot.doc !== view.state.doc ||
-      snapshot.base !== gitBaseRef.current ||
-      !snapshot.blocks.includes(block)
-    )
-      return;
-    setChangePopup({ block, anchor, view, snapshot });
-  }, []);
-  gitSelectRef.current = openChangePopup;
-
-  const closeChangePopup = useCallback((restoreFocus = false) => {
-    setChangePopup(null);
-    if (restoreFocus) viewRef.current?.focus();
-  }, []);
-
-  const currentChangePopup = () => {
-    if (
-      changePopup &&
-      changePopup.view === viewRef.current &&
-      changePopup.snapshot.doc === changePopup.view.state.doc &&
-      changePopup.snapshot.base === gitBaseRef.current
-    )
-      return changePopup;
-    closeChangePopup();
-    return null;
-  };
-
-  const revertChange = () => {
-    const popup = currentChangePopup();
-    const view = viewRef.current;
-    if (
-      !popup ||
-      !view ||
-      !documentRef.current?.editable ||
-      operationLockedRef.current ||
-      gitLockedRef.current
-    )
-      return;
-    const { block } = popup;
-    const doc = view.state.doc;
-    const nextLine = block.from + block.newLines.length;
-    const insert = block.oldLines.join("\n");
-    // Keep the separator with the replaced lines, including changes at EOF.
-    const changes =
-      doc.length === 0
-        ? { from: 0, insert: normalizeDocumentText(popup.snapshot.base) }
-        : nextLine <= doc.lines
-          ? {
-              from: doc.line(block.from).from,
-              to: doc.line(nextLine).from,
-              insert: block.oldLines.length ? `${insert}\n` : "",
-            }
-          : {
-              from: block.from > 1 ? doc.line(block.from - 1).to : 0,
-              to: doc.length,
-              insert: block.oldLines.length && block.from > 1 ? `\n${insert}` : insert,
-            };
-    view.dispatch({ changes, userEvent: "delete.revert", scrollIntoView: false });
-    closeChangePopup(true);
-  };
-
-  const openComparison = (wrap: boolean) => {
-    const popup = currentChangePopup();
-    if (!popup) return;
-    const { doc, blocks } = popup.snapshot;
-    onOpenComparison?.({ doc, blocks, selected: blocks.indexOf(popup.block), wrap });
-    closeChangePopup();
-  };
-
-  const save = useCallback(
-    async (options?: { force?: boolean; forFileOperation?: boolean }): Promise<SaveResult> => {
-      if ((operationLockedRef.current || gitLockedRef.current) && !options?.forFileOperation) {
-        return { status: "error", message: t("文件操作进行中，请稍候。") };
-      }
-      clearAutoSaveTimer();
-      if (inFlightRef.current) return inFlightRef.current;
-      const view = viewRef.current;
-      const document = documentRef.current;
-      if (!view || !document) return { status: "clean" };
-      if (!document.editable) {
-        return {
-          status: "readonly",
-          message: document.editBlockedReason ?? t("当前文件只支持阅读。"),
-        };
-      }
-      const text = view.state.doc.toString();
-      if (!options?.force && !dirtyRef.current && text === baselineRef.current) {
-        return { status: "clean" };
-      }
-      const generation = generationRef.current;
-      const promise = (async (): Promise<SaveResult> => {
-        savingRef.current = true;
-        setSaving(true);
-        try {
-          const result = await api.writeFile(
-            tab.projectId,
-            tab.path,
-            text,
-            document.fingerprint,
-            document.encodingKind,
-            document.lineEnding,
-            options?.force ?? false,
-          );
-          onSavedRef.current();
-          if (generation === generationRef.current) {
-            document.fingerprint = result.fingerprint;
-            document.size = result.size;
-            baselineRef.current = text;
-            lastSavedAtRef.current = Date.now();
-            const stillDirty = view.state.doc.toString() !== text;
-            dirtyRef.current = stillDirty;
-            setDirty(stillDirty);
-            setRecovery(null);
-            void deleteRecovery();
-            resumeAutoSave();
-            if (stillDirty) {
-              scheduleRecoveryRef.current(view);
-              scheduleAutoSaveRef.current();
-            }
-          }
-          return { status: "saved" };
-        } catch (reason) {
-          if (generation === generationRef.current) {
-            if (errorCode(reason) === "conflict") {
-              pauseAutoSave("conflict", errorMessage(reason));
-              return { status: "conflict", message: errorMessage(reason) };
-            }
-            pauseAutoSave("error", errorMessage(reason));
-          }
-          return { status: "error", message: errorMessage(reason) };
-        } finally {
-          savingRef.current = false;
-          setSaving(false);
-          inFlightRef.current = null;
-        }
-      })();
-      inFlightRef.current = promise;
-      return promise;
-    },
-    [clearAutoSaveTimer, deleteRecovery, pauseAutoSave, resumeAutoSave, tab.path, tab.projectId],
-  );
-
-  saveRef.current = save;
-
-  const reloadFromDisk = useCallback(() => {
-    clearAutoSaveTimer();
-    ignoreRecoveryRef.current = true;
-    setRecovery(null);
-    void deleteRecovery();
-    resumeAutoSave();
-    setLocalReload((value) => value + 1);
-  }, [clearAutoSaveTimer, deleteRecovery, resumeAutoSave]);
-
-  const restoreRecovery = useCallback(() => {
-    const view = viewRef.current;
-    const document = documentRef.current;
-    if (!recovery || !view || !document?.editable) return;
-    document.fingerprint = recovery.originalFingerprint;
-    setRecovery(null);
-    view.dispatch({
-      changes: {
-        from: 0,
-        to: view.state.doc.length,
-        insert: normalizeDocumentText(recovery.content),
-      },
-      userEvent: "input.recover",
-    });
-    view.focus();
-  }, [recovery]);
-
-  const showPreview = useCallback(() => {
-    if (!viewRef.current) return;
-    if (previewTimerRef.current !== null) window.clearTimeout(previewTimerRef.current);
-    previewTimerRef.current = null;
-    setPreviewText(viewRef.current.state.doc.toString());
-    setPreviewNotice(null);
-    setChangePopup(null);
-    setPreview(true);
-  }, []);
 
   const previewMessage = useCallback(
     (message: string) => {
@@ -1163,124 +372,18 @@ export function CodeReader({
       save,
       discardRecovery,
       reloadFromDisk,
-      async prepareFileOperation(options) {
-        operationLockedRef.current = true;
-        clearAutoSaveTimer();
-        viewRef.current?.dispatch({
-          effects: operationCompartment.current.reconfigure(
-            Prec.highest([EditorState.readOnly.of(true), EditorView.editable.of(false)]),
-          ),
-        });
-        if (inFlightRef.current) {
-          const result = await inFlightRef.current;
-          if (result.status !== "saved" && result.status !== "clean") return result;
-        }
-        if (options?.save === false) return { status: "clean" };
-        if (!dirtyRef.current) return { status: "clean" };
-        if (pauseReasonRef.current === "conflict" || pauseReasonRef.current === "external") {
-          return { status: "conflict", message: t("请先处理文件的磁盘冲突，再执行文件操作。") };
-        }
-        return save({ forFileOperation: true });
-      },
-      finishFileOperation(options) {
-        if (options?.reload) {
-          clearAutoSaveTimer();
-          operationCursorRef.current = viewRef.current?.state.selection.main.head ?? null;
-          viewRef.current?.destroy();
-          viewRef.current = null;
-          documentRef.current = null;
-          dirtyRef.current = false;
-          setDirty(false);
-          onDirtyChangeRef.current(false);
-          setLoaded(null);
-          setLoading(true);
-          reloadFromDisk();
-        }
-        operationLockedRef.current = false;
-        viewRef.current?.dispatch({
-          effects: operationCompartment.current.reconfigure(
-            gitLockedRef.current
-              ? Prec.highest([EditorState.readOnly.of(true), EditorView.editable.of(false)])
-              : [],
-          ),
-        });
-        if (dirtyRef.current) scheduleAutoSaveRef.current();
-      },
+      prepareFileOperation,
+      finishFileOperation,
     }),
-    [clearAutoSaveTimer, discardRecovery, reloadFromDisk, save],
+    [discardRecovery, finishFileOperation, prepareFileOperation, reloadFromDisk, save],
   );
-
-  useEffect(() => {
-    let cancelled = false;
-    const hasView = viewRef.current !== null;
-    if (!hasView) {
-      setLoading(true);
-      setLoaded(null);
-    }
-    setError(null);
-    setRecovery(null);
-    clearAutoSaveTimer();
-    const skipRecovery = ignoreRecoveryRef.current;
-    ignoreRecoveryRef.current = false;
-    const recoveryRequest = skipRecovery
-      ? Promise.resolve(null)
-      : api.readRecovery(tab.projectId, tab.path).catch(() => null);
-    Promise.all([api.readFile(tab.projectId, tab.path), recoveryRequest])
-      .then(([content, recovery]) => {
-        if (cancelled) return;
-        const diskText = content.kind === "text" ? normalizeDocumentText(content.content) : null;
-        const alreadySaved =
-          recovery !== null && diskText === normalizeDocumentText(recovery.content);
-        if (alreadySaved) void deleteRecovery();
-        setRecovery(content.kind === "text" && recovery && !alreadySaved ? recovery : null);
-        const view = viewRef.current;
-        if (view && content.kind === "text" && diskText === view.state.doc.toString()) {
-          documentRef.current = content;
-          baselineRef.current = normalizeDocumentText(content.content);
-          dirtyRef.current = false;
-          setDirty(false);
-          setLineCount(view.state.doc.lines);
-          resumeAutoSave();
-          setLoading(false);
-          return;
-        }
-        documentRef.current = content.kind === "text" ? content : null;
-        setLoaded({ content, revision: reloadToken + localReload });
-        setLoading(false);
-      })
-      .catch((reason: unknown) => {
-        if (cancelled) return;
-        viewRef.current?.destroy();
-        viewRef.current = null;
-        setError(errorMessage(reason));
-        setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    tab.projectId,
-    tab.path,
-    reloadToken,
-    localReload,
-    retryToken,
-    clearAutoSaveTimer,
-    deleteRecovery,
-    resumeAutoSave,
-  ]);
 
   useEffect(() => {
     if (!surfaceRef.current || !loaded || loaded.content.kind !== "text") {
       return;
     }
     const content = loaded.content;
-    generationRef.current += 1;
-    documentRef.current = content;
-    const normalizedContent = normalizeDocumentText(content.content);
-    baselineRef.current = normalizedContent;
-    dirtyRef.current = false;
-    setDirty(false);
-    setLineCount(normalizedContent === "" ? 1 : normalizedContent.split("\n").length);
+    const normalizedContent = resetEditorDocument(content);
     setProblems(undefined);
     resumeAutoSave();
     clearAutoSaveTimer();
@@ -1290,79 +393,36 @@ export function CodeReader({
     const state = EditorState.create({
       doc: content.content,
       selection: { anchor: Math.min(operationCursorRef.current ?? 0, normalizedContent.length) },
-      extensions: [
-        localeCompartment.current.of([]),
-        diagnosticsCompartment.current.of([]),
-        autoImportCompartment.current.of([]),
-        Prec.lowest(gitChangeGutter((block, element) => gitSelectRef.current(block, element))),
-        initialExtensions(
-          theme,
-          content.editable,
-          languageCompartment.current,
-          themeCompartment.current,
-          highlightCompartment.current,
-          tab.name,
-          (view) => {
-            const baseline = baselineRef.current;
-            const doc = view.state.doc;
-            const clean = doc.length === baseline.length && doc.toString() === baseline;
-            const nextDirty = !clean;
-            setChangePopup(null);
-            setRecovery(null);
-            if (dirtyRef.current !== nextDirty) {
-              dirtyRef.current = nextDirty;
-              setDirty(nextDirty);
-            }
-            setLineCount(doc.lines);
-            if (nextDirty) {
-              scheduleRecoveryRef.current(view);
-              scheduleAutoSaveRef.current();
-            } else {
-              clearAutoSaveTimer();
-              void deleteRecoveryRef.current();
-            }
-            scheduleGitDiffRef.current(view);
-            if (previewRef.current) {
-              if (previewTimerRef.current !== null) window.clearTimeout(previewTimerRef.current);
-              previewTimerRef.current = window.setTimeout(() => {
-                previewTimerRef.current = null;
-                if (previewRef.current && viewRef.current === view)
-                  setPreviewText(view.state.doc.toString());
-              }, MARKDOWN_PREVIEW_DELAY_MS);
-            }
-          },
-        ),
-        content.mode === "normal"
-          ? definitionLink(
-              tab.projectId,
-              tab.path,
-              () =>
-                (!operationLockedRef.current || gitLockedRef.current) &&
-                !!onGoToDefinitionRef.current,
-              (position, result) => onGoToDefinitionRef.current?.(position, result),
-              (path, fragment) => onOpenFileLinkRef.current?.(tab.projectId, path, fragment),
-            )
-          : [],
-        languageToolsCompartment.current.of([]),
-        aiCompletionCompartment.current.of([]),
-        minimapCompartment.current.of([]),
-        preferencesCompartment.current.of(
-          preferenceExtensions(
-            preferencesRef.current,
-            content.mode,
-            content.editable,
-            content.content,
-            tab.name,
-            appNavigation,
-            copyLocation,
-          ),
-        ),
-        operationCompartment.current.of(
-          operationLockedRef.current || gitLockedRef.current
-            ? Prec.highest([EditorState.readOnly.of(true), EditorView.editable.of(false)])
-            : [],
-        ),
-        EditorView.updateListener.of((update) => {
+      extensions: createCodeReaderExtensions({
+        compartments: compartments.current,
+        theme,
+        content,
+        fileName: tab.name,
+        projectId: tab.projectId,
+        filePath: tab.path,
+        preferences: preferencesRef.current,
+        onNavigate: appNavigation,
+        onCopyLocation: copyLocation,
+        onDocumentChanged: (view) => {
+          closeChangePopup();
+          onLifecycleDocumentChanged(view);
+          scheduleGitDiffRef.current(view);
+          if (previewRef.current) {
+            if (previewTimerRef.current !== null) window.clearTimeout(previewTimerRef.current);
+            previewTimerRef.current = window.setTimeout(() => {
+              previewTimerRef.current = null;
+              if (previewRef.current && viewRef.current === view)
+                setPreviewText(view.state.doc.toString());
+            }, MARKDOWN_PREVIEW_DELAY_MS);
+          }
+        },
+        onGitChangeSelect: (block, element) => gitSelectRef.current(block, element),
+        canGoToDefinition: () =>
+          (!operationLockedRef.current || gitLockedRef.current) && !!onGoToDefinitionRef.current,
+        onGoToDefinition: (position, result) => onGoToDefinitionRef.current?.(position, result),
+        onOpenFileLink: (path, fragment) =>
+          onOpenFileLinkRef.current?.(tab.projectId, path, fragment),
+        onUpdate: (update) => {
           if (update.docChanged || !update.startState.selection.eq(update.state.selection)) {
             pluginRequest.current?.abort();
           }
@@ -1388,13 +448,9 @@ export function CodeReader({
           } else if (update.docChanged) {
             setProblems(undefined);
           }
-        }),
-        EditorState.transactionFilter.of((transaction) =>
-          transaction.docChanged && (operationLockedRef.current || gitLockedRef.current)
-            ? []
-            : transaction,
-        ),
-      ],
+        },
+        isLocked: () => operationLockedRef.current || gitLockedRef.current,
+      }),
     });
     const view = new EditorView({ state, parent: surfaceRef.current });
     const restore =
@@ -1419,7 +475,7 @@ export function CodeReader({
         .then((support) => {
           if (cancelled || viewRef.current !== view) return;
           view.dispatch({
-            effects: languageCompartment.current.reconfigure(support),
+            effects: compartments.current.language.reconfigure(support),
           });
         })
         .catch(() => {
@@ -1435,11 +491,20 @@ export function CodeReader({
     };
     // The editor is rebuilt only when a document revision is loaded.
     // Theme changes are applied through the theme compartment below.
-  }, [loaded, tab.name, markdown, clearAutoSaveTimer, resumeAutoSave, copyLocation]);
+  }, [
+    loaded,
+    tab.name,
+    markdown,
+    clearAutoSaveTimer,
+    resumeAutoSave,
+    resetEditorDocument,
+    onLifecycleDocumentChanged,
+    copyLocation,
+  ]);
 
   useEffect(() => {
     viewRef.current?.dispatch({
-      effects: localeCompartment.current.reconfigure(
+      effects: compartments.current.locale.reconfigure(
         EditorState.phrases.of(
           language === "zh-CN"
             ? {
@@ -1468,37 +533,59 @@ export function CodeReader({
     });
   }, [language, loaded]);
 
-  useEffect(() => {
-    const view = viewRef.current;
-    if (!view) return;
-    if (gitDiffTimerRef.current !== null) {
-      window.clearTimeout(gitDiffTimerRef.current);
-      gitDiffTimerRef.current = null;
-    }
-    refreshGitChanges(view);
-  }, [active, gitBase, loaded, refreshGitChanges]);
+  const {
+    gitBlocks,
+    changePopup,
+    gitSelectRef,
+    scheduleGitDiffRef,
+    jumpToChange,
+    openChangePopup,
+    closeChangePopup,
+    revertChange,
+    openComparison,
+    getChangeAtContext,
+    changeLabel,
+  } = useGitChangeBlocks({
+    projectId: tab.projectId,
+    path: tab.path,
+    viewRef,
+    documentRef,
+    operationLockedRef,
+    gitLockedRef,
+    activeRef,
+    active,
+    loaded,
+    editorPopupsBlocked,
+    gitLocked,
+    onOpenComparison,
+  });
+
+  const showPreview = useCallback(() => {
+    if (!viewRef.current) return;
+    if (previewTimerRef.current !== null) window.clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = null;
+    setPreviewText(viewRef.current.state.doc.toString());
+    setPreviewNotice(null);
+    closeChangePopup();
+    setPreview(true);
+  }, [closeChangePopup]);
 
   useEffect(
     () => () => {
-      if (gitDiffTimerRef.current !== null) window.clearTimeout(gitDiffTimerRef.current);
       if (previewTimerRef.current !== null) window.clearTimeout(previewTimerRef.current);
     },
     [],
   );
 
   useEffect(() => {
-    setChangePopup(null);
-  }, [active, gitBase, loaded, editorPopupsBlocked, gitLocked]);
-
-  useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
     view.dispatch({
       effects: [
-        themeCompartment.current.reconfigure(
+        compartments.current.theme.reconfigure(
           editorTheme(theme === "dark", fontFamily, preferences),
         ),
-        highlightCompartment.current.reconfigure(
+        compartments.current.highlight.reconfigure(
           syntaxHighlighting(theme === "dark" ? oneDarkHighlightStyle : defaultHighlightStyle, {
             fallback: true,
           }),
@@ -1512,7 +599,7 @@ export function CodeReader({
     const document = documentRef.current;
     if (view && document)
       view.dispatch({
-        effects: preferencesCompartment.current.reconfigure(
+        effects: compartments.current.preferences.reconfigure(
           preferenceExtensions(
             preferences,
             document.mode,
@@ -1531,7 +618,7 @@ export function CodeReader({
   }, [active, closeContextMenu, editorPopupsBlocked, previewVisible]);
 
   useEffect(() => {
-    viewRef.current?.dispatch({ effects: minimapCompartment.current.reconfigure(minimap ?? []) });
+    viewRef.current?.dispatch({ effects: compartments.current.minimap.reconfigure(minimap ?? []) });
   }, [loaded, minimap]);
 
   useEffect(() => {
@@ -1548,7 +635,7 @@ export function CodeReader({
       !operationLockedRef.current;
     const notify = (message: string) => onNoticeRef.current?.(message);
     view.dispatch({
-      effects: languageToolsCompartment.current.reconfigure([
+      effects: compartments.current.languageTools.reconfigure([
         // Cancel pending hints before the completion keymap handles Escape.
         canShowQuickDocumentation
           ? editorLanguageTools({
@@ -1596,7 +683,7 @@ export function CodeReader({
     const plugin =
       active && !previewVisible && !gitLocked && document.editable ? inlineCompletion : undefined;
     view.dispatch({
-      effects: aiCompletionCompartment.current.reconfigure(
+      effects: compartments.current.aiCompletion.reconfigure(
         plugin
           ? plugin({
               projectId: tab.projectId,
@@ -1640,7 +727,7 @@ export function CodeReader({
       view.dispatch(setDiagnostics(view.state, []), { effects: closeHoverTooltips });
     }
     view.dispatch({
-      effects: diagnosticsCompartment.current.reconfigure(
+      effects: compartments.current.diagnostics.reconfigure(
         enabled ? codeDiagnostics(tab.projectId, tab.path) : [],
       ),
     });
@@ -1651,7 +738,7 @@ export function CodeReader({
     if (!view) return;
     const enabled = preferences.autoImportEnabled && canUseEditorActions;
     view.dispatch({
-      effects: autoImportCompartment.current.reconfigure(
+      effects: compartments.current.autoImport.reconfigure(
         enabled
           ? autoImportExtension(
               tab.projectId,
@@ -1674,11 +761,6 @@ export function CodeReader({
     preferences.autoImportEnabled,
     pythonRevision,
   ]);
-
-  useEffect(() => {
-    clearAutoSaveTimer();
-    if (dirtyRef.current) scheduleAutoSaveRef.current();
-  }, [preferences.autoSave, preferences.autoSaveDelay, clearAutoSaveTimer]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -1720,11 +802,6 @@ export function CodeReader({
   }, [active, previewRequest, markdown, loaded, showPreview]);
 
   useEffect(() => {
-    if (externalChangeToken === 0 || !dirtyRef.current) return;
-    pauseAutoSave("external", t("该文件已在磁盘上被其他程序修改。"));
-  }, [externalChangeToken, pauseAutoSave]);
-
-  useEffect(() => {
     if (!active) return;
     if (error || !loaded || loaded.content.kind !== "text") {
       onStatus(null);
@@ -1760,13 +837,6 @@ export function CodeReader({
     tab.path,
   ]);
 
-  useEffect(() => {
-    onDirtyChangeRef.current(dirty);
-  }, [dirty]);
-
-  useEffect(() => clearAutoSaveTimer, [clearAutoSaveTimer]);
-  useEffect(() => clearRecoveryTimer, [clearRecoveryTimer]);
-
   if (loading) {
     return (
       <div className="reader-placeholder" aria-live="polite">
@@ -1785,7 +855,7 @@ export function CodeReader({
         <AlertCircle size={26} />
         <h2>{t("无法打开文件")}</h2>
         <p>{error}</p>
-        <button className="button" onClick={() => setRetryToken((value) => value + 1)}>
+        <button className="button" onClick={retryLoad}>
           <RotateCcw size={14} />
           {t("重试")}
         </button>
@@ -1921,15 +991,7 @@ export function CodeReader({
   };
 
   const text = documentRef.current ?? loaded.content;
-  const changeAtContext =
-    contextMenu &&
-    gitSnapshotRef.current?.doc === contextMenu.state.doc &&
-    gitSnapshotRef.current.base === gitBase
-      ? changeBlockAtLine(
-          contextMenu.view,
-          contextMenu.state.doc.lineAt(contextMenu.state.selection.main.head).number,
-        )
-      : undefined;
+  const changeAtContext = getChangeAtContext(contextMenu);
   return (
     <section
       className="reader"
@@ -2195,14 +1257,6 @@ export function CodeReader({
       )}
     </section>
   );
-}
-
-function changeLabel(block: ChangeBlock): string {
-  const added = block.newLines.length;
-  const removed = block.oldLines.length;
-  if (block.kind === "added") return t("新增 {0} 行", added);
-  if (block.kind === "deleted") return t("删除 {0} 行", removed);
-  return t("修改 {0} 行（原 {1} 行）", added, removed);
 }
 
 function applyReveal(view: EditorView, request: RevealRequest) {
