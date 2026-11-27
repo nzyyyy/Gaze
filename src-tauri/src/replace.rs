@@ -16,6 +16,7 @@ use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::cache::Cache;
 use crate::error::{GazeError, GazeResult};
 use crate::files::{read_file_with_bytes, restore_file_bytes, write_file};
 use crate::git_workspace;
@@ -23,7 +24,7 @@ use crate::models::{
     FileContent, FileFingerprint, LineEnding, Project, SearchOptions, TextEncodingKind,
 };
 use crate::search::{apply_search_args, parse_rg_line, scope_projects, ProjectLookup};
-use crate::AppState;
+use crate::tools::Tools;
 
 const MAX_REPLACE_FILES: usize = 200;
 const MAX_REPLACE_MATCHES: usize = 5_000;
@@ -80,6 +81,12 @@ impl ReplacePreviewService {
             }
         }
     }
+}
+
+#[derive(Default)]
+pub struct ReplaceState {
+    pub(crate) replace_previews: ReplacePreviewService,
+    pub(crate) replace_lock: tokio::sync::Mutex<()>,
 }
 
 #[derive(Clone)]
@@ -760,7 +767,9 @@ pub(crate) async fn preview_replace(
     query: String,
     replacement: String,
     options: SearchOptions,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<ReplaceState>>,
+    cache: State<'_, Cache>,
+    tools: State<'_, Tools>,
 ) -> Result<ReplacePreview, String> {
     let cancel = state
         .replace_previews
@@ -768,11 +777,7 @@ pub(crate) async fn preview_replace(
         .map_err(|error| error.message())?;
     let result = async {
         let replacer = Replacer::compile(&query, &options).map_err(|error| error.message())?;
-        let projects = state
-            .cache
-            .projects()
-            .await
-            .map_err(|error| error.message())?;
+        let projects = cache.projects().await.map_err(|error| error.message())?;
         let projects = scope_projects(projects, &options);
         if projects.is_empty() {
             return Err("所选项目当前不可搜索。".into());
@@ -781,8 +786,7 @@ pub(crate) async fn preview_replace(
             .iter()
             .map(|project| (project.id.clone(), project.clone()))
             .collect();
-        let rg = state
-            .tools
+        let rg = tools
             .rg
             .clone()
             .ok_or_else(|| "未找到 ripgrep（rg）。".to_string())?;
@@ -799,7 +803,7 @@ pub(crate) async fn preview_replace(
 #[tauri::command(rename_all = "camelCase")]
 pub(crate) fn cancel_replace_preview(
     request_id: String,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<ReplaceState>>,
 ) -> Result<(), String> {
     state.replace_previews.cancel(&request_id);
     Ok(())
@@ -939,7 +943,8 @@ pub(crate) async fn apply_replace(
     replacement: String,
     targets: Vec<ReplaceTarget>,
     options: SearchOptions,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<ReplaceState>>,
+    cache: State<'_, Cache>,
     undo_state: State<'_, ReplaceUndoService>,
     git_state: State<'_, git_workspace::AppState>,
 ) -> Result<ReplaceApplyResult, String> {
@@ -947,11 +952,7 @@ pub(crate) async fn apply_replace(
         return Err("没有选择要替换的文件。".into());
     }
     let replacer = Replacer::compile(&query, &options).map_err(|error| error.message())?;
-    let projects = state
-        .cache
-        .projects()
-        .await
-        .map_err(|error| error.message())?;
+    let projects = cache.projects().await.map_err(|error| error.message())?;
     let projects = scope_projects(projects, &options);
     let by_id: HashMap<_, _> = projects
         .into_iter()
@@ -1013,7 +1014,7 @@ pub(crate) async fn apply_replace(
 
 #[tauri::command(async)]
 pub(crate) async fn undo_replace(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<ReplaceState>>,
     undo_state: State<'_, ReplaceUndoService>,
     git_state: State<'_, git_workspace::AppState>,
 ) -> Result<ReplaceApplyResult, String> {

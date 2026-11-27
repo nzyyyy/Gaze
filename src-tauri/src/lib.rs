@@ -1,6 +1,7 @@
 mod ai_completion;
 mod cache;
 mod color_schemes;
+mod commands;
 mod config;
 mod error;
 mod external_files;
@@ -12,6 +13,7 @@ mod markdown;
 mod models;
 mod native_files;
 mod native_menu;
+mod navigation;
 mod path_index;
 mod plugins;
 mod preferences;
@@ -24,28 +26,22 @@ mod terminal;
 mod tools;
 mod watcher;
 
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::Path;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
-use uuid::Uuid;
+use tauri::{AppHandle, Emitter, Manager};
 
 use cache::Cache;
 use config::AppConfig;
-use error::{CommandError, GazeError, GazeResult};
+use error::{GazeError, GazeResult};
 use lsp::LspManager;
-use models::{
-    DirEntry, DirectoryListing, FileContent, FileFingerprint, LineEnding, NavigationResult,
-    OutlineResult, Project, SymbolSearchResult, TextEncodingKind, TextPosition, WorkspaceSnapshot,
-    WriteResult,
-};
-use path_index::{PathIndex, PathIndexStatus, PathSearchResponse};
+use models::{Project, WorkspaceSnapshot};
+use path_index::PathIndex;
 use search::SearchService;
-use symbols::{SymbolIndexStatus, SymbolService};
-use terminal::{TerminalManager, TerminalSessionInfo};
-use tools::{ToolCapabilities, Tools};
+use symbols::SymbolService;
+use terminal::TerminalManager;
+use tools::Tools;
 use watcher::WatcherService;
 
 pub struct AppState {
@@ -58,12 +54,11 @@ pub struct AppState {
     watchers: WatcherService,
     terminal: TerminalManager,
     settings_lock: tokio::sync::Mutex<()>,
-    ai_completion: ai_completion::Completion,
+    ai_completion: Arc<ai_completion::Completion>,
     background_started: AtomicBool,
-    external_files: external_files::ExternalFiles,
+    external_files: Arc<external_files::ExternalFiles>,
     recovery: recovery::RecoveryStore,
-    replace_previews: replace::ReplacePreviewService,
-    replace_lock: tokio::sync::Mutex<()>,
+    replace: Arc<replace::ReplaceState>,
 }
 
 impl AppState {
@@ -83,6 +78,7 @@ impl AppState {
             .try_init();
 
         let cache = Cache::open(&data_dir.join("gaze.sqlite3"))?;
+        app.manage(cache.clone());
         app.manage(plugins::Plugins::new(
             data_dir.join("plugins"),
             cache.clone(),
@@ -104,6 +100,14 @@ impl AppState {
             ));
         }
         let lsp = Arc::new(LspManager::new(&tools, cache.clone()));
+        let ai_completion = Arc::new(ai_completion::Completion::default());
+        let external_files = Arc::new(external_files::ExternalFiles::default());
+        let replace = Arc::new(replace::ReplaceState::default());
+        app.manage(tools.clone());
+        app.manage(Arc::clone(&lsp));
+        app.manage(Arc::clone(&ai_completion));
+        app.manage(Arc::clone(&external_files));
+        app.manage(Arc::clone(&replace));
         app.manage(git_workspace::AppState::new(
             cache.clone(),
             config.tools.git.as_deref().and_then(Path::to_str),
@@ -121,12 +125,11 @@ impl AppState {
             watchers: WatcherService::new(),
             terminal: TerminalManager::default(),
             settings_lock: tokio::sync::Mutex::new(()),
-            ai_completion: ai_completion::Completion::default(),
+            ai_completion,
             background_started: AtomicBool::new(false),
-            external_files: external_files::ExternalFiles::default(),
+            external_files,
             recovery: recovery::RecoveryStore::new(data_dir.join("recovery")),
-            replace_previews: replace::ReplacePreviewService::default(),
-            replace_lock: tokio::sync::Mutex::new(()),
+            replace,
         })
     }
 
@@ -148,13 +151,7 @@ impl AppState {
     }
 
     async fn read_preferences(&self) -> GazeResult<preferences::Preferences> {
-        Ok(self
-            .cache
-            .setting("preferences")
-            .await?
-            .and_then(|value| preferences::Preferences::from_stored(&value).ok())
-            .filter(|value| value.validate().is_ok())
-            .unwrap_or_default())
+        preferences::read(&self.cache).await
     }
 
     async fn snapshot(&self) -> GazeResult<WorkspaceSnapshot> {
@@ -295,571 +292,6 @@ impl AppState {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ImportFailure {
-    path: String,
-    message: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ImportResult {
-    projects: Vec<Project>,
-    failures: Vec<ImportFailure>,
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn bootstrap_workspace(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<WorkspaceSnapshot, CommandError> {
-    let snapshot = {
-        let _settings = state.settings_lock.lock().await;
-        let snapshot = state.snapshot().await.map_err(CommandError::from)?;
-        plugins::apply_builtin_preferences(&state, None, &snapshot.preferences).await;
-        snapshot
-    };
-    state
-        .path_index
-        .load_cached(&state.cache, &snapshot.projects)
-        .await
-        .map_err(CommandError::from)?;
-    if !state.background_started.swap(true, Ordering::SeqCst) {
-        state.watch_projects(&app, &snapshot.projects);
-        state.start_path_index(
-            &app,
-            snapshot.projects.clone(),
-            snapshot.active_project_id.clone(),
-        );
-    }
-    Ok(snapshot)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn import_projects(
-    paths: Vec<String>,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<ImportResult, CommandError> {
-    let existing = state.cache.projects().await.map_err(CommandError::from)?;
-    let mut imported = Vec::new();
-    let mut failures = Vec::new();
-    for raw_path in paths {
-        match canonical_project_path(Path::new(&raw_path)) {
-            Ok(root) => {
-                if existing.iter().any(|project| project.root == root) {
-                    failures.push(ImportFailure {
-                        path: raw_path,
-                        message: "该项目已在工作区中。".to_string(),
-                    });
-                    continue;
-                }
-                let name = Path::new(&root)
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .filter(|name| !name.is_empty())
-                    .unwrap_or("未命名项目")
-                    .to_string();
-                let project = Project {
-                    id: Uuid::new_v4().to_string(),
-                    name,
-                    root,
-                };
-                match state.cache.insert_project(&project).await {
-                    Ok(()) => imported.push(project),
-                    Err(error) => failures.push(ImportFailure {
-                        path: raw_path,
-                        message: error.message(),
-                    }),
-                }
-            }
-            Err(error) => failures.push(ImportFailure {
-                path: raw_path,
-                message: error.message(),
-            }),
-        }
-    }
-    let active_before = state
-        .cache
-        .setting("active_project")
-        .await
-        .ok()
-        .flatten()
-        .filter(|value| !value.is_empty());
-    if active_before.is_none() {
-        if let Some(first) = imported.first() {
-            let _ = state.cache.set_setting("active_project", &first.id).await;
-        }
-    }
-    let active_after = state
-        .cache
-        .setting("active_project")
-        .await
-        .ok()
-        .flatten()
-        .filter(|value| !value.is_empty());
-    if !imported.is_empty() {
-        state.watch_projects(&app, &imported);
-        state.start_path_index(&app, imported.clone(), active_after);
-    }
-    Ok(ImportResult {
-        projects: imported,
-        failures,
-    })
-}
-
-fn canonical_project_path(path: &Path) -> GazeResult<String> {
-    if !path.exists() {
-        return Err(GazeError::NotFound(format!(
-            "目录 {} 不存在。",
-            path.display()
-        )));
-    }
-    if !path.is_dir() {
-        return Err(GazeError::InvalidPath(format!(
-            "{} 不是目录。",
-            path.display()
-        )));
-    }
-    let canonical = path
-        .canonicalize()
-        .map_err(|error| GazeError::Message(format!("无法打开目录: {error}")))?;
-    canonical
-        .to_str()
-        .map(str::to_string)
-        .ok_or_else(|| GazeError::InvalidPath("项目路径不是有效的 Unicode。".to_string()))
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn remove_project(
-    project_id: String,
-    state: State<'_, AppState>,
-    git_state: State<'_, git_workspace::AppState>,
-) -> Result<WorkspaceSnapshot, CommandError> {
-    state.path_index.remove_project(&project_id);
-    state.symbols.remove_project(&project_id);
-    state.watchers.stop(&project_id);
-    state.lsp.remove_project(&project_id).await;
-    state
-        .cache
-        .delete_project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    git_state.detach(&project_id);
-    let snapshot = state.snapshot().await.map_err(CommandError::from)?;
-    let _ = state
-        .cache
-        .set_setting(
-            "active_project",
-            snapshot.active_project_id.as_deref().unwrap_or(""),
-        )
-        .await;
-    Ok(snapshot)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn set_active_project(
-    project_id: Option<String>,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    state
-        .cache
-        .set_setting("active_project", project_id.as_deref().unwrap_or(""))
-        .await
-        .map_err(CommandError::from)?;
-    if let Some(project_id) = project_id.filter(|value| !value.is_empty()) {
-        if let Some(project) = state
-            .cache
-            .projects()
-            .await
-            .map_err(CommandError::from)?
-            .into_iter()
-            .find(|project| project.id == project_id)
-        {
-            state.ensure_active_indexing(&app, project);
-        }
-    }
-    Ok(())
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn set_theme(theme: String, state: State<'_, AppState>) -> Result<(), CommandError> {
-    if !matches!(theme.as_str(), "system" | "light" | "dark") {
-        return Err(CommandError::from(GazeError::InvalidPath(
-            "未知主题。".to_string(),
-        )));
-    }
-    state
-        .cache
-        .set_setting("theme", &theme)
-        .await
-        .map_err(CommandError::from)?;
-    Ok(())
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn save_settings(
-    settings: preferences::AppSettings,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    let _settings = state.settings_lock.lock().await;
-    let previous = state.read_preferences().await.map_err(CommandError::from)?;
-    let next = &settings.preferences;
-    if next.ai_completion_enabled {
-        next.ai_completion.validate().map_err(CommandError::from)?;
-    }
-    settings
-        .save(&state.cache)
-        .await
-        .map_err(CommandError::from)?;
-    plugins::apply_builtin_preferences(&state, Some(&previous), next).await;
-    Ok(())
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn list_directory(
-    project_id: String,
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<DirectoryListing, CommandError> {
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    tokio::task::spawn_blocking(move || files::list_directory(&project, &path))
-        .await
-        .map_err(|error| CommandError::from(GazeError::Join(error)))?
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn create_entry(
-    project_id: String,
-    parent_path: String,
-    name: String,
-    is_dir: bool,
-    state: State<'_, AppState>,
-    git_state: State<'_, git_workspace::AppState>,
-) -> Result<DirEntry, CommandError> {
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    let _git_write = git_state
-        .editor_guard(Path::new(&project.root))
-        .map_err(|e| CommandError::from(GazeError::Message(e)))?;
-    tokio::task::spawn_blocking(move || files::create_entry(&project, &parent_path, &name, is_dir))
-        .await
-        .map_err(|error| CommandError::from(GazeError::Join(error)))?
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn move_entry(
-    project_id: String,
-    path: String,
-    destination_path: String,
-    state: State<'_, AppState>,
-    git_state: State<'_, git_workspace::AppState>,
-) -> Result<DirEntry, CommandError> {
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    let _git_write = git_state
-        .editor_guard(Path::new(&project.root))
-        .map_err(|e| CommandError::from(GazeError::Message(e)))?;
-    let projects = state.cache.projects().await.map_err(CommandError::from)?;
-    let source = path.clone();
-    let document_path = Path::new(&project.root).join(&path);
-    let entry = tokio::task::spawn_blocking(move || {
-        files::move_entry(&project, &source, &destination_path, &projects)
-    })
-    .await
-    .map_err(|error| CommandError::from(GazeError::Join(error)))?
-    .map_err(CommandError::from)?;
-    state.lsp.forget_documents(&document_path).await;
-    Ok(entry)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn trash_entry(
-    project_id: String,
-    path: String,
-    state: State<'_, AppState>,
-    git_state: State<'_, git_workspace::AppState>,
-) -> Result<(), CommandError> {
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    let _git_write = git_state
-        .editor_guard(Path::new(&project.root))
-        .map_err(|e| CommandError::from(GazeError::Message(e)))?;
-    let projects = state.cache.projects().await.map_err(CommandError::from)?;
-    let source = path.clone();
-    let document_path = Path::new(&project.root).join(&path);
-    tokio::task::spawn_blocking(move || files::trash_entry(&project, &source, &projects))
-        .await
-        .map_err(|error| CommandError::from(GazeError::Join(error)))?
-        .map_err(CommandError::from)?;
-    state.lsp.forget_documents(&document_path).await;
-    Ok(())
-}
-
-#[tauri::command]
-async fn has_file_clipboard(app: AppHandle) -> Result<bool, CommandError> {
-    native_file_action(&app, || {
-        native_files::clipboard_paths().map(|paths| !paths.is_empty())
-    })
-    .await
-}
-
-#[tauri::command]
-async fn read_editor_clipboard(app: AppHandle) -> Result<Option<String>, CommandError> {
-    native_file_action(&app, native_files::read_clipboard_text).await
-}
-
-#[tauri::command]
-async fn write_editor_clipboard(app: AppHandle, text: String) -> Result<(), CommandError> {
-    native_file_action(&app, move || native_files::write_clipboard_text(&text)).await
-}
-
-// AppKit's shared pasteboard must be serialized with WebKit on the main thread.
-async fn native_file_action<T: Send + 'static>(
-    app: &AppHandle,
-    action: impl FnOnce() -> GazeResult<T> + Send + 'static,
-) -> Result<T, CommandError> {
-    let (sender, receiver) = tokio::sync::oneshot::channel();
-    app.run_on_main_thread(move || {
-        let _ = sender.send(action());
-    })
-    .map_err(|error| CommandError::from(GazeError::Message(error.to_string())))?;
-    receiver
-        .await
-        .map_err(|error| CommandError::from(GazeError::Message(error.to_string())))?
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn copy_entry(
-    app: AppHandle,
-    project_id: String,
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    let project = state
-        .file_project(&project_id, &path)
-        .await
-        .map_err(CommandError::from)?;
-    native_file_action(&app, move || {
-        native_files::copy_file(&files::entry_path(&project, &path)?)
-    })
-    .await
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn copy_entry_path(
-    app: AppHandle,
-    project_id: String,
-    path: String,
-    relative: bool,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    let project = state
-        .file_project(&project_id, &path)
-        .await
-        .map_err(CommandError::from)?;
-    native_file_action(&app, move || {
-        native_files::copy_path(&files::clipboard_path(&project, &path, relative)?)
-    })
-    .await
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn reveal_entry(
-    app: AppHandle,
-    project_id: String,
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    let project = state
-        .file_project(&project_id, &path)
-        .await
-        .map_err(CommandError::from)?;
-    native_file_action(&app, move || {
-        native_files::reveal(&files::entry_path(&project, &path)?)
-    })
-    .await
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn paste_entries(
-    app: AppHandle,
-    project_id: String,
-    parent_path: String,
-    state: State<'_, AppState>,
-    git_state: State<'_, git_workspace::AppState>,
-) -> Result<files::PasteResult, CommandError> {
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    let _git_write = git_state
-        .editor_guard(Path::new(&project.root))
-        .map_err(|error| CommandError::from(GazeError::Message(error)))?;
-    let sources = native_file_action(&app, native_files::clipboard_paths).await?;
-    tokio::task::spawn_blocking(move || files::paste_entries(&project, &parent_path, &sources))
-        .await
-        .map_err(|error| CommandError::from(GazeError::Join(error)))?
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn copy_dropped_files(
-    project_id: String,
-    parent_path: String,
-    paths: Vec<String>,
-    state: State<'_, AppState>,
-    git_state: State<'_, git_workspace::AppState>,
-) -> Result<files::PasteResult, CommandError> {
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    let _git_write = git_state
-        .editor_guard(Path::new(&project.root))
-        .map_err(|error| CommandError::from(GazeError::Message(error)))?;
-    tokio::task::spawn_blocking(move || {
-        files::copy_dropped_files(
-            &project,
-            &parent_path,
-            &paths.into_iter().map(PathBuf::from).collect::<Vec<_>>(),
-        )
-    })
-    .await
-    .map_err(|error| CommandError::from(GazeError::Join(error)))?
-    .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn open_external_files(
-    paths: Vec<String>,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<external_files::OpenResult, CommandError> {
-    let projects = state.cache.projects().await.map_err(CommandError::from)?;
-    let mut result = external_files::OpenResult::default();
-    for path in paths {
-        let opened = state
-            .external_files
-            .open(Path::new(&path), &projects)
-            .and_then(|file| {
-                if file.temporary {
-                    if let Err(error) = state.watchers.start_file(
-                        app.clone(),
-                        file.project.clone(),
-                        file.path.clone(),
-                    ) {
-                        let _ = state.external_files.close(&file.project.id, &file.path);
-                        return Err(error);
-                    }
-                }
-                Ok(file)
-            });
-        match opened {
-            Ok(file) => result.files.push(file),
-            Err(error) => result.failures.push(external_files::OpenFailure {
-                path,
-                message: error.message(),
-            }),
-        }
-    }
-    Ok(result)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-fn close_external_file(
-    project_id: String,
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    state.watchers.stop_file(&project_id, &path);
-    state
-        .external_files
-        .close(&project_id, &path)
-        .map_err(CommandError::from)
-}
-
-#[tauri::command]
-fn take_pending_files(state: State<'_, AppState>) -> Result<Vec<String>, CommandError> {
-    state
-        .external_files
-        .take_pending()
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn read_file(
-    project_id: String,
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<FileContent, CommandError> {
-    let project = state
-        .file_project(&project_id, &path)
-        .await
-        .map_err(CommandError::from)?;
-    tokio::task::spawn_blocking(move || files::read_file(&project, &path))
-        .await
-        .map_err(|error| CommandError::from(GazeError::Join(error)))?
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn read_recovery(
-    project_id: String,
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<Option<recovery::RecoveryRecord>, CommandError> {
-    let store = state.recovery.clone();
-    tokio::task::spawn_blocking(move || store.read(&project_id, &path))
-        .await
-        .map_err(|error| CommandError::from(GazeError::Join(error)))?
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn write_recovery(
-    project_id: String,
-    path: String,
-    content: String,
-    original_fingerprint: FileFingerprint,
-    state: State<'_, AppState>,
-) -> Result<recovery::RecoveryRecord, CommandError> {
-    let store = state.recovery.clone();
-    tokio::task::spawn_blocking(move || {
-        store.write(&project_id, &path, &content, original_fingerprint)
-    })
-    .await
-    .map_err(|error| CommandError::from(GazeError::Join(error)))?
-    .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn delete_recovery(
-    project_id: String,
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    let store = state.recovery.clone();
-    tokio::task::spawn_blocking(move || store.delete(&project_id, &path))
-        .await
-        .map_err(|error| CommandError::from(GazeError::Join(error)))?
-        .map_err(CommandError::from)
-}
-
 async fn read_protocol_markdown_image(
     app: &AppHandle,
     uri: &str,
@@ -910,654 +342,6 @@ fn markdown_image_response(
     .expect("static image response headers are valid")
 }
 
-#[tauri::command(rename_all = "camelCase")]
-async fn resolve_markdown_link(
-    project_id: String,
-    document_path: String,
-    href: String,
-    state: State<'_, AppState>,
-) -> Result<markdown::MarkdownLink, CommandError> {
-    let project = state
-        .file_project(&project_id, &document_path)
-        .await
-        .map_err(CommandError::from)?;
-    tokio::task::spawn_blocking(move || markdown::resolve_link(&project, &document_path, &href))
-        .await
-        .map_err(|error| CommandError::from(GazeError::Join(error)))?
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn open_external_url(url: String) -> Result<(), CommandError> {
-    let url = markdown::external_url(&url).map_err(CommandError::from)?;
-    tokio::task::spawn_blocking(move || {
-        tauri_plugin_opener::open_url(url.as_str(), None::<&str>)
-            .map_err(|error| GazeError::Message(format!("无法打开网页：{error}")))
-    })
-    .await
-    .map_err(|error| CommandError::from(GazeError::Join(error)))?
-    .map_err(CommandError::from)
-}
-
-#[allow(clippy::too_many_arguments)]
-#[tauri::command(rename_all = "camelCase")]
-async fn write_file(
-    project_id: String,
-    path: String,
-    content: String,
-    base_fingerprint: FileFingerprint,
-    encoding_kind: TextEncodingKind,
-    line_ending: LineEnding,
-    force: bool,
-    state: State<'_, AppState>,
-    git_state: State<'_, git_workspace::AppState>,
-) -> Result<WriteResult, CommandError> {
-    let project = state
-        .file_project(&project_id, &path)
-        .await
-        .map_err(CommandError::from)?;
-    let _git_write = git_state
-        .editor_guard(Path::new(&project.root))
-        .map_err(|e| CommandError::from(GazeError::Message(e)))?;
-    tokio::task::spawn_blocking(move || {
-        files::write_file(
-            &project,
-            &path,
-            &content,
-            base_fingerprint,
-            encoding_kind,
-            line_ending,
-            force,
-        )
-    })
-    .await
-    .map_err(|error| CommandError::from(GazeError::Join(error)))?
-    .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn hover_code(
-    project_id: String,
-    path: String,
-    content: String,
-    position: TextPosition,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<Vec<lsp::HoverContent>, CommandError> {
-    let project = state
-        .file_project(&project_id, &path)
-        .await
-        .map_err(CommandError::from)?;
-    state
-        .lsp
-        .hover(&app, &project, &path, &content, position)
-        .await
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn complete_code(
-    project_id: String,
-    path: String,
-    content: String,
-    position: TextPosition,
-    trigger: Option<String>,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<lsp::CompletionResult, CommandError> {
-    let project = state
-        .file_project(&project_id, &path)
-        .await
-        .map_err(CommandError::from)?;
-    state
-        .lsp
-        .complete(
-            &app,
-            &project,
-            &path,
-            &content,
-            position,
-            trigger.as_deref(),
-        )
-        .await
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn resolve_completion(
-    project_id: String,
-    path: String,
-    content: String,
-    resolve: lsp::CompletionResolve,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<Option<lsp::CompletionItem>, CommandError> {
-    let project = state
-        .file_project(&project_id, &path)
-        .await
-        .map_err(CommandError::from)?;
-    state
-        .lsp
-        .resolve_completion(&app, &project, &path, &content, resolve)
-        .await
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn sync_document(
-    project_id: String,
-    path: String,
-    content: String,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<lsp::DiagnosticSync, CommandError> {
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    state
-        .lsp
-        .sync_document(&app, &project, &path, &content)
-        .await
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn get_python_environment(
-    project_id: String,
-    state: State<'_, AppState>,
-) -> Result<python::PythonEnvironmentStatus, CommandError> {
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    state
-        .lsp
-        .python_environment(&project)
-        .await
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn list_python_environments(
-    project_id: String,
-    state: State<'_, AppState>,
-) -> Result<Vec<python::PythonEnvironment>, CommandError> {
-    state
-        .lsp
-        .ensure_python_enabled()
-        .map_err(CommandError::from)?;
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    Ok(python::discover(Path::new(&project.root)).await)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn set_python_environment(
-    project_id: String,
-    interpreter: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<python::PythonEnvironmentStatus, CommandError> {
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    state
-        .lsp
-        .set_python_environment(&project, interpreter)
-        .await
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn search_paths(
-    query: String,
-    state: State<'_, AppState>,
-) -> Result<PathSearchResponse, CommandError> {
-    state
-        .path_index
-        .search(query)
-        .await
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn complete_paths(
-    project_id: String,
-    document_path: String,
-    directory: String,
-    prefix: String,
-    directory_only: bool,
-    state: State<'_, AppState>,
-) -> Result<Vec<path_index::PathCompletion>, CommandError> {
-    if !state
-        .read_preferences()
-        .await
-        .map_err(CommandError::from)?
-        .path_completion_enabled
-    {
-        return Ok(Vec::new());
-    }
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    state
-        .path_index
-        .complete(project, document_path, directory, prefix, directory_only)
-        .await
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-fn path_index_status(state: State<'_, AppState>) -> Vec<PathIndexStatus> {
-    state.path_index.statuses()
-}
-
-#[tauri::command(rename_all = "camelCase")]
-fn symbol_index_status(
-    project_id: String,
-    state: State<'_, AppState>,
-) -> Option<SymbolIndexStatus> {
-    state.symbols.status(&project_id)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn get_outline(
-    project_id: String,
-    path: String,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<OutlineResult, CommandError> {
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    let lsp_error = if state.lsp.has_server_for(&path) {
-        match state.lsp.document_symbols(&app, &project, &path).await {
-            Ok(result) => return Ok(result),
-            Err(error) => Some(error.message()),
-        }
-    } else {
-        Some("没有为该文件配置 LSP。".to_string())
-    };
-    let Some(ctags) = state.tools.ctags.clone() else {
-        return Ok(OutlineResult {
-            symbols: Vec::new(),
-            source: "ctags".to_string(),
-            message: Some(format!(
-                "LSP 不可用（{}）；同时未找到 universal-ctags，无法生成文件大纲。",
-                lsp_error.unwrap_or_default()
-            )),
-        });
-    };
-    state
-        .symbols
-        .index_file(&state.cache, &ctags, &project, &path)
-        .await
-        .map_err(CommandError::from)?;
-    let symbols = state
-        .symbols
-        .outline(&state.cache, &project, &path)
-        .await
-        .map_err(CommandError::from)?;
-    Ok(OutlineResult {
-        symbols,
-        source: "ctags".to_string(),
-        message: Some(format!(
-            "LSP 不可用（{}），当前显示 ctags 文本符号。",
-            lsp_error.unwrap_or_default()
-        )),
-    })
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn search_symbols(
-    project_id: String,
-    query: String,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<SymbolSearchResult, CommandError> {
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    let Some(ctags) = state.tools.ctags.clone() else {
-        return Ok(SymbolSearchResult {
-            symbols: Vec::new(),
-            indexing: false,
-            message: Some("未找到 universal-ctags，符号搜索不可用。".to_string()),
-        });
-    };
-    state
-        .symbols
-        .ensure_project_index(app, state.cache.clone(), ctags, project.clone())
-        .await
-        .map_err(CommandError::from)?;
-    state
-        .symbols
-        .search(&state.cache, &project, &query)
-        .await
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn find_definitions(
-    project_id: String,
-    path: String,
-    position: TextPosition,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<NavigationResult, CommandError> {
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    let projects = state.cache.projects().await.map_err(CommandError::from)?;
-    let lsp_error = match state
-        .lsp
-        .definition(&app, &projects, &project, &path, position)
-        .await
-    {
-        Ok(result) => return Ok(result),
-        Err(error) => error.message(),
-    };
-    let Some(ctags) = state.tools.ctags.clone() else {
-        return Ok(NavigationResult {
-            locations: Vec::new(),
-            source: "ctags".to_string(),
-            message: Some("没有可用的 LSP 或 universal-ctags，无法定位定义。".to_string()),
-        });
-    };
-    state
-        .symbols
-        .ensure_project_index(app, state.cache.clone(), ctags, project.clone())
-        .await
-        .map_err(CommandError::from)?;
-    let locations = state
-        .symbols
-        .definition_candidates(&state.cache, &project, position, &path)
-        .await
-        .map_err(CommandError::from)?;
-    let message = if locations.is_empty() {
-        Some(format!(
-            "LSP 不可用（{lsp_error}）；ctags 也未找到该位置的定义候选。"
-        ))
-    } else {
-        Some(format!(
-            "LSP 不可用（{lsp_error}），以下为 ctags 文本定义候选。"
-        ))
-    };
-    Ok(NavigationResult {
-        locations,
-        source: "ctags".to_string(),
-        message,
-    })
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn find_references(
-    project_id: String,
-    path: String,
-    position: TextPosition,
-    include_declaration: Option<bool>,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<NavigationResult, CommandError> {
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    let projects = state.cache.projects().await.map_err(CommandError::from)?;
-    match state
-        .lsp
-        .references(
-            &app,
-            &projects,
-            &project,
-            &path,
-            position,
-            include_declaration.unwrap_or(true),
-        )
-        .await
-    {
-        Ok(result) => Ok(result),
-        Err(error) => Ok(NavigationResult {
-            locations: Vec::new(),
-            source: "lsp".to_string(),
-            message: Some(format!(
-                "无法精确查找引用：{}。Gaze 不会用文本匹配伪造语义引用。",
-                error.message()
-            )),
-        }),
-    }
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn find_implementations(
-    project_id: String,
-    path: String,
-    position: TextPosition,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<NavigationResult, CommandError> {
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    let projects = state.cache.projects().await.map_err(CommandError::from)?;
-    match state
-        .lsp
-        .implementations(&app, &projects, &project, &path, position)
-        .await
-    {
-        Ok(result) => Ok(result),
-        Err(error) => Ok(NavigationResult {
-            locations: Vec::new(),
-            source: "lsp".to_string(),
-            message: Some(format!("无法查找实现：{}。", error.message())),
-        }),
-    }
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn lsp_code_actions(
-    project_id: String,
-    path: String,
-    content: String,
-    range: lsp::LspRange,
-    kinds: Vec<String>,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<lsp::CodeActionResult, CommandError> {
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    state
-        .lsp
-        .code_actions(&app, &project, &path, &content, range, &kinds)
-        .await
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn lsp_resolve_code_action(
-    project_id: String,
-    path: String,
-    content: String,
-    resolve: lsp::CodeActionResolve,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<Option<lsp::CodeAction>, CommandError> {
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    state
-        .lsp
-        .resolve_code_action(&app, &project, &path, &content, resolve)
-        .await
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn lsp_editor_revision_matches(
-    project_id: String,
-    path: String,
-    content: String,
-    revision: lsp::DocumentRevision,
-    state: State<'_, AppState>,
-) -> Result<bool, CommandError> {
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    state
-        .lsp
-        .editor_revision_matches(&project, &path, &content, &revision)
-        .await
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn lsp_signature_help(
-    project_id: String,
-    path: String,
-    content: String,
-    position: TextPosition,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<Option<lsp::SignatureHelp>, CommandError> {
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    state
-        .lsp
-        .signature_help(&app, &project, &path, &content, position)
-        .await
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn lsp_format(
-    project_id: String,
-    path: String,
-    content: String,
-    range: Option<lsp::LspRange>,
-    options: lsp::FormattingOptions,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<lsp::FormatResult, CommandError> {
-    let project = state
-        .project(&project_id)
-        .await
-        .map_err(CommandError::from)?;
-    state
-        .lsp
-        .format(&app, &project, &path, &content, range, options)
-        .await
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn start_search(
-    request_id: String,
-    query: String,
-    options: models::SearchOptions,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    let projects = state.cache.projects().await.map_err(CommandError::from)?;
-    state
-        .search_service
-        .start(
-            app,
-            state.tools.clone(),
-            projects,
-            request_id,
-            query,
-            options,
-        )
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-fn continue_search(request_id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
-    state.search_service.resume(&request_id);
-    Ok(())
-}
-
-#[tauri::command(rename_all = "camelCase")]
-fn cancel_search(request_id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
-    state.search_service.cancel(&request_id);
-    Ok(())
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn create_terminal(
-    session_id: String,
-    project_id: Option<String>,
-    cols: u16,
-    rows: u16,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<TerminalSessionInfo, CommandError> {
-    let cwd = match project_id.as_deref() {
-        Some(id) => PathBuf::from(state.project(id).await.map_err(CommandError::from)?.root),
-        None => app.path().home_dir().map_err(|error| {
-            CommandError::from(GazeError::Message(format!("无法获取用户主目录：{error}")))
-        })?,
-    };
-    state
-        .terminal
-        .create(session_id, project_id, cwd, cols, rows, move |event| {
-            let _ = app.emit("gaze://terminal", event);
-        })
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-async fn write_terminal(
-    session_id: String,
-    data: String,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    state
-        .terminal
-        .write(&session_id, data.as_bytes())
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-fn resize_terminal(
-    session_id: String,
-    cols: u16,
-    rows: u16,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    state
-        .terminal
-        .resize(&session_id, cols, rows)
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-fn close_terminal(session_id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
-    state
-        .terminal
-        .close(&session_id)
-        .map_err(CommandError::from)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-fn get_capabilities(state: State<'_, AppState>) -> Result<ToolCapabilities, CommandError> {
-    Ok(state.tools.capabilities())
-}
-
 pub fn is_plugin_worker() -> bool {
     std::env::args_os()
         .nth(1)
@@ -1588,13 +372,13 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            bootstrap_workspace,
+            commands::workspace::bootstrap_workspace,
             native_menu::sync_menu_state,
-            import_projects,
-            remove_project,
-            set_active_project,
-            set_theme,
-            save_settings,
+            commands::workspace::import_projects,
+            commands::workspace::remove_project,
+            commands::workspace::set_active_project,
+            commands::workspace::set_theme,
+            commands::workspace::save_settings,
             plugins::list_plugins,
             plugins::install_plugin,
             plugins::set_plugin_enabled,
@@ -1604,61 +388,61 @@ pub fn run() {
             ai_completion::request_ai_completion,
             ai_completion::cancel_ai_completion,
             ai_completion::test_ai_completion,
-            list_directory,
-            create_entry,
-            move_entry,
-            trash_entry,
-            has_file_clipboard,
-            read_editor_clipboard,
-            write_editor_clipboard,
-            copy_entry,
-            paste_entries,
-            copy_dropped_files,
-            open_external_files,
-            close_external_file,
-            take_pending_files,
-            copy_entry_path,
-            reveal_entry,
-            read_file,
-            read_recovery,
-            write_recovery,
-            delete_recovery,
-            resolve_markdown_link,
-            open_external_url,
-            write_file,
-            sync_document,
-            get_python_environment,
-            list_python_environments,
-            set_python_environment,
-            complete_code,
-            resolve_completion,
-            hover_code,
-            search_paths,
-            complete_paths,
-            path_index_status,
-            symbol_index_status,
-            get_outline,
-            search_symbols,
-            find_definitions,
-            find_references,
-            find_implementations,
-            lsp_code_actions,
-            lsp_resolve_code_action,
-            lsp_editor_revision_matches,
-            lsp_signature_help,
-            lsp_format,
-            start_search,
-            continue_search,
-            cancel_search,
+            commands::files::list_directory,
+            commands::files::create_entry,
+            commands::files::move_entry,
+            commands::files::trash_entry,
+            commands::files::has_file_clipboard,
+            commands::files::read_editor_clipboard,
+            commands::files::write_editor_clipboard,
+            commands::files::copy_entry,
+            commands::files::paste_entries,
+            commands::files::copy_dropped_files,
+            commands::files::open_external_files,
+            commands::files::close_external_file,
+            commands::files::take_pending_files,
+            commands::files::copy_entry_path,
+            commands::files::reveal_entry,
+            commands::files::read_file,
+            commands::files::read_recovery,
+            commands::files::write_recovery,
+            commands::files::delete_recovery,
+            commands::files::resolve_markdown_link,
+            commands::files::open_external_url,
+            commands::files::write_file,
+            commands::lsp::sync_document,
+            commands::lsp::get_python_environment,
+            commands::lsp::list_python_environments,
+            commands::lsp::set_python_environment,
+            commands::lsp::complete_code,
+            commands::lsp::resolve_completion,
+            commands::lsp::hover_code,
+            commands::search::search_paths,
+            commands::search::complete_paths,
+            commands::search::path_index_status,
+            commands::search::symbol_index_status,
+            commands::search::get_outline,
+            commands::search::search_symbols,
+            commands::search::find_definitions,
+            commands::search::find_references,
+            commands::search::find_implementations,
+            commands::lsp::lsp_code_actions,
+            commands::lsp::lsp_resolve_code_action,
+            commands::lsp::lsp_editor_revision_matches,
+            commands::lsp::lsp_signature_help,
+            commands::lsp::lsp_format,
+            commands::search::start_search,
+            commands::search::continue_search,
+            commands::search::cancel_search,
             replace::preview_replace,
             replace::cancel_replace_preview,
             replace::apply_replace,
             replace::undo_replace,
-            create_terminal,
-            write_terminal,
-            resize_terminal,
-            close_terminal,
-            get_capabilities,
+            commands::terminal::create_terminal,
+            commands::terminal::write_terminal,
+            commands::terminal::resize_terminal,
+            commands::terminal::close_terminal,
+            commands::workspace::get_capabilities,
             git_workspace::git_context,
             git_workspace::summary::refresh_repository,
             git_workspace::working_tree::get_status,
@@ -1712,7 +496,7 @@ pub fn run() {
             app_handle.state::<git_workspace::AppState>().stop();
             state.watchers.stop_all();
             state.search_service.cancel_all();
-            state.replace_previews.cancel_all();
+            state.replace.replace_previews.cancel_all();
             state.terminal.close_all();
             let lsp = Arc::clone(&state.lsp);
             tauri::async_runtime::block_on(async move {

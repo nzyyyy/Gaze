@@ -114,6 +114,15 @@ impl Default for Preferences {
     }
 }
 
+pub(crate) async fn read(cache: &Cache) -> GazeResult<Preferences> {
+    Ok(cache
+        .setting("preferences")
+        .await?
+        .and_then(|value| Preferences::from_stored(&value).ok())
+        .filter(|value| value.validate().is_ok())
+        .unwrap_or_default())
+}
+
 impl Preferences {
     pub fn from_stored(raw: &str) -> GazeResult<Self> {
         let mut value: serde_json::Value = serde_json::from_str(raw)?;

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use reqwest::{Client, StatusCode, Url};
@@ -10,10 +10,13 @@ use serde_json::{json, Value};
 use tauri::{State, WebviewWindow};
 use tokio_util::sync::CancellationToken;
 
+use crate::cache::Cache;
 use crate::error::{CommandError, GazeError, GazeResult};
+use crate::external_files::ExternalFiles;
+use crate::lsp::LspManager;
 use crate::models::{Project, TextPosition};
 use crate::path_index::{is_ignored, IgnoreCache};
-use crate::AppState;
+use crate::preferences;
 
 const CONTEXT_BUDGET: Duration = Duration::from_millis(80);
 const MANUAL_CONTEXT_BUDGET: Duration = Duration::from_millis(400);
@@ -656,16 +659,38 @@ async fn complete_http(
     }
 }
 
-async fn run_request(state: &AppState, request: &Request) -> Result<Option<String>, RequestError> {
-    let prefs = state
-        .read_preferences()
+async fn file_project(
+    cache: &Cache,
+    external_files: &ExternalFiles,
+    project_id: &str,
+    path: &str,
+) -> GazeResult<Project> {
+    if project_id.starts_with("external:") {
+        external_files.project(project_id, path)
+    } else {
+        cache
+            .projects()
+            .await?
+            .into_iter()
+            .find(|project| project.id == project_id)
+            .ok_or_else(|| GazeError::NotFound("项目已从工作区移除。".to_string()))
+    }
+}
+
+async fn run_request(
+    completion: &Completion,
+    cache: &Cache,
+    external_files: &ExternalFiles,
+    lsp: &LspManager,
+    request: &Request,
+) -> Result<Option<String>, RequestError> {
+    let prefs = preferences::read(cache)
         .await
         .map_err(|_| Failure::Unavailable)?;
     if !prefs.ai_completion_enabled {
         return Ok(None);
     }
-    state
-        .ai_completion
+    completion
         .cooldown
         .lock()
         .map_err(|_| Failure::Unavailable)?
@@ -675,8 +700,7 @@ async fn run_request(state: &AppState, request: &Request) -> Result<Option<Strin
     if !valid_key(&config.api_key) {
         return Err(Failure::Configuration.into());
     }
-    let Some(project) = state
-        .file_project(&request.project_id, &request.path)
+    let Some(project) = file_project(cache, external_files, &request.project_id, &request.path)
         .await
         .ok()
     else {
@@ -713,7 +737,7 @@ async fn run_request(state: &AppState, request: &Request) -> Result<Option<Strin
             } else {
                 CONTEXT_BUDGET
             },
-            state.lsp.inline_declarations(
+            lsp.inline_declarations(
                 &project,
                 &request.path,
                 request.cursor,
@@ -741,12 +765,12 @@ async fn run_request(state: &AppState, request: &Request) -> Result<Option<Strin
         "related": context,
     });
     complete_http(
-        state.ai_completion.http_client()?,
+        completion.http_client()?,
         &config,
         &endpoint,
         &input,
         &request.suffix,
-        &state.ai_completion.hints,
+        &completion.hints,
     )
     .await
 }
@@ -754,14 +778,32 @@ async fn run_request(state: &AppState, request: &Request) -> Result<Option<Strin
 #[tauri::command]
 pub async fn request_ai_completion(
     window: WebviewWindow,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<Completion>>,
+    cache: State<'_, Cache>,
+    external_files: State<'_, Arc<ExternalFiles>>,
+    lsp: State<'_, Arc<LspManager>>,
     request: Request,
 ) -> Result<Reply, CommandError> {
-    Ok(request_completion(&state, window.label(), request).await)
+    Ok(request_completion(
+        &state,
+        &cache,
+        &external_files,
+        &lsp,
+        window.label(),
+        request,
+    )
+    .await)
 }
 
-async fn request_completion(state: &AppState, window: &str, request: Request) -> Reply {
-    let service = &state.ai_completion;
+async fn request_completion(
+    completion: &Completion,
+    cache: &Cache,
+    external_files: &ExternalFiles,
+    lsp: &LspManager,
+    window: &str,
+    request: Request,
+) -> Reply {
+    let service = completion;
     let Some(token) = service.start(window, request.id) else {
         return Reply::Empty;
     };
@@ -771,7 +813,13 @@ async fn request_completion(state: &AppState, window: &str, request: Request) ->
     } else {
         AUTO_DEADLINE
     };
-    let Some(result) = within_deadline(&token, deadline, run_request(state, &request)).await else {
+    let Some(result) = within_deadline(
+        &token,
+        deadline,
+        run_request(completion, cache, external_files, lsp, &request),
+    )
+    .await
+    else {
         return Reply::Empty;
     };
     // Finish and record against the same window generation that produced the result.
@@ -820,12 +868,15 @@ async fn within_deadline(
 }
 
 #[tauri::command]
-pub fn cancel_ai_completion(window: WebviewWindow, state: State<'_, AppState>, id: u64) {
-    state.ai_completion.stop(window.label(), id);
+pub fn cancel_ai_completion(window: WebviewWindow, state: State<'_, Arc<Completion>>, id: u64) {
+    state.stop(window.label(), id);
 }
 
 #[tauri::command]
-pub async fn test_ai_completion(state: State<'_, AppState>, config: Config) -> Result<(), Failure> {
+pub async fn test_ai_completion(
+    state: State<'_, Arc<Completion>>,
+    config: Config,
+) -> Result<(), Failure> {
     let endpoint = config.endpoint().ok_or(Failure::Configuration)?;
     if !valid_key(&config.api_key) {
         return Err(Failure::Configuration);
@@ -833,19 +884,12 @@ pub async fn test_ai_completion(state: State<'_, AppState>, config: Config) -> R
     let body =
         json!({"language": "Python", "prefix": "def double(x):\n    return x * ", "suffix": "\n"});
     tokio::time::timeout(MANUAL_DEADLINE, async {
-        let client = state.ai_completion.http_client().map_err(|e| e.kind)?;
-        complete_http(
-            client,
-            &config,
-            &endpoint,
-            &body,
-            "\n",
-            &state.ai_completion.hints,
-        )
-        .await
-        .map_err(|e| e.kind)?
-        .map(|_| ())
-        .ok_or(Failure::InvalidResponse)
+        let client = state.http_client().map_err(|e| e.kind)?;
+        complete_http(client, &config, &endpoint, &body, "\n", &state.hints)
+            .await
+            .map_err(|e| e.kind)?
+            .map(|_| ())
+            .ok_or(Failure::InvalidResponse)
     })
     .await
     .unwrap_or(Err(Failure::Timeout))
