@@ -8,10 +8,10 @@ import { ChevronDown, Plus, Terminal as TerminalIcon, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 
-import { api } from "../../lib/api";
-import type { ColorScheme } from "../../lib/colorSchemes";
-import { LAYOUT_CHANGE_EVENT, readLayout, saveLayout } from "../../lib/layout";
-import { DEFAULT_PREFERENCES, type Preferences } from "../../lib/preferences";
+import { api } from "../../lib/platform/api";
+import type { ColorScheme } from "../../lib/settings/colorSchemes";
+import { LAYOUT_CHANGE_EVENT, readLayout, saveLayout } from "../../lib/settings/layout";
+import { DEFAULT_PREFERENCES, type Preferences } from "../../lib/settings/preferences";
 import {
   folderName,
   nextTerminalTitle,

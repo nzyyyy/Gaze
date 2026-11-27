@@ -11,8 +11,8 @@ import { isolateHistory } from "@codemirror/commands";
 import { ensureSyntaxTree, language } from "@codemirror/language";
 import type { EditorState } from "@codemirror/state";
 import { ViewPlugin } from "@codemirror/view";
-import { api } from "../lib/api";
-import { completionCompositionKeys } from "../lib/completion";
+import { api } from "../lib/platform/api";
+import { completionCompositionKeys } from "../lib/editor/completion";
 
 const pathCharacters = /[\\\x00-\x1f\x7f]/;
 const urlStart = /^(?:\/\/|[a-z][a-z\d+.-]*:)/i;

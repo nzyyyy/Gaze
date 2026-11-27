@@ -49,7 +49,7 @@ const gitApiMock = vi.hoisted(() => ({
   onRepositoryChange: vi.fn().mockResolvedValue(() => {}),
 }));
 
-vi.mock("./lib/api", () => ({ api: apiMock }));
+vi.mock("./lib/platform/api", () => ({ api: apiMock }));
 vi.mock("./git/api", () => ({ gitApi: gitApiMock }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 vi.mock("./git/GitWorkspace", () => ({ default: () => null }));
@@ -63,8 +63,8 @@ vi.mock("./plugins/mermaid/render", () => ({
 import App from "./App";
 import { gitApi } from "./git/api";
 import type { GitContext } from "./git/models";
-import { DEFAULT_FONT_SETTINGS, fontStack } from "./lib/fonts";
-import { DEFAULT_PREFERENCES } from "./lib/preferences";
+import { DEFAULT_FONT_SETTINGS, fontStack } from "./lib/settings/fonts";
+import { DEFAULT_PREFERENCES } from "./lib/settings/preferences";
 
 describe("App", () => {
   beforeEach(() => {

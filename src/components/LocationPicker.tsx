@@ -4,7 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { CornerDownLeft, GitFork, X } from "lucide-react";
 
 import type { NavigationResult, Project, SymbolLocation } from "../lib/types";
-import { useModalFocus } from "../lib/useModalFocus";
+import { useModalFocus } from "../lib/ui/useModalFocus";
 import { basename, parentPath } from "../lib/utils";
 import { FileIcon } from "./FileIcon";
 import "./LocationPicker.css";

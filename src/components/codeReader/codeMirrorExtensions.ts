@@ -49,15 +49,15 @@ import {
 import { gitChangeGutter } from "../../git/editorChanges";
 import type { ChangeBlock } from "../../git/lineDiff";
 import { t } from "../../lib/i18n";
-import { columnSelection } from "../../lib/columnSelection";
-import { editorCommands, matchSelection } from "../../lib/editorCommands";
-import { definitionLink } from "../../lib/definitionLink";
-import { detectIndentation } from "../../lib/indentation";
-import { indentDoubleClick, indentGuides } from "../../lib/indentGuides";
-import { matchLanguage } from "../../lib/language";
-import { DEFAULT_PREFERENCES, type Preferences } from "../../lib/preferences";
-import { rainbowBrackets } from "../../lib/rainbowBrackets";
-import { stickyScroll, syntaxSelection } from "../../lib/readingTools";
+import { columnSelection } from "../../lib/editor/columnSelection";
+import { editorCommands, matchSelection } from "../../lib/editor/editorCommands";
+import { definitionLink } from "../../lib/editor/definitionLink";
+import { detectIndentation } from "../../lib/editor/indentation";
+import { indentDoubleClick, indentGuides } from "../../lib/editor/indentGuides";
+import { matchLanguage } from "../../lib/editor/language";
+import { DEFAULT_PREFERENCES, type Preferences } from "../../lib/settings/preferences";
+import { rainbowBrackets } from "../../lib/editor/rainbowBrackets";
+import { stickyScroll, syntaxSelection } from "../../lib/editor/readingTools";
 import { resolveShortcuts, shortcutKeymap, type NavigationTarget } from "../../lib/shortcuts";
 import type { NavigationResult, ResolvedTheme, TextFile, TextPosition } from "../../lib/types";
 

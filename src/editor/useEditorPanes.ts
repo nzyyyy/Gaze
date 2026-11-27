@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState, type RefObject } from "react";
 
 import { t } from "../lib/i18n";
-import type { WorkspaceSession } from "../lib/session";
+import type { WorkspaceSession } from "../lib/workspace/session";
 import type { EditorPane } from "../lib/types";
 import type { CodeReaderHandle, EditorTab } from "./types";
 

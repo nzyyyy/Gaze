@@ -17,7 +17,7 @@ import {
   type ViewUpdate,
 } from "@codemirror/view";
 import { aiCompletionApi as api } from "./ai-completion-api";
-import { pendingLspVersion, synchronizedLspVersion } from "../lib/diagnostics";
+import { pendingLspVersion, synchronizedLspVersion } from "../lib/editor/diagnostics";
 import { aiCompletionError } from "./ai-completion-config";
 
 const LSP_WAIT = 400;

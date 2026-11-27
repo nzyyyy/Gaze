@@ -1,7 +1,7 @@
 import { t, useLanguage } from "../lib/i18n";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
-import { LAYOUT_CHANGE_EVENT, readLayout, saveLayout } from "../lib/layout";
+import { LAYOUT_CHANGE_EVENT, readLayout, saveLayout } from "../lib/settings/layout";
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 600;

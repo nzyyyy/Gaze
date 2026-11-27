@@ -1,5 +1,5 @@
 import { t } from "../../lib/i18n";
-import { PALETTES, type ColorScheme } from "../../lib/colorSchemes";
+import { PALETTES, type ColorScheme } from "../../lib/settings/colorSchemes";
 
 export interface TerminalTab {
   id: string;

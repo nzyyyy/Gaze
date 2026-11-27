@@ -1,6 +1,6 @@
 import { t, useLanguage } from "../lib/i18n";
 import { useEffect, useState } from "react";
-import { api } from "../lib/api";
+import { api } from "../lib/platform/api";
 import { ContextMenu, type MenuTarget } from "./ContextMenu";
 import type { DirEntry, Project } from "../lib/types";
 import { errorMessage, parentPath } from "../lib/utils";

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { t, useLanguage } from "../lib/i18n";
-import type { RecentFile } from "../lib/session";
+import type { RecentFile } from "../lib/workspace/session";
 import "./CodeLocationPreview.css";
 
 export type ReadPreviewText = (projectId: string, path: string) => Promise<string | null>;

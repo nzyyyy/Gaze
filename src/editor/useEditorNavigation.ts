@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState, type RefObject } from "react";
 
 import { t } from "../lib/i18n";
-import type { RecentFile } from "../lib/session";
+import type { RecentFile } from "../lib/workspace/session";
 import type { EditorPane, Project } from "../lib/types";
 import { basename, tabKey } from "../lib/utils";
 import { paneOf } from "./useEditorPanes";

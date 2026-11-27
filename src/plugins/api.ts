@@ -1,4 +1,4 @@
-import { invoke } from "../lib/ipc";
+import { invoke } from "../lib/platform/ipc";
 
 export type PluginContribution =
   { kind: "command"; id: string; title: string } | { kind: "markdown"; language: string };

@@ -3,9 +3,9 @@ import { EditorState, Prec, type Compartment } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 
 import type { SaveResult } from "../../editor/types";
-import { api, type RecoveryRecord } from "../../lib/api";
+import { api, type RecoveryRecord } from "../../lib/platform/api";
 import { t } from "../../lib/i18n";
-import type { Preferences } from "../../lib/preferences";
+import type { Preferences } from "../../lib/settings/preferences";
 import type { TextFile } from "../../lib/types";
 import { errorCode, errorMessage } from "../../lib/utils";
 import { normalizeDocumentText, type LoadedState, type PauseReason } from "./documentModel";

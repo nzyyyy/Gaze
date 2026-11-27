@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, Folder, LoaderCircle } from "lucide-react";
 
-import { api } from "../lib/api";
+import { api } from "../lib/platform/api";
 import type { DirEntry, Project } from "../lib/types";
 import { errorMessage, parentPath } from "../lib/utils";
 import "./FileOperationDialog.css";

@@ -1,10 +1,10 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
-import { DEFAULT_FONT_SETTINGS } from "../lib/fonts";
-import { DEFAULT_COLOR_SCHEMES } from "../lib/colorSchemes";
-import { DEFAULT_PREFERENCES, type AppSettings } from "../lib/preferences";
-import { DEFAULT_LAYOUT } from "../lib/layout";
+import { DEFAULT_FONT_SETTINGS } from "../lib/settings/fonts";
+import { DEFAULT_COLOR_SCHEMES } from "../lib/settings/colorSchemes";
+import { DEFAULT_PREFERENCES, type AppSettings } from "../lib/settings/preferences";
+import { DEFAULT_LAYOUT } from "../lib/settings/layout";
 import { SettingsDialog } from "./SettingsDialog";
 import { aiCompletionApi } from "../plugins/ai-completion-api";
 

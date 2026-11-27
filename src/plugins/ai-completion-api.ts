@@ -1,4 +1,4 @@
-import { invoke } from "../lib/ipc";
+import { invoke } from "../lib/platform/ipc";
 import type {
   AiCompletionConfig,
   AiCompletionReply,

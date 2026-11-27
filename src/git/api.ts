@@ -1,4 +1,4 @@
-import { invoke, listen } from "../lib/ipc";
+import { invoke, listen } from "../lib/platform/ipc";
 import type * as Git from "./models";
 import type { OperationRequest, SessionLogLine } from "./models";
 

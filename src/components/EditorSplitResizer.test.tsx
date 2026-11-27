@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { saveLayout } from "../lib/layout";
+import { saveLayout } from "../lib/settings/layout";
 import { EditorSplitResizer } from "./EditorSplitResizer";
 
 afterEach(() => {

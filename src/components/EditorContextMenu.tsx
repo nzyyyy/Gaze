@@ -2,10 +2,10 @@ import { foldable, foldCode, foldedRanges, unfoldCode } from "@codemirror/langua
 import type { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { flushSync } from "react-dom";
-import { columnMode, deleteEditorSelection, selectedEditorText } from "../lib/columnSelection";
-import { pasteEditorText, readEditorClipboard, writeEditorClipboard } from "../lib/editorClipboard";
-import { editorCommands } from "../lib/editorCommands";
-import { runEditorLanguageAction } from "../lib/editorLanguageTools";
+import { columnMode, deleteEditorSelection, selectedEditorText } from "../lib/editor/columnSelection";
+import { pasteEditorText, readEditorClipboard, writeEditorClipboard } from "../lib/editor/editorClipboard";
+import { editorCommands } from "../lib/editor/editorCommands";
+import { runEditorLanguageAction } from "../lib/editor/editorLanguageTools";
 import { t } from "../lib/i18n";
 import {
   shortcutCommandLabel,

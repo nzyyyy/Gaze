@@ -9,7 +9,7 @@ import {
 } from "../api";
 import { useI18n } from "../i18n";
 import { errorMessage, shortOid, type RunOperation } from "../types";
-import { useModalDialog } from "../../lib/useModalDialog";
+import { useModalDialog } from "../../lib/ui/useModalDialog";
 
 const ACTIONS: RebaseAction[] = ["pick", "reword", "squash", "fixup", "drop"];
 

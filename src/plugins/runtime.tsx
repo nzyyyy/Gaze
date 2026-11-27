@@ -10,13 +10,13 @@ import {
   type ReactNode,
 } from "react";
 import type { EditorState } from "@codemirror/state";
-import type { CompletionContribution } from "../lib/completion";
-import { isJavaScriptOrTypeScriptFile, isPythonFile } from "../lib/language";
-import { minimap } from "../lib/minimap";
+import type { CompletionContribution } from "../lib/editor/completion";
+import { isJavaScriptOrTypeScriptFile, isPythonFile } from "../lib/editor/language";
+import { minimap } from "../lib/editor/minimap";
 import { BUILTIN_PLUGINS, type BuiltinPluginKey } from "./builtins";
 import { aiInlineCompletion } from "./ai-completion";
 import { PythonEnvironmentSelect } from "./python/PythonEnvironmentSelect";
-import type { Preferences } from "../lib/preferences";
+import type { Preferences } from "../lib/settings/preferences";
 import { MermaidDiagram } from "./mermaid/MermaidDiagram";
 import { markdownInsert, markdownSlashQuery } from "./markdown-insert";
 import { createPathCompletion } from "./path-completion";

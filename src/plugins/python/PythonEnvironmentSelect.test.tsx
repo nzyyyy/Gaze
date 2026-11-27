@@ -2,12 +2,12 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { beforeEach, expect, it, vi } from "vitest";
-import { api } from "../../lib/api";
+import { api } from "../../lib/platform/api";
 import { setLanguage } from "../../lib/i18n";
 import { PythonEnvironmentSelect } from "./PythonEnvironmentSelect";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
-vi.mock("../../lib/api", () => ({
+vi.mock("../../lib/platform/api", () => ({
   api: {
     getPythonEnvironment: vi.fn(),
     listPythonEnvironments: vi.fn(),

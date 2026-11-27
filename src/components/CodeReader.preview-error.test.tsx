@@ -5,7 +5,7 @@ import { expect, it, vi } from "vitest";
 vi.mock("./MarkdownPreview", () => {
   throw new Error("chunk unavailable");
 });
-vi.mock("../lib/api", () => ({
+vi.mock("../lib/platform/api", () => ({
   api: {
     readRecovery: vi.fn().mockResolvedValue(null),
     writeRecovery: vi.fn().mockResolvedValue(null),

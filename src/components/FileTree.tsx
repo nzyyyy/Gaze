@@ -22,9 +22,9 @@ import {
   Plus,
 } from "lucide-react";
 
-import { api } from "../lib/api";
+import { api } from "../lib/platform/api";
 import { matchShortcut, type ShortcutBindings } from "../lib/shortcuts";
-import type { DirEntry, PasteResult, Project } from "../lib/types";
+import type { DirEntry, PasteResult, Project, TreeRefresh } from "../lib/types";
 import { basename, errorMessage } from "../lib/utils";
 import { parentPath } from "../lib/utils";
 import { FileIcon } from "./FileIcon";
@@ -52,14 +52,6 @@ interface FlatNode {
   project: Project;
   entry?: DirEntry;
   message?: string;
-}
-
-/** Directories the watcher reported as changed, per project. */
-export interface TreeRefresh {
-  /** Increments on every filesystem batch; 0 means nothing has changed yet. */
-  token: number;
-  /** null refreshes every cached listing in the project. */
-  directories: Map<string, string[] | null>;
 }
 
 interface FileTreeProps {

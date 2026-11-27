@@ -2,12 +2,12 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SearchPanel } from "./SearchPanel";
-import { api } from "../lib/api";
-import { DEFAULT_PREFERENCES } from "../lib/preferences";
+import { api } from "../lib/platform/api";
+import { DEFAULT_PREFERENCES } from "../lib/settings/preferences";
 import { setLanguage, t } from "../lib/i18n";
 import type { ReplacePreview } from "../lib/types";
 
-vi.mock("../lib/api", () => ({
+vi.mock("../lib/platform/api", () => ({
   api: {
     onSearchEvent: vi.fn().mockResolvedValue(() => undefined),
     startSearch: vi.fn().mockResolvedValue(undefined),

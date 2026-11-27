@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { LAYOUT_CHANGE_EVENT, readLayout, saveLayout } from "../lib/layout";
+import { LAYOUT_CHANGE_EVENT, readLayout, saveLayout } from "../lib/settings/layout";
 import { SidebarResizer } from "./SidebarResizer";
 
 export interface SidebarLayoutHandle {

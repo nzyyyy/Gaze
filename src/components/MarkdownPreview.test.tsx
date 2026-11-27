@@ -7,7 +7,7 @@ const apiMock = vi.hoisted(() => ({
   resolveMarkdownLink: vi.fn(),
   openExternalUrl: vi.fn(),
 }));
-vi.mock("../lib/api", () => ({ api: apiMock }));
+vi.mock("../lib/platform/api", () => ({ api: apiMock }));
 vi.mock("../plugins/mermaid/render", () => ({
   renderMermaid: vi.fn(
     async (code: string) =>
@@ -24,7 +24,7 @@ import { renderMermaid } from "../plugins/mermaid/render";
 import MarkdownPreview from "./MarkdownPreview";
 import { pluginApi, type InstalledPlugin } from "../plugins/api";
 import { PluginProvider } from "../plugins/runtime";
-import { DEFAULT_PREFERENCES } from "../lib/preferences";
+import { DEFAULT_PREFERENCES } from "../lib/settings/preferences";
 import { ExternalPlugins } from "./ExternalPlugins";
 
 const props = {

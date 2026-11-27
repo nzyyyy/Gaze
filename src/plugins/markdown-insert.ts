@@ -10,7 +10,7 @@ import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorSelection, Prec, type EditorState } from "@codemirror/state";
 import { EditorView, keymap, type Command } from "@codemirror/view";
 import { t } from "../lib/i18n";
-import { completionCompositionKeys, type CompletionContribution } from "../lib/completion";
+import { completionCompositionKeys, type CompletionContribution } from "../lib/editor/completion";
 
 interface InsertItem {
   name: string;

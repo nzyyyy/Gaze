@@ -1,7 +1,7 @@
 import { t as tr, useLanguage } from "../../lib/i18n";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { LAYOUT_CHANGE_EVENT, readLayout, saveLayout } from "../../lib/layout";
+import { LAYOUT_CHANGE_EVENT, readLayout, saveLayout } from "../../lib/settings/layout";
 import type { SessionLogLine } from "../models";
 
 const MIN_HEIGHT = 96;

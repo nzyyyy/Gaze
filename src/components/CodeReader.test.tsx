@@ -28,7 +28,7 @@ const gitApiMock = vi.hoisted(() => ({
   onRepositoryChange: vi.fn(),
 }));
 
-vi.mock("../lib/api", () => ({ api: apiMock }));
+vi.mock("../lib/platform/api", () => ({ api: apiMock }));
 vi.mock("../git/api", () => ({ gitApi: gitApiMock }));
 vi.mock("../plugins/ai-completion-api", () => ({
   aiCompletionApi: {
@@ -62,12 +62,12 @@ import { CodeReader } from "./CodeReader";
 import type { CodeReaderHandle, EditorTab, SaveResult } from "../editor/types";
 import type { EditorDiffSnapshot } from "../git/EditorDiff";
 import type { TextFile } from "../lib/types";
-import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
-import type { RecoveryRecord } from "../lib/api";
+import { DEFAULT_PREFERENCES, type Preferences } from "../lib/settings/preferences";
+import type { RecoveryRecord } from "../lib/platform/api";
 import type { NavigationTarget } from "../lib/shortcuts";
 import { setLanguage } from "../lib/i18n";
 import { EditorSelection, EditorState, StateEffect } from "@codemirror/state";
-import { columnMode, selectedEditorText } from "../lib/columnSelection";
+import { columnMode, selectedEditorText } from "../lib/editor/columnSelection";
 import { pluginApi } from "../plugins/api";
 import { PluginProvider } from "../plugins/runtime";
 

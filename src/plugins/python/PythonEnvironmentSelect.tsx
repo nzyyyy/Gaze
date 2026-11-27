@@ -1,6 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useId, useState } from "react";
-import { api } from "../../lib/api";
+import { api } from "../../lib/platform/api";
 import { t, useLanguage } from "../../lib/i18n";
 import type { PythonEnvironment, PythonEnvironmentStatus } from "../../lib/types";
 import { errorMessage } from "../../lib/utils";

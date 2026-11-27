@@ -3,13 +3,13 @@ import { history, undo } from "@codemirror/commands";
 import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { api } from "../lib/api";
-import { codeCompletion } from "../lib/completion";
+import { api } from "../lib/platform/api";
+import { codeCompletion } from "../lib/editor/completion";
 import { aiInlineCompletion, completionContext } from "./ai-completion";
 import { aiCompletionApi as aiApi } from "./ai-completion-api";
 import type { AiCompletionReply } from "./ai-completion-config";
 
-vi.mock("../lib/api", () => ({
+vi.mock("../lib/platform/api", () => ({
   api: {
     completeCode: vi.fn(),
     resolveCompletion: vi.fn(),

@@ -4,7 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlertCircle, Boxes, LoaderCircle, Search, Workflow } from "lucide-react";
 
 import type { EditorTab, RevealRequest } from "../editor/types";
-import { api } from "../lib/api";
+import { api } from "../lib/platform/api";
 import type {
   DocumentSymbol,
   OutlineResult,

@@ -3,9 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { resolveShortcuts } from "../lib/shortcuts";
-import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
-import { DEFAULT_FONT_SETTINGS } from "../lib/fonts";
-import { DEFAULT_COLOR_SCHEMES } from "../lib/colorSchemes";
+import { DEFAULT_PREFERENCES, type Preferences } from "../lib/settings/preferences";
+import { DEFAULT_FONT_SETTINGS } from "../lib/settings/fonts";
+import { DEFAULT_COLOR_SCHEMES } from "../lib/settings/colorSchemes";
 import { SettingsDialog } from "./SettingsDialog";
 
 afterEach(() => vi.restoreAllMocks());

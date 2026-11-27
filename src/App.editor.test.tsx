@@ -5,7 +5,7 @@ import { Text } from "@codemirror/state";
 
 import type { FileOperation, FileOperationResult } from "./components/FileOperationDialog";
 import type { DirEntry, EditorStatus, Project } from "./lib/types";
-import type { NativeMenuAction, NativeMenuState } from "./lib/nativeMenu";
+import type { NativeMenuAction, NativeMenuState } from "./lib/platform/nativeMenu";
 import type { PrepareGitOperation } from "./git/editorOperations";
 import type { OperationRequest } from "./git/models";
 import type { EditorDiffSnapshot } from "./git/EditorDiff";
@@ -21,7 +21,7 @@ const nativeMenu = vi.hoisted(() => ({
   action: null as ((action: NativeMenuAction) => Promise<void>) | null,
   error: null as ((error: unknown) => void) | null,
 }));
-vi.mock("./lib/nativeMenu", () => ({
+vi.mock("./lib/platform/nativeMenu", () => ({
   useNativeMenu: (
     state: NativeMenuState,
     action: typeof nativeMenu.action,
@@ -104,7 +104,7 @@ const gitApiMock = vi.hoisted(() => ({
   onRepositoryChange: vi.fn(),
 }));
 
-vi.mock("./lib/api", () => ({ api: apiMock }));
+vi.mock("./lib/platform/api", () => ({ api: apiMock }));
 vi.mock("./git/api", () => ({ api: gitApiMock, gitApi: gitApiMock }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 vi.mock("./components/terminal/TerminalPanel", () => ({
@@ -336,8 +336,8 @@ vi.mock("./components/CodeReader", async () => {
 });
 
 import App from "./App";
-import { DEFAULT_FONT_SETTINGS } from "./lib/fonts";
-import { DEFAULT_PREFERENCES } from "./lib/preferences";
+import { DEFAULT_FONT_SETTINGS } from "./lib/settings/fonts";
+import { DEFAULT_PREFERENCES } from "./lib/settings/preferences";
 import { open } from "@tauri-apps/plugin-dialog";
 
 async function menuAction(action: NativeMenuAction) {

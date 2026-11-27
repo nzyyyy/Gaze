@@ -2,7 +2,7 @@ import { createRef } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { readLayout, saveLayout } from "../lib/layout";
+import { readLayout, saveLayout } from "../lib/settings/layout";
 import { SidebarLayout, type SidebarLayoutHandle } from "./SidebarLayout";
 import { Tooltip } from "./Tooltip";
 

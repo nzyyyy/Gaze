@@ -6,7 +6,7 @@ import { TabBar } from "./TabBar";
 import type { EditorTab } from "../editor/types";
 
 const nativeApi = vi.hoisted(() => ({ copyEntryPath: vi.fn(), revealEntry: vi.fn() }));
-vi.mock("../lib/api", () => ({ api: nativeApi }));
+vi.mock("../lib/platform/api", () => ({ api: nativeApi }));
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();

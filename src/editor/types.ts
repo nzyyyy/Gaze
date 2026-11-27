@@ -1,5 +1,5 @@
-import type { EditorLanguageAction } from "../lib/editorLanguageTools";
-import type { EditorViewState } from "../lib/session";
+import type { EditorLanguageAction } from "../lib/editor/editorLanguageTools";
+import type { EditorViewState } from "../lib/workspace/session";
 import type { EditorPane, PositionEncoding, TextPosition } from "../lib/types";
 
 export interface MarkdownPreviewRequest {

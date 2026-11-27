@@ -2,7 +2,7 @@ import { t, useLanguage } from "../lib/i18n";
 import { AlertCircle, LoaderCircle } from "lucide-react";
 import { useEffect, useId, useRef } from "react";
 
-import { useModalFocus } from "../lib/useModalFocus";
+import { useModalFocus } from "../lib/ui/useModalFocus";
 
 interface UnsavedDialogProps {
   title: string;

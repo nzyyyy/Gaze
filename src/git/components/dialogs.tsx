@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { errorMessage, type DialogSpec, type DialogValue, type Pending } from "../types";
-import { useModalDialog } from "../../lib/useModalDialog";
+import { useModalDialog } from "../../lib/ui/useModalDialog";
 
 export function FormDialog({ spec, onClose }: { spec: DialogSpec; onClose: () => void }) {
   const { t } = useI18n();

@@ -25,6 +25,14 @@ export interface DirectoryListing {
   entries: DirEntry[];
 }
 
+/** Directories the watcher reported as changed, per project. */
+export interface TreeRefresh {
+  /** Increments on every filesystem batch; 0 means nothing has changed yet. */
+  token: number;
+  /** null refreshes every cached listing in the project. */
+  directories: Map<string, string[] | null>;
+}
+
 export interface PasteResult {
   entries: DirEntry[];
   failures: { name: string; message: string }[];

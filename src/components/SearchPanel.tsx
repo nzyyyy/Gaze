@@ -14,9 +14,9 @@ import type {
   ToolCapabilities,
 } from "../lib/types";
 import { tabKey } from "../lib/utils";
-import { useSearch } from "../lib/useSearch";
+import { useSearch } from "../lib/search/useSearch";
 import { errorMessage } from "../lib/utils";
-import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
+import { DEFAULT_PREFERENCES, type Preferences } from "../lib/settings/preferences";
 import "./SearchPanel.css";
 
 interface SearchPanelProps {

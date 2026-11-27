@@ -58,9 +58,9 @@ import { SymbolPanel } from "./components/SymbolPanel";
 import { TerminalPanel } from "./components/terminal/TerminalPanel";
 import { Tooltip } from "./components/Tooltip";
 import { UnsavedDialog } from "./components/UnsavedDialog";
-import { api } from "./lib/api";
-import { DEFAULT_PREFERENCES, type AppSettings, type Preferences } from "./lib/preferences";
-import { useNativeMenu, type NativeMenuAction, type NativeMenuState } from "./lib/nativeMenu";
+import { api } from "./lib/platform/api";
+import { DEFAULT_PREFERENCES, type AppSettings, type Preferences } from "./lib/settings/preferences";
+import { useNativeMenu, type NativeMenuAction, type NativeMenuState } from "./lib/platform/nativeMenu";
 import {
   matchShortcut,
   resolveShortcuts,
@@ -69,17 +69,17 @@ import {
   shortcutLabel,
   type NavigationTarget,
 } from "./lib/shortcuts";
-import { saveLayout } from "./lib/layout";
+import { saveLayout } from "./lib/settings/layout";
 import {
   readSession,
   saveSession,
   RECENT_FILE_LIMIT,
   type RecentFile,
   type WorkspaceSession,
-} from "./lib/session";
-import { colorSchemeVariables, DEFAULT_COLOR_SCHEMES, type ColorSchemes } from "./lib/colorSchemes";
-import { DEFAULT_FONT_SETTINGS, fontStack, type FontSettings } from "./lib/fonts";
-import { isMarkdownFile, isPythonFile } from "./lib/language";
+} from "./lib/workspace/session";
+import { colorSchemeVariables, DEFAULT_COLOR_SCHEMES, type ColorSchemes } from "./lib/settings/colorSchemes";
+import { DEFAULT_FONT_SETTINGS, fontStack, type FontSettings } from "./lib/settings/fonts";
+import { isMarkdownFile, isPythonFile } from "./lib/editor/language";
 import type {
   DirEntry,
   EditorPane,
@@ -92,16 +92,16 @@ import type {
   ToolCapabilities,
   TextPosition,
 } from "./lib/types";
-import type { WorkspaceSnapshot } from "./lib/workspace";
+import type { WorkspaceSnapshot } from "./lib/workspace/workspace";
 import { paneOf, useEditorPanes } from "./editor/useEditorPanes";
 import { useEditorNavigation } from "./editor/useEditorNavigation";
 import { basename, errorMessage, normalizePath, parentPath, tabKey } from "./lib/utils";
-import { fileDropTarget } from "./lib/fileDrop";
-import { useAutoHideScrollbars } from "./lib/useAutoHideScrollbars";
+import { fileDropTarget } from "./lib/workspace/fileDrop";
+import { useAutoHideScrollbars } from "./lib/ui/useAutoHideScrollbars";
 import { useProjectBranch } from "./git/hooks/useProjectBranch";
 import type { EditorDiffSnapshot } from "./git/EditorDiff";
-import { useReplacement } from "./lib/useReplacement";
-import { useFileChanges } from "./lib/useFileChanges";
+import { useReplacement } from "./lib/search/useReplacement";
+import { useFileChanges } from "./lib/workspace/useFileChanges";
 import "./App.css";
 
 type LoadState =

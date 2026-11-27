@@ -9,7 +9,7 @@ import {
   type KeyboardEvent,
 } from "react";
 
-import { api } from "../lib/api";
+import { api } from "../lib/platform/api";
 import { errorMessage } from "../lib/utils";
 import type { EditorTab } from "../editor/types";
 import { ContextMenu, type MenuTarget } from "./ContextMenu";

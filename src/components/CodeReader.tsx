@@ -35,20 +35,20 @@ import type {
   MarkdownPreviewRequest,
   RevealRequest,
 } from "../editor/types";
-import { codeDiagnostics } from "../lib/diagnostics";
-import { isWithinEditorSelection } from "../lib/columnSelection";
-import { writeEditorClipboard } from "../lib/editorClipboard";
-import { autoImportExtension } from "../lib/autoImport";
-import { codeCompletion } from "../lib/completion";
+import { codeDiagnostics } from "../lib/editor/diagnostics";
+import { isWithinEditorSelection } from "../lib/editor/columnSelection";
+import { writeEditorClipboard } from "../lib/editor/editorClipboard";
+import { autoImportExtension } from "../lib/editor/autoImport";
+import { codeCompletion } from "../lib/editor/completion";
 import {
   dismissEditorLanguageTooltip,
   editorLanguageTools,
   runEditorLanguageAction,
-} from "../lib/editorLanguageTools";
-import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
+} from "../lib/editor/editorLanguageTools";
+import { DEFAULT_PREFERENCES, type Preferences } from "../lib/settings/preferences";
 import { resolveShortcuts, type NavigationTarget } from "../lib/shortcuts";
-import type { EditorViewState } from "../lib/session";
-import { isMarkdownFile, matchLanguage } from "../lib/language";
+import type { EditorViewState } from "../lib/workspace/session";
+import { isMarkdownFile, matchLanguage } from "../lib/editor/language";
 import {
   useBuiltinFeature,
   useEditorCompletion,

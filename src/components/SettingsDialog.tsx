@@ -19,8 +19,8 @@ import {
   DEFAULT_COLOR_SCHEMES,
   PALETTES,
   type ColorScheme,
-} from "../lib/colorSchemes";
-import { DEFAULT_FONT_SETTINGS, fontStack, type FontChoice } from "../lib/fonts";
+} from "../lib/settings/colorSchemes";
+import { DEFAULT_FONT_SETTINGS, fontStack, type FontChoice } from "../lib/settings/fonts";
 import { errorMessage } from "../lib/utils";
 import {
   DEFAULT_PREFERENCES,
@@ -30,8 +30,8 @@ import {
   type AppSettings,
   type Preferences,
   type SettingsCategory,
-} from "../lib/preferences";
-import { DEFAULT_LAYOUT, LAYOUT_SIZE_LIMITS, readLayout, type Layout } from "../lib/layout";
+} from "../lib/settings/preferences";
+import { DEFAULT_LAYOUT, LAYOUT_SIZE_LIMITS, readLayout, type Layout } from "../lib/settings/layout";
 import { BUILTIN_PLUGIN_CATEGORIES, type BuiltinPluginCategory } from "../plugins/builtins";
 import { aiCompletionApi } from "../plugins/ai-completion-api";
 import {

@@ -3,12 +3,12 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { FileSearch, LoaderCircle, SearchX } from "lucide-react";
 
-import { api } from "../lib/api";
-import { matchesNavigationQuery, parseFileQuery } from "../lib/navigationSearch";
-import type { RecentFile } from "../lib/session";
+import { api } from "../lib/platform/api";
+import { matchesNavigationQuery, parseFileQuery } from "../lib/search/navigationSearch";
+import type { RecentFile } from "../lib/workspace/session";
 import { shortcutLabel } from "../lib/shortcuts";
 import type { Project, SymbolLocation } from "../lib/types";
-import { useModalFocus } from "../lib/useModalFocus";
+import { useModalFocus } from "../lib/ui/useModalFocus";
 import { basename, errorMessage } from "../lib/utils";
 import { CodeLocationPreview, type ReadPreviewText } from "./CodeLocationPreview";
 import { FileIcon } from "./FileIcon";

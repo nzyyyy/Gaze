@@ -1,5 +1,5 @@
 import { t, useLanguage } from "../lib/i18n";
-import { DEFAULT_PREFERENCES } from "../lib/preferences";
+import { DEFAULT_PREFERENCES } from "../lib/settings/preferences";
 import {
   Children,
   createContext,
@@ -42,7 +42,7 @@ import tsx from "refractor/lang/tsx";
 import typescript from "refractor/lang/typescript";
 import yaml from "refractor/lang/yaml";
 
-import { api } from "../lib/api";
+import { api } from "../lib/platform/api";
 import { errorMessage } from "../lib/utils";
 import type { MarkdownPreviewRequest } from "../editor/types";
 import { useMarkdownRenderers } from "../plugins/runtime";
