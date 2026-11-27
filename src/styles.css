@@ -80,6 +80,14 @@
   --icon-data: #6754a3;
   --icon-shell: #4e7660;
   --icon-folder: #8c7441;
+  --vcs-added: #2a725c;
+  --vcs-modified: #406897;
+  --vcs-deleted: #616161;
+  --vcs-conflict: #a63c31;
+  --vcs-untracked: #993300;
+  --vcs-renamed: #007474;
+  --vcs-ignored: #646871;
+  --vcs-type-changed: #6754a3;
   --radius-small: 4px;
   --radius-control: 8px;
   --radius-panel: 12px;
@@ -140,6 +148,14 @@
   --icon-data: #ae9bdf;
   --icon-shell: #8ab697;
   --icon-folder: #c3a56b;
+  --vcs-added: #71bea4;
+  --vcs-modified: #82a9d5;
+  --vcs-deleted: #a8adb5;
+  --vcs-conflict: #e98f86;
+  --vcs-untracked: #e09a72;
+  --vcs-renamed: #6fbabd;
+  --vcs-ignored: #b2b7c2;
+  --vcs-type-changed: #ae9bdf;
   --overlay-backdrop: rgba(10, 12, 18, 0.4);
   --shadow-panel: 0 16px 48px rgba(0, 0, 0, 0.4);
 }

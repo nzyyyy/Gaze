@@ -888,15 +888,15 @@
 }
 
 .code-minimap-git-added {
-  color: var(--icon-code);
+  color: var(--vcs-added);
 }
 
 .code-minimap-git-modified {
-  color: var(--icon-image);
+  color: var(--vcs-modified);
 }
 
 .code-minimap-git-deleted {
-  color: var(--danger);
+  color: var(--vcs-deleted);
 }
 
 .code-minimap-preview {
@@ -952,15 +952,15 @@
 }
 
 .cm-git-changes .cm-gutterElement.cm-git-line-added {
-  --git-change-color: var(--icon-code);
+  --git-change-color: var(--vcs-added);
 }
 
 .cm-git-changes .cm-gutterElement.cm-git-line-modified {
-  --git-change-color: var(--icon-image);
+  --git-change-color: var(--vcs-modified);
 }
 
 .cm-git-changes .cm-gutterElement.cm-git-line-deleted {
-  --git-change-color: var(--danger);
+  --git-change-color: var(--vcs-deleted);
 }
 
 .cm-git-changes .cm-gutterElement::before {
@@ -1054,15 +1054,15 @@
 }
 
 .git-change-tick-added {
-  background: var(--icon-code);
+  background: var(--vcs-added);
 }
 
 .git-change-tick-modified {
-  background: var(--icon-image);
+  background: var(--vcs-modified);
 }
 
 .git-change-tick-deleted {
-  background: var(--danger);
+  background: var(--vcs-deleted);
 }
 
 .git-change-popover,

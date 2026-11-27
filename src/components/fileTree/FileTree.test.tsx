@@ -742,7 +742,7 @@ describe("FileTree operations", () => {
         "git-modified",
       ),
     );
-    expect(screen.getByText("new.ts").closest('[role="treeitem"]')).toHaveClass("git-added");
+    expect(screen.getByText("new.ts").closest('[role="treeitem"]')).toHaveClass("git-untracked");
     expect(screen.getByText("edit.ts").closest('[role="treeitem"]')).toHaveClass("git-modified");
     expect(screen.getByText("conflict.ts").closest('[role="treeitem"]')).toHaveClass(
       "git-conflict",

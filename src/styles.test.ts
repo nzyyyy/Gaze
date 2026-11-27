@@ -172,3 +172,82 @@ it("keeps the expanded Python environment trigger highlighted", () => {
   expect(expanded.selectorText).toBe(selectors[1]);
   expect(expanded.style.getPropertyValue("border-color")).toBe("var(--accent)");
 });
+
+it("keeps every VCS status readable on editor and file tree backgrounds", () => {
+  const source = readFileSync("src/styles.css", "utf8");
+  const statuses = [
+    "--vcs-added",
+    "--vcs-modified",
+    "--vcs-deleted",
+    "--vcs-conflict",
+    "--vcs-untracked",
+    "--vcs-renamed",
+    "--vcs-ignored",
+    "--vcs-type-changed",
+  ];
+  const luminance = (hex: string) => {
+    const channels = [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255);
+    const [red, green, blue] = channels.map((channel) =>
+      channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
+    );
+    return 0.2126 * red! + 0.7152 * green! + 0.0722 * blue!;
+  };
+  const contrast = (first: string, second: string) => {
+    const a = luminance(first);
+    const b = luminance(second);
+    return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  };
+  const mix = (first: string, second: string, amount: number) =>
+    `#${[1, 3, 5]
+      .map((offset) => {
+        const a = parseInt(first.slice(offset, offset + 2), 16);
+        const b = parseInt(second.slice(offset, offset + 2), 16);
+        return Math.round(a * amount + b * (1 - amount))
+          .toString(16)
+          .padStart(2, "0");
+      })
+      .join("")}`;
+
+  for (const theme of ["light", "dark"] as const) {
+    const selector = theme === "dark" ? ':root[data-theme="dark"] {' : ":root {";
+    const start = source.indexOf(selector);
+    const block = source.slice(start, source.indexOf("\n}", start));
+    const colors = new Map(
+      Array.from(block.matchAll(/(--[\w-]+):\s*(#[0-9a-f]{6});/g), (match) => [
+        match[1]!,
+        match[2]!,
+      ]),
+    );
+    for (const status of statuses) {
+      for (const background of ["--editor-bg", "--surface-raised"]) {
+        const foreground = colors.get(status)!;
+        const surface = colors.get(background)!;
+        expect(
+          contrast(foreground, surface),
+          `${theme} ${status} on ${background}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+
+    const sidebar = colors.get("--sidebar")!;
+    const text = colors.get("--text")!;
+    const accent = colors.get("--accent")!;
+    const active = mix(accent, sidebar, theme === "dark" ? 0.24 : 0.12);
+    const inactive = mix(accent, sidebar, 0.08);
+    const hover = mix(theme === "dark" ? "#dfece4" : "#17211e", sidebar, 0.055);
+    for (const status of statuses.slice(0, 6)) {
+      const statusColor = colors.get(status)!;
+      const normal = mix(statusColor, text, 0.9);
+      const selected = mix(statusColor, text, 0.8);
+      for (const background of [sidebar, hover]) {
+        expect(contrast(normal, background), `${theme} tree ${status}`).toBeGreaterThanOrEqual(4.5);
+      }
+      for (const background of [active, inactive]) {
+        expect(
+          contrast(selected, background),
+          `${theme} selected tree ${status}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  }
+});

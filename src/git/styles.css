@@ -489,30 +489,34 @@
   color: var(--yellow);
 }
 .gaze-git-workspace .kind-modified {
-  color: var(--icon-image);
+  color: var(--vcs-modified);
 }
 .gaze-git-workspace .kind-added {
-  color: var(--green);
+  color: var(--vcs-added);
 }
-.gaze-git-workspace .kind-deleted,
+.gaze-git-workspace .kind-deleted {
+  color: var(--vcs-deleted);
+}
 .gaze-git-workspace .danger-icon {
   color: var(--red);
 }
-.gaze-git-workspace .kind-renamed,
+.gaze-git-workspace .kind-renamed {
+  color: var(--vcs-renamed);
+}
 .gaze-git-workspace .kind-copied {
-  color: var(--icon-image);
+  color: var(--vcs-added);
 }
 .gaze-git-workspace .kind-untracked {
-  color: var(--muted);
+  color: var(--vcs-untracked);
 }
 .gaze-git-workspace .kind-ignored {
-  color: var(--muted);
+  color: var(--vcs-ignored);
 }
 .gaze-git-workspace .kind-conflicted {
-  color: var(--yellow);
+  color: var(--vcs-conflict);
 }
 .gaze-git-workspace .kind-typechanged {
-  color: var(--icon-data);
+  color: var(--vcs-type-changed);
 }
 .gaze-git-workspace .kind-unknown {
   color: var(--muted);

@@ -47,9 +47,9 @@ it("loads all projects, sharing one status for projects in the same worktree", a
     { id: "p3", name: "Closed", root: "/other" },
   ];
   const { result } = renderHook(() => useFileTreeGit(projects, 0));
-  await waitFor(() => expect(result.current.get("p2")?.get("new.ts")?.kind).toBe("added"));
-  expect(result.current.get("p1")?.get("src/new.ts")?.kind).toBe("added");
-  await waitFor(() => expect(result.current.get("p3")?.get("src/new.ts")?.kind).toBe("added"));
+  await waitFor(() => expect(result.current.get("p2")?.get("new.ts")?.kind).toBe("untracked"));
+  expect(result.current.get("p1")?.get("src/new.ts")?.kind).toBe("untracked");
+  await waitFor(() => expect(result.current.get("p3")?.get("src/new.ts")?.kind).toBe("untracked"));
   expect(gitApi.getStatus).toHaveBeenCalledTimes(2);
   expect(gitApi.context).toHaveBeenCalledWith("p3");
 });

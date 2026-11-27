@@ -2,7 +2,7 @@ import { t as tr } from "../lib/i18n";
 import type { FileChange } from "./models";
 
 export interface GitDecoration {
-  kind: "modified" | "added" | "deleted" | "renamed" | "conflict";
+  kind: "modified" | "added" | "deleted" | "renamed" | "conflict" | "untracked";
   label: string;
 }
 
@@ -31,13 +31,15 @@ export function fileTreeStatus(files: FileChange[], prefix: string) {
       const conflict = file.conflict;
       const kind = conflict
         ? "conflict"
-        : file.kind === "untracked" || file.kind === "added" || file.kind === "copied"
-          ? "added"
-          : file.kind === "deleted"
-            ? "deleted"
-            : file.kind === "renamed"
-              ? "renamed"
-              : "modified";
+        : file.kind === "untracked"
+          ? "untracked"
+          : file.kind === "added" || file.kind === "copied"
+            ? "added"
+            : file.kind === "deleted"
+              ? "deleted"
+              : file.kind === "renamed"
+                ? "renamed"
+                : "modified";
       const label = conflict
         ? tr("Git 冲突")
         : file.kind === "untracked"

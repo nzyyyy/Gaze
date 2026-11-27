@@ -50,9 +50,11 @@ it("keeps conflict priority regardless of file order and separates untracked fro
     [
       file("new.ts", { kind: "untracked" }),
       file("added.ts", { kind: "added", staged: true, unstaged: false }),
+      file("copied.ts", { kind: "copied", staged: true, unstaged: false }),
     ],
     "",
   );
-  expect(statuses.get("new.ts")?.kind).toBe("added");
+  expect(statuses.get("new.ts")?.kind).toBe("untracked");
   expect(statuses.get("added.ts")?.label).toBe("已新增（已暂存）");
+  expect(statuses.get("copied.ts")?.kind).toBe("added");
 });

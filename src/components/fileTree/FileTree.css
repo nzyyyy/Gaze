@@ -150,29 +150,34 @@
 }
 
 .tree-row.git-modified {
-  --tree-git-color: var(--icon-config);
+  --tree-git-color: var(--vcs-modified);
 }
 .tree-row.git-added {
-  --tree-git-color: var(--icon-code);
+  --tree-git-color: var(--vcs-added);
 }
-.tree-row.git-deleted,
+.tree-row.git-deleted {
+  --tree-git-color: var(--vcs-deleted);
+}
 .tree-row.git-conflict {
-  --tree-git-color: var(--danger);
+  --tree-git-color: var(--vcs-conflict);
+}
+.tree-row.git-untracked {
+  --tree-git-color: var(--vcs-untracked);
 }
 .tree-row.git-renamed {
-  --tree-git-color: var(--icon-data);
+  --tree-git-color: var(--vcs-renamed);
 }
 .tree-row[class*="git-"] .tree-text {
-  color: color-mix(in srgb, var(--tree-git-color) 75%, var(--text));
+  color: color-mix(in srgb, var(--tree-git-color) 90%, var(--text));
 }
 
 .tree-row.is-active[class*="git-"] .tree-text,
 .tree-row.is-selected[class*="git-"] .tree-text {
-  color: color-mix(in srgb, var(--tree-git-color) 50%, var(--text));
+  color: color-mix(in srgb, var(--tree-git-color) 80%, var(--text));
 }
 
 .tree-row.is-ignored .tree-text {
-  color: color-mix(in srgb, var(--text-muted) 65%, var(--sidebar));
+  color: var(--vcs-ignored);
   font-style: italic;
 }
 
