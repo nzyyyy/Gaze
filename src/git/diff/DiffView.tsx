@@ -1,4 +1,4 @@
-import { OperationButton } from "./components/OperationButton";
+import { OperationButton } from "../components/OperationButton";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
@@ -13,10 +13,10 @@ import {
   type HunkTokens,
 } from "react-diff-view";
 import "react-diff-view/style/index.css";
-import type { CommitFileChange, DiffFile, DiffHunk, OperationRequest } from "./api";
-import { useI18n } from "./i18n";
-import { ChangedFileList } from "./components/ChangedFileList";
-import type { OperationFinished } from "./types";
+import type { CommitFileChange, DiffFile, DiffHunk, OperationRequest } from "../api";
+import { useI18n } from "../i18n";
+import { ChangedFileList } from "../components/ChangedFileList";
+import type { OperationFinished } from "../types";
 import { languageForPath, useDiffTokens } from "./useDiffTokens";
 
 const AT = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;

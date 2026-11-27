@@ -1,9 +1,9 @@
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import type { DiffFile, OperationRequest } from "./api";
+import type { DiffFile, OperationRequest } from "../api";
 import { BranchComparisonView, DiffView } from "./DiffView";
-import { I18nProvider } from "./i18n";
+import { I18nProvider } from "../i18n";
 
 const patch =
   "diff --git a/src/file.ts b/src/file.ts\n--- a/src/file.ts\n+++ b/src/file.ts\n@@ -2,3 +2,2 @@\n-const oldValue = 1;\n-const removed = true;\n+const newValue = 2;\n context\n\\ No newline at end of file";

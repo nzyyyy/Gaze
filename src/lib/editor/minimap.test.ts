@@ -10,8 +10,8 @@ import { EditorView, type BlockInfo } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { afterEach, expect, it, vi } from "vitest";
 
-import { changeBlocksField, setChangeBlocks } from "../../git/editorChanges";
-import { computeChangeBlocks } from "../../git/lineDiff";
+import { changeBlocksField, setChangeBlocks } from "../../git/diff/editorChanges";
+import { computeChangeBlocks } from "../../git/diff/lineDiff";
 import { matchLanguage } from "./language";
 import { minimap } from "./minimap";
 

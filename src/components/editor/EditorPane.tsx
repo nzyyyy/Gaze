@@ -2,14 +2,14 @@ import { Fragment, lazy, Suspense } from "react";
 import { BookOpen, FolderPlus, PanelRight } from "lucide-react";
 
 import type { EditorTab } from "../../editor/types";
-import type { EditorDiffSnapshot } from "../../git/EditorDiff";
+import type { EditorDiffSnapshot } from "../../git/diff/EditorDiff";
 import { t } from "../../lib/i18n";
 import type { EditorPane } from "../../lib/types";
 import { TabBar } from "./TabBar";
 import "./editor.css";
 
 const EditorComparison = lazy(() =>
-  import("../../git/EditorDiff").then(({ EditorComparison }) => ({ default: EditorComparison })),
+  import("../../git/diff/EditorDiff").then(({ EditorComparison }) => ({ default: EditorComparison })),
 );
 
 interface EditorPaneProps {

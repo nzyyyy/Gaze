@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import type { EditorState, Text } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 
-import { changeBlockAtLine, setChangeBlocks } from "../../../git/editorChanges";
-import type { EditorDiffAnchor, EditorDiffSnapshot } from "../../../git/EditorDiff";
+import { changeBlockAtLine, setChangeBlocks } from "../../../git/diff/editorChanges";
+import type { EditorDiffAnchor, EditorDiffSnapshot } from "../../../git/diff/EditorDiff";
 import { useFileBase } from "../../../git/hooks/useFileBase";
-import { computeChangeBlocksAsync } from "../../../git/lineDiffClient";
-import type { ChangeBlock } from "../../../git/lineDiff";
+import { computeChangeBlocksAsync } from "../../../git/diff/lineDiffClient";
+import type { ChangeBlock } from "../../../git/diff/lineDiff";
 import { t } from "../../../lib/i18n";
 import type { TextFile } from "../../../lib/types";
 import { normalizeDocumentText, type LoadedState } from "./documentModel";

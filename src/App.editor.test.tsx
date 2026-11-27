@@ -8,8 +8,8 @@ import type { DirEntry, EditorStatus, Project } from "./lib/types";
 import type { NativeMenuAction, NativeMenuState } from "./lib/platform/nativeMenu";
 import type { PrepareGitOperation } from "./git/editorOperations";
 import type { OperationRequest } from "./git/models";
-import type { EditorDiffSnapshot } from "./git/EditorDiff";
-import { computeChangeBlocks } from "./git/lineDiff";
+import type { EditorDiffSnapshot } from "./git/diff/EditorDiff";
+import { computeChangeBlocks } from "./git/diff/lineDiff";
 
 const gitPreparation = vi.hoisted(() => ({ current: null as PrepareGitOperation | null }));
 const openFileHandler = vi.hoisted(() => ({

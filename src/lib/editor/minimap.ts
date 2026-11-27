@@ -3,7 +3,7 @@ import { foldedRanges, syntaxTree } from "@codemirror/language";
 import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { appendHighlightedText, syntaxTokens } from "./highlightedText";
 
-import { changeBlocksField } from "../../git/editorChanges";
+import { changeBlocksField } from "../../git/diff/editorChanges";
 
 const PADDING = 4;
 const PIXELS_PER_LINE = 4;

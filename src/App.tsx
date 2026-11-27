@@ -99,7 +99,7 @@ import { basename, errorMessage, normalizePath, parentPath, tabKey } from "./lib
 import { fileDropTarget } from "./lib/workspace/fileDrop";
 import { useAutoHideScrollbars } from "./lib/ui/useAutoHideScrollbars";
 import { useProjectBranch } from "./git/hooks/useProjectBranch";
-import type { EditorDiffSnapshot } from "./git/EditorDiff";
+import type { EditorDiffSnapshot } from "./git/diff/EditorDiff";
 import { useReplacement } from "./lib/search/useReplacement";
 import { useFileChanges } from "./lib/workspace/useFileChanges";
 import "./App.css";

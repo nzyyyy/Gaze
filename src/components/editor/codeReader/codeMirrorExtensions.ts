@@ -46,8 +46,8 @@ import {
   type ViewUpdate,
 } from "@codemirror/view";
 
-import { gitChangeGutter } from "../../../git/editorChanges";
-import type { ChangeBlock } from "../../../git/lineDiff";
+import { gitChangeGutter } from "../../../git/diff/editorChanges";
+import type { ChangeBlock } from "../../../git/diff/lineDiff";
 import { t } from "../../../lib/i18n";
 import { columnSelection } from "../../../lib/editor/columnSelection";
 import { editorCommands, matchSelection } from "../../../lib/editor/editorCommands";

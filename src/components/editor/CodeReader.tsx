@@ -28,7 +28,7 @@ import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
 import { closeHoverTooltips, EditorView } from "@codemirror/view";
 import { AlertCircle, FileQuestion, LoaderCircle, RotateCcw } from "lucide-react";
 
-import type { EditorDiffSnapshot } from "../../git/EditorDiff";
+import type { EditorDiffSnapshot } from "../../git/diff/EditorDiff";
 import type {
   CodeReaderHandle,
   EditorTab,
@@ -81,7 +81,7 @@ import { errorMessage } from "../../lib/utils";
 const MARKDOWN_PREVIEW_DELAY_MS = 120;
 
 const EditorChangePopover = lazy(() =>
-  import("../../git/EditorDiff").then(({ EditorChangePopover }) => ({ default: EditorChangePopover })),
+  import("../../git/diff/EditorDiff").then(({ EditorChangePopover }) => ({ default: EditorChangePopover })),
 );
 const MarkdownPreview = lazy(() =>
   import("../markdown/MarkdownPreview").catch(() => ({

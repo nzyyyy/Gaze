@@ -6,7 +6,7 @@ import { EditorSplitResizer } from "../components/layout/EditorSplitResizer";
 import type { Project } from "../lib/types";
 import { api, type FileChange, type GitContext, type RepositorySummary } from "./api";
 import { ConflictEditor } from "./ConflictEditor";
-import { BranchComparisonView, DiffView } from "./DiffView";
+import { BranchComparisonView, DiffView } from "./diff/DiffView";
 import { I18nProvider } from "./i18n";
 import { GitProjectList } from "./components/GitProjectList";
 import { GitBusyContext } from "./components/OperationButton";

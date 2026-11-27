@@ -1,4 +1,4 @@
-import { t as tr } from "../lib/i18n";
+import { t as tr } from "../../lib/i18n";
 import { computeChangeBlocks, type ChangeBlock } from "./lineDiff";
 
 interface PendingRequest {

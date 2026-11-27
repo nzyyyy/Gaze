@@ -11,7 +11,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, ArrowUp, ArrowUpRight, X } from "lucide-react";
 import type { HunkData, HunkTokens } from "react-diff-view";
 
-import { t, useLanguage } from "../lib/i18n";
+import { t, useLanguage } from "../../lib/i18n";
 import type { ChangeBlock } from "./lineDiff";
 import { languageForPath, useDiffTokens } from "./useDiffTokens";
 

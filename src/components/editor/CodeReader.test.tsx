@@ -60,7 +60,7 @@ beforeEach(() => {
 
 import { CodeReader } from "./CodeReader";
 import type { CodeReaderHandle, EditorTab, SaveResult } from "../../editor/types";
-import type { EditorDiffSnapshot } from "../../git/EditorDiff";
+import type { EditorDiffSnapshot } from "../../git/diff/EditorDiff";
 import type { TextFile } from "../../lib/types";
 import { DEFAULT_PREFERENCES, type Preferences } from "../../lib/settings/preferences";
 import type { RecoveryRecord } from "../../lib/platform/api";
