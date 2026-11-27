@@ -669,3 +669,124 @@ pub struct OperationResult {
     pub operation_id: OperationId,
     pub accepted: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn representative_operation_requests_round_trip_typescript_json() {
+        let cases = vec![
+            (
+                OperationRequest::StageHunk {
+                    snapshot_id: 42,
+                    hunk_id: "hunk-7".to_string(),
+                },
+                json!({
+                    "type": "stageHunk",
+                    "snapshotId": 42,
+                    "hunkId": "hunk-7"
+                }),
+            ),
+            (
+                OperationRequest::ForcePushWithLease {
+                    remote: "origin".to_string(),
+                    branch: "main".to_string(),
+                    expected_oid: "0123456789abcdef".to_string(),
+                },
+                json!({
+                    "type": "forcePushWithLease",
+                    "remote": "origin",
+                    "branch": "main",
+                    "expectedOid": "0123456789abcdef"
+                }),
+            ),
+            (
+                OperationRequest::CreateBranch {
+                    name: "feature/contracts".to_string(),
+                    start_point: Some("origin/main".to_string()),
+                    checkout: true,
+                },
+                json!({
+                    "type": "createBranch",
+                    "name": "feature/contracts",
+                    "startPoint": "origin/main",
+                    "checkout": true
+                }),
+            ),
+            (
+                OperationRequest::ResolveConflictBlocks {
+                    snapshot_id: 42,
+                    document_id: "document-3".to_string(),
+                    path: "src/lib/types.ts".to_string(),
+                    choices: vec![ConflictResolution {
+                        block_id: "block-2".to_string(),
+                        choice: ConflictChoice::Both,
+                    }],
+                },
+                json!({
+                    "type": "resolveConflictBlocks",
+                    "snapshotId": 42,
+                    "documentId": "document-3",
+                    "path": "src/lib/types.ts",
+                    "choices": [{ "blockId": "block-2", "choice": "both" }]
+                }),
+            ),
+            (
+                OperationRequest::StashCreate {
+                    message: None,
+                    include_untracked: true,
+                },
+                json!({
+                    "type": "stashCreate",
+                    "message": null,
+                    "includeUntracked": true
+                }),
+            ),
+            (
+                OperationRequest::UndoLastCommit,
+                json!({ "type": "undoLastCommit" }),
+            ),
+            (
+                OperationRequest::Pull {
+                    strategy: Some(PullStrategy::FastForwardOnly),
+                },
+                json!({ "type": "pull", "strategy": "fastForwardOnly" }),
+            ),
+        ];
+
+        for (request, value) in cases {
+            assert_eq!(
+                serde_json::from_value::<OperationRequest>(value.clone()).unwrap(),
+                request
+            );
+            assert_eq!(serde_json::to_value(request).unwrap(), value);
+        }
+    }
+
+    #[test]
+    fn finished_operation_event_matches_typescript_contract() {
+        let value = serde_json::to_value(OperationEvent {
+            operation_id: 91,
+            repository_id: Some(7),
+            kind: OperationEventKind::Finished,
+            message: "Push completed".to_string(),
+            exit_code: Some(0),
+            outcome: Some(OperationOutcome::Succeeded),
+        })
+        .unwrap();
+
+        assert_eq!(
+            value,
+            json!({
+                "operationId": 91,
+                "repositoryId": 7,
+                "kind": "finished",
+                "message": "Push completed",
+                "exitCode": 0,
+                "outcome": "succeeded"
+            })
+        );
+    }
+}

@@ -1,0 +1,43 @@
+.reference-results {
+  overflow: auto;
+}
+
+.reference-file,
+.reference-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  height: 30px;
+  padding: 0 9px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: left;
+}
+
+.reference-file {
+  font-weight: 600;
+}
+
+.reference-row {
+  padding-left: 29px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.reference-file span,
+.reference-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reference-row:hover,
+.reference-row[aria-selected="true"] {
+  color: var(--text);
+  background: var(--sidebar-active);
+}

@@ -39,6 +39,7 @@ import {
   AI_PROTOCOLS,
   type AiCompletionConfig,
 } from "../plugins/ai-completion-config";
+import "./SettingsDialog.css";
 
 interface SettingsDialogProps {
   settings: AppSettings;

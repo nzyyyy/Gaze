@@ -1,7 +1,23 @@
 import { afterEach, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
-const css = readFileSync("src/styles.css", "utf8");
+const cssFiles = [
+  "src/styles.css",
+  "src/components/FileTree.css",
+  "src/components/ContextMenu.css",
+  "src/components/editor.css",
+  "src/components/SettingsDialog.css",
+  "src/components/SearchPanel.css",
+  "src/components/QuickOpen.css",
+  "src/components/SymbolPanel.css",
+  "src/components/ReferencePanel.css",
+  "src/components/CodeLocationPreview.css",
+  "src/components/LocationPicker.css",
+  "src/components/terminal/TerminalPanel.css",
+  "src/components/FileOperationDialog.css",
+  "src/App.css",
+];
+const css = cssFiles.map((file) => readFileSync(file, "utf8")).join("\n");
 const gitCss = readFileSync("src/git/styles.css", "utf8");
 
 const style = document.createElement("style");
@@ -124,4 +140,35 @@ it("keeps Chinese and English controls on one line with the same size rules", ()
     expect(heading.whiteSpace).toBe("nowrap");
     expect(getComputedStyle(section.querySelector(".pane-message")!).overflowWrap).toBe("anywhere");
   }
+});
+
+it("keeps palette shortcut tokens above the shared key hint defaults", () => {
+  applyStyles("disabled");
+  const rules = Array.from(style.sheet!.cssRules).filter(
+    (rule): rule is CSSStyleRule =>
+      rule instanceof CSSStyleRule &&
+      rule.selectorText.includes(".palette-key") &&
+      rule.selectorText.includes(".palette-hints kbd"),
+  );
+  const palette = rules.at(-1)!;
+  expect(palette.style.getPropertyValue("border-color")).toBe("var(--border-strong)");
+  expect(palette.style.getPropertyValue("background")).toBe("var(--bg)");
+  expect(palette.style.getPropertyValue("color")).toBe("var(--text-faint)");
+});
+
+it("keeps the expanded Python environment trigger highlighted", () => {
+  applyStyles("disabled");
+  const selectors = [
+    ".python-environment .app-select .app-select-trigger",
+    '.app-select .app-select-trigger[aria-expanded="true"]',
+  ];
+  const rules = Array.from(style.sheet!.cssRules).filter(
+    (rule): rule is CSSStyleRule =>
+      rule instanceof CSSStyleRule &&
+      selectors.includes(rule.selectorText) &&
+      rule.style.getPropertyValue("border-color") !== "",
+  );
+  const expanded = rules.at(-1)!;
+  expect(expanded.selectorText).toBe(selectors[1]);
+  expect(expanded.style.getPropertyValue("border-color")).toBe("var(--accent)");
 });

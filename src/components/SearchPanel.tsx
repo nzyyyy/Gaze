@@ -17,6 +17,7 @@ import { tabKey } from "../lib/utils";
 import { useSearch } from "../lib/useSearch";
 import { errorMessage } from "../lib/utils";
 import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";
+import "./SearchPanel.css";
 
 interface SearchPanelProps {
   preferences?: Preferences;

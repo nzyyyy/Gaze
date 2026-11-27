@@ -1,0 +1,495 @@
+.file-drop-target {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.file-drop-hint {
+  position: fixed;
+  right: 24px;
+  bottom: 48px;
+  z-index: 1000;
+  padding: 8px 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 54px;
+  flex: 0 0 54px;
+  padding: 0 16px;
+  background: var(--sidebar-rail-bg);
+  color: var(--topbar-text);
+  border-bottom: 1px solid var(--separator);
+  user-select: none;
+}
+
+/* 拖拽只认 mousedown 目标自身，装饰性子元素会吃掉事件，让它们透明穿透到 .topbar。 */
+.brand > *,
+.breadcrumb > * {
+  pointer-events: none;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  min-width: 230px;
+  gap: 8px;
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 25px;
+  height: 25px;
+  border-radius: var(--radius-control);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.brand-name {
+  font-size: 14px;
+  font-weight: 680;
+  letter-spacing: 0.01em;
+}
+
+.project-branch {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 5px;
+  min-width: 0;
+  max-width: 300px;
+  color: var(--topbar-muted);
+  font: 11px/20px var(--font-mono);
+  pointer-events: auto;
+}
+
+.project-branch > svg {
+  flex-shrink: 0;
+}
+
+.project-branch > * {
+  pointer-events: none;
+}
+
+.project-branch > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+  color: var(--topbar-muted);
+  font: 11px/20px var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.breadcrumb-project {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--topbar-text);
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.topbar .icon-button {
+  color: var(--topbar-muted);
+}
+
+.topbar .icon-button:hover {
+  color: var(--topbar-text);
+  background: var(--hover);
+}
+
+.tool-warning {
+  color: var(--accent);
+  font-size: 11px;
+  padding: 2px 6px;
+  border: 1px solid var(--accent-soft);
+  border-radius: var(--radius-small);
+  cursor: help;
+}
+
+.workspace {
+  --sidebar-width: 292px;
+  --sidebar-motion: 280ms cubic-bezier(0.22, 0.75, 0.22, 1);
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  background: var(--sidebar-rail-bg);
+}
+
+.sidebar-space {
+  width: var(--sidebar-width);
+  max-width: calc(100% - 84px);
+  flex-shrink: 0;
+  transition: width var(--sidebar-motion);
+}
+
+.sidebar-resizer {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  bottom: 0;
+  left: calc(56px + min(var(--sidebar-width), 100% - 84px) - 3px);
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+  transition:
+    left var(--sidebar-motion),
+    opacity 180ms ease;
+}
+
+.sidebar-resizer::after {
+  content: "";
+  position: absolute;
+  inset: 0 2px;
+}
+
+.sidebar-resizer:hover::after,
+.sidebar-resizer:focus-visible::after,
+.is-resizing-sidebar .sidebar-resizer::after {
+  background: var(--accent);
+}
+
+.workspace.is-resizing-sidebar,
+.workspace.is-resizing-sidebar * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+.sidebar {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  bottom: 0;
+  left: 56px;
+  width: var(--sidebar-width);
+  max-width: calc(100% - 84px);
+  min-height: 0;
+  overflow: hidden;
+  background: var(--sidebar-panel-bg);
+  border: 1px solid transparent;
+  border-top-color: var(--separator);
+  border-left-color: var(--separator);
+  border-right-color: var(--separator);
+  border-radius: var(--radius-large) 0 0 var(--radius-large);
+  opacity: 1;
+  transform: translateX(0);
+  visibility: visible;
+  transition:
+    opacity 180ms ease,
+    transform var(--sidebar-motion),
+    left var(--sidebar-motion),
+    top var(--sidebar-motion),
+    bottom var(--sidebar-motion),
+    border-radius var(--sidebar-motion),
+    box-shadow var(--sidebar-motion),
+    border-color var(--sidebar-motion),
+    visibility 0s;
+}
+
+.sidebar-rail {
+  position: relative;
+  z-index: 6;
+  width: 56px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding-top: 12px;
+  background: var(--sidebar-rail-bg);
+}
+
+.sidebar-rail-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: auto;
+  padding: 7px 0;
+}
+
+.rail-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-panel);
+  color: var(--text-faint);
+  background: transparent;
+  cursor: pointer;
+}
+
+.rail-button:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.rail-button.is-active {
+  color: var(--accent);
+  background: var(--sidebar-active);
+}
+
+.sidebar-panels {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  height: 100%;
+}
+
+.sidebar-toggle {
+  position: absolute;
+  z-index: 3;
+  top: 7px;
+  right: 8px;
+}
+
+.sidebar .pane-heading,
+.sidebar .git-sidebar-workspace .git-projects-heading {
+  padding-right: 44px;
+}
+
+.workspace[data-sidebar="collapsed"] .sidebar-space,
+.workspace[data-sidebar="floating"] .sidebar-space {
+  width: 0;
+}
+
+.workspace[data-sidebar="collapsed"] .sidebar {
+  opacity: 0;
+  transform: translateX(-18px);
+  visibility: hidden;
+  pointer-events: none;
+  transition-delay: 0s, 0s, 0s, 0s, 0s, 0s, 0s, 0s, 280ms;
+}
+
+.workspace[data-sidebar="collapsed"] .sidebar-resizer,
+.workspace[data-sidebar="floating"] .sidebar-resizer {
+  left: 53px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.workspace[data-sidebar="floating"] .sidebar {
+  left: 63px;
+  top: 7px;
+  bottom: 10px;
+  border-radius: var(--radius-large);
+  border-color: var(--separator);
+  box-shadow: var(--shadow-panel);
+}
+
+.workspace.is-resizing-sidebar[data-sidebar="docked"] .sidebar-space,
+.workspace.is-resizing-sidebar[data-sidebar="docked"] .sidebar-resizer {
+  transition: none;
+}
+
+.sidebar-view {
+  height: 100%;
+  min-height: 0;
+}
+
+.git-sidebar-target {
+  height: 100%;
+  min-height: 0;
+}
+
+.sidebar-view[hidden] {
+  display: none;
+}
+
+.quick-open-trigger {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 182px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-control);
+  color: var(--topbar-muted);
+  background: var(--input-bg);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.quick-open-trigger:hover {
+  color: var(--topbar-text);
+  background: var(--hover);
+}
+
+.quick-open-trigger span {
+  flex: 1;
+  text-align: left;
+}
+
+.main-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  overflow: hidden;
+  transition: border-radius var(--sidebar-motion);
+}
+
+.workspace[data-sidebar="collapsed"] .main-pane,
+.workspace[data-sidebar="floating"] .main-pane {
+  border-radius: var(--radius-large) 0 0 var(--radius-large);
+  box-shadow: inset 1px 1px var(--separator);
+}
+
+.document-area {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.document-panel {
+  height: 100%;
+  min-height: 0;
+}
+
+.document-panel[hidden] {
+  display: none;
+}
+
+.git-main-panel {
+  flex: 1;
+  min-height: 0;
+}
+
+.statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 26px;
+  height: 26px;
+  padding: 0 11px;
+  overflow: hidden;
+  color: var(--text-faint);
+  background: var(--surface);
+  border-top: 1px solid var(--separator);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  user-select: none;
+}
+
+.status-left,
+.status-right {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.readonly-badge {
+  padding: 1px 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.status-warning {
+  color: var(--accent);
+}
+
+.status-dirty {
+  color: var(--accent);
+}
+
+.app-loading {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--bg);
+  color: var(--text-muted);
+}
+
+.app-loading .brand-mark {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-panel);
+  margin-bottom: 5px;
+}
+
+.app-loading h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 18px;
+}
+
+.app-loading p {
+  max-width: 520px;
+  margin: 0;
+  line-height: 1.55;
+  text-align: center;
+}
+
+.app-error {
+  color: var(--danger);
+}
+
+.statusbar[hidden] {
+  display: none;
+}
+
+@media (max-width: 960px) {
+  .workspace {
+    --sidebar-width: 248px;
+  }
+
+  .brand {
+    min-width: 230px;
+  }
+}
+
+.platform-macos .topbar {
+  padding-left: 84px;
+}
+
+.platform-macos .brand {
+  min-width: 176px;
+}

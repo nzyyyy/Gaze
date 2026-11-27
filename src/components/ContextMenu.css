@@ -1,0 +1,43 @@
+.file-tree-menu {
+  position: fixed;
+  z-index: 100;
+  width: max-content;
+  min-width: min(256px, calc(100vw - 16px));
+  padding: 5px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--popover-material);
+  color: var(--text);
+  box-shadow: var(--shadow-panel);
+  backdrop-filter: blur(24px) saturate(1.2);
+}
+.file-tree-menu button {
+  display: block;
+  width: 100%;
+  height: 32px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: calc(var(--radius-panel) - 6px);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.file-tree-menu button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.file-tree-menu button:not(:disabled):hover,
+.file-tree-menu button:focus-visible {
+  background: var(--hover);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}

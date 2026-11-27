@@ -274,28 +274,75 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tagged_file_payload_uses_camel_case_fields() {
+    fn text_file_content_matches_typescript_contract() {
         let value = serde_json::to_value(FileContent::Text {
-            project_id: "p".to_string(),
-            path: "a.ts".to_string(),
-            content: "x".to_string(),
-            encoding: "UTF-8".to_string(),
-            encoding_kind: TextEncodingKind::Utf8,
-            line_ending: LineEnding::Lf,
-            mode: FileMode::Normal,
-            editable: true,
-            edit_blocked_reason: None,
+            project_id: "project-1".to_string(),
+            path: "src/main.ts".to_string(),
+            content: "const answer = 42;\n".to_string(),
+            encoding: "UTF-16LE".to_string(),
+            encoding_kind: TextEncodingKind::Utf16Le,
+            line_ending: LineEnding::Crlf,
+            mode: FileMode::LongLine,
+            editable: false,
+            edit_blocked_reason: Some("Line exceeds the editing limit".to_string()),
             fingerprint: FileFingerprint {
-                size: 1,
-                modified_ns: 2,
+                size: 4096,
+                modified_ns: 1_761_500_000_123_456_789,
             },
-            size: 1,
-            warnings: vec![],
+            size: 4096,
+            warnings: vec!["Long lines are read-only".to_string()],
         })
         .unwrap();
-        assert_eq!(value["kind"], "text");
-        assert!(value.get("projectId").is_some());
-        assert!(value.get("project_id").is_none());
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "kind": "text",
+                "projectId": "project-1",
+                "path": "src/main.ts",
+                "content": "const answer = 42;\n",
+                "encoding": "UTF-16LE",
+                "encodingKind": "utf16Le",
+                "lineEnding": "crlf",
+                "mode": "longLine",
+                "editable": false,
+                "editBlockedReason": "Line exceeds the editing limit",
+                "fingerprint": {
+                    "size": 4096,
+                    "modifiedNs": "1761500000123456789"
+                },
+                "size": 4096,
+                "warnings": ["Long lines are read-only"]
+            })
+        );
+    }
+
+    #[test]
+    fn binary_file_content_matches_typescript_contract() {
+        let value = serde_json::to_value(FileContent::Binary {
+            project_id: "project-2".to_string(),
+            path: "assets/logo.png".to_string(),
+            fingerprint: FileFingerprint {
+                size: 2048,
+                modified_ns: i64::MAX,
+            },
+            size: 2048,
+        })
+        .unwrap();
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "kind": "binary",
+                "projectId": "project-2",
+                "path": "assets/logo.png",
+                "fingerprint": {
+                    "size": 2048,
+                    "modifiedNs": "9223372036854775807"
+                },
+                "size": 2048
+            })
+        );
     }
 
     #[test]
@@ -313,16 +360,85 @@ mod tests {
     }
 
     #[test]
-    fn tagged_search_event_uses_camel_case_fields() {
-        let value = serde_json::to_value(SearchEvent::Paused {
-            request_id: "r".to_string(),
-            received: 200,
-            has_more: true,
-        })
-        .unwrap();
-        assert_eq!(value["type"], "paused");
-        assert!(value.get("requestId").is_some());
-        assert!(value.get("hasMore").is_some());
-        assert!(value.get("request_id").is_none());
+    fn search_event_variants_match_typescript_contract() {
+        assert_eq!(
+            serde_json::to_value(SearchEvent::Batch {
+                request_id: "request-batch".to_string(),
+                matches: vec![SearchHit {
+                    project_id: "project-1".to_string(),
+                    project_name: "Gaze".to_string(),
+                    path: "src/lib/types.ts".to_string(),
+                    line: 147,
+                    preview: "export interface SearchHit {".to_string(),
+                    ranges: vec![
+                        SearchRange { start: 18, end: 27 },
+                        SearchRange { start: 30, end: 38 },
+                    ],
+                }],
+                received: 1,
+            })
+            .unwrap(),
+            serde_json::json!({
+                "type": "batch",
+                "requestId": "request-batch",
+                "matches": [{
+                    "projectId": "project-1",
+                    "projectName": "Gaze",
+                    "path": "src/lib/types.ts",
+                    "line": 147,
+                    "preview": "export interface SearchHit {",
+                    "ranges": [
+                        { "start": 18, "end": 27 },
+                        { "start": 30, "end": 38 }
+                    ]
+                }],
+                "received": 1
+            })
+        );
+
+        assert_eq!(
+            serde_json::to_value(SearchEvent::Paused {
+                request_id: "request-paused".to_string(),
+                received: 200,
+                has_more: true,
+            })
+            .unwrap(),
+            serde_json::json!({
+                "type": "paused",
+                "requestId": "request-paused",
+                "received": 200,
+                "hasMore": true
+            })
+        );
+
+        assert_eq!(
+            serde_json::to_value(SearchEvent::Done {
+                request_id: "request-done".to_string(),
+                received: 500,
+                truncated: true,
+            })
+            .unwrap(),
+            serde_json::json!({
+                "type": "done",
+                "requestId": "request-done",
+                "received": 500,
+                "truncated": true
+            })
+        );
+
+        assert_eq!(
+            serde_json::to_value(SearchEvent::Error {
+                request_id: "request-error".to_string(),
+                code: "invalid_regex".to_string(),
+                message: "Invalid regular expression".to_string(),
+            })
+            .unwrap(),
+            serde_json::json!({
+                "type": "error",
+                "requestId": "request-error",
+                "code": "invalid_regex",
+                "message": "Invalid regular expression"
+            })
+        );
     }
 }

@@ -35,6 +35,7 @@ import {
 } from "./FileOperationDialog";
 import { FileTreeMenu, type TreeMenuTarget } from "./FileTreeMenu";
 import { useFileTreeGit } from "../git/hooks/useFileTreeGit";
+import "./FileTree.css";
 
 type DirectoryState =
   | { status: "loading"; entries: DirEntry[] }

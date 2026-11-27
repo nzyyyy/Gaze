@@ -1,0 +1,67 @@
+.file-operation-dialog {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: min(460px, calc(100vw - 32px));
+}
+.file-operation-dialog .dialog-body {
+  width: 100%;
+  min-width: 0;
+}
+.file-operation-dialog p {
+  overflow-wrap: anywhere;
+}
+.file-operation-dialog label {
+  display: block;
+  margin: 16px 0 6px;
+}
+.file-name-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--editor-bg);
+  color: var(--text);
+  font: inherit;
+}
+.file-name-input:focus-visible {
+  outline: 2px solid var(--accent);
+}
+.folder-picker {
+  margin-top: 12px;
+}
+.folder-picker-list {
+  max-height: 240px;
+  overflow: auto;
+  margin-top: 8px;
+}
+.folder-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.folder-picker-row:hover,
+.folder-picker-row:focus-visible {
+  background: var(--hover);
+}
+.folder-picker-row:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.file-operation-selection {
+  max-height: 160px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding-left: 20px;
+}
+
+.file-operation-dialog .dialog-error {
+  white-space: pre-wrap;
+}

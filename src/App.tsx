@@ -102,6 +102,7 @@ import { useProjectBranch } from "./git/hooks/useProjectBranch";
 import type { EditorDiffSnapshot } from "./git/EditorDiff";
 import { useReplacement } from "./lib/useReplacement";
 import { useFileChanges } from "./lib/useFileChanges";
+import "./App.css";
 
 type LoadState =
   | { status: "loading" }

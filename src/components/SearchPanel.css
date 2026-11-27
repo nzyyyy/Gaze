@@ -1,0 +1,348 @@
+/* Search sidebar */
+.search-panel {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pane-count {
+  min-width: 19px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: var(--hover);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0;
+  text-align: center;
+}
+
+.search-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 0 10px;
+  flex: 0 0 auto;
+}
+
+.search-input-icon {
+  position: absolute;
+  left: 9px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.search-input {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 28px 0 29px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  outline: none;
+  color: var(--text);
+  background: var(--input-bg);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+.search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.search-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.search-input::placeholder {
+  color: var(--text-faint);
+}
+
+.search-spinner {
+  position: absolute;
+  right: 9px;
+  color: var(--text-faint);
+}
+
+.search-options {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 32px;
+  height: 32px;
+  padding: 0 10px;
+}
+
+.search-scope {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  padding: 0 10px 8px;
+}
+
+.search-scope select {
+  min-width: 0;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  background: var(--input-bg);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+.search-scope .search-input {
+  height: 28px;
+  padding: 0 8px;
+}
+
+.replace-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  padding: 0 10px 8px;
+}
+
+.replace-box > .search-input {
+  height: 28px;
+  padding: 0 8px;
+}
+
+.replace-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.replace-preview {
+  display: grid;
+  gap: 5px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.replace-preview p {
+  margin: 0;
+}
+
+.replace-file {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding-top: 5px;
+  border-top: 1px solid var(--border);
+}
+
+.replace-file label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.replace-lines {
+  display: grid;
+  gap: 2px;
+}
+
+.replace-file strong,
+.replace-file span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.replace-file span:first-of-type {
+  color: var(--red);
+}
+
+.replace-file span:last-of-type {
+  color: var(--green);
+}
+
+.replace-ok,
+.replace-warning {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+
+.replace-ok {
+  color: var(--green);
+}
+
+.replace-warning {
+  color: var(--red);
+}
+
+.option-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-small);
+  color: var(--text-faint);
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.option-toggle:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.option-toggle.is-on {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--sidebar-active);
+}
+
+.option-toggle:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.option-text {
+  width: 56px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+}
+
+.option-divider {
+  width: 1px;
+  height: 12px;
+  margin: 0 2px;
+  background: var(--border);
+}
+
+.search-results {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 6px;
+}
+
+.search-results-virtual {
+  position: relative;
+  width: 100%;
+}
+
+.search-result {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
+  height: 62px;
+  padding: 7px 7px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--text-muted);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.search-result:hover {
+  background: var(--hover);
+}
+
+.search-result-location {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.search-project {
+  flex: 0 0 auto;
+  max-width: 80px;
+  margin-right: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-faint);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.search-file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.search-line {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.search-preview {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.search-preview mark {
+  padding: 0;
+  border-radius: var(--radius-small);
+  color: inherit;
+  background: var(--search-match);
+}
+
+.search-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex: 0 0 34px;
+  min-height: 34px;
+  padding: 0 10px;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.search-truncated {
+  color: var(--accent);
+}
+
+.search-footer .button {
+  flex-shrink: 0;
+  height: 23px;
+  padding: 0 8px;
+  font-size: 10px;
+}

@@ -5,6 +5,7 @@ import { t, useLanguage } from "../lib/i18n";
 import type { NavigationResult, Project, SymbolLocation } from "../lib/types";
 import { CodeLocationPreview, type ReadPreviewText } from "./CodeLocationPreview";
 import { FileIcon } from "./FileIcon";
+import "./ReferencePanel.css";
 
 export function ReferencePanel({
   result,

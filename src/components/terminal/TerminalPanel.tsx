@@ -1,5 +1,6 @@
 import { t, useLanguage } from "../../lib/i18n";
 import "@xterm/xterm/css/xterm.css";
+import "./TerminalPanel.css";
 
 import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";

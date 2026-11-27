@@ -6,6 +6,7 @@ import { ChevronLeft, Folder, LoaderCircle } from "lucide-react";
 import { api } from "../lib/api";
 import type { DirEntry, Project } from "../lib/types";
 import { errorMessage, parentPath } from "../lib/utils";
+import "./FileOperationDialog.css";
 
 export type FileOperation =
   | { kind: "createFile" | "createDirectory"; project: Project; parentPath: string }

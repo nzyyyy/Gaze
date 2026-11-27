@@ -12,6 +12,7 @@ import { useModalFocus } from "../lib/useModalFocus";
 import { basename, errorMessage } from "../lib/utils";
 import { CodeLocationPreview, type ReadPreviewText } from "./CodeLocationPreview";
 import { FileIcon } from "./FileIcon";
+import "./QuickOpen.css";
 
 const MODES = ["files", "symbols", "actions", "locations"] as const;
 type Mode = (typeof MODES)[number];

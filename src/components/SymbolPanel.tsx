@@ -13,6 +13,7 @@ import type {
   SymbolSearchResult,
 } from "../lib/types";
 import { errorMessage } from "../lib/utils";
+import "./SymbolPanel.css";
 
 interface SymbolPanelProps {
   active: boolean;

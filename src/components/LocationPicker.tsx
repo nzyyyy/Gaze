@@ -7,6 +7,7 @@ import type { NavigationResult, Project, SymbolLocation } from "../lib/types";
 import { useModalFocus } from "../lib/useModalFocus";
 import { basename, parentPath } from "../lib/utils";
 import { FileIcon } from "./FileIcon";
+import "./LocationPicker.css";
 
 interface LocationPickerProps {
   title: string;

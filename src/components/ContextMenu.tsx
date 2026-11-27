@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import "./ContextMenu.css";
 
 export interface MenuTarget {
   x: number;

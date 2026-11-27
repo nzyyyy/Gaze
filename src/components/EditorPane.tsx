@@ -6,6 +6,7 @@ import type { EditorDiffSnapshot } from "../git/EditorDiff";
 import { t } from "../lib/i18n";
 import type { EditorPane } from "../lib/types";
 import { TabBar } from "./TabBar";
+import "./editor.css";
 
 const EditorComparison = lazy(() =>
   import("../git/EditorDiff").then(({ EditorComparison }) => ({ default: EditorComparison })),

@@ -1,0 +1,240 @@
+.file-tree-pane {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tree-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 18px;
+}
+
+.tree-scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.tree-scroll.has-active-row:focus-visible {
+  outline: none;
+}
+
+.tree-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.tree-virtual {
+  position: relative;
+  width: 100%;
+}
+
+.tree-row {
+  position: absolute;
+  top: 0;
+  left: 6px;
+  display: flex;
+  align-items: center;
+  width: calc(100% - 12px);
+  height: 27px;
+  border-radius: var(--radius-control);
+  padding-right: 7px;
+  white-space: nowrap;
+  color: var(--text-muted);
+  transition: background-color 120ms ease;
+}
+
+.tree-row:hover {
+  background: var(--hover);
+}
+
+.tree-row.is-active {
+  color: var(--text);
+  background: var(--selected-inactive);
+}
+
+.tree-row.is-selected {
+  color: var(--text);
+  background: var(--sidebar-active);
+}
+
+.tree-scroll:not(:focus-within) .tree-row.is-selected {
+  background: var(--selected-inactive);
+}
+
+.tree-scroll:focus-visible .tree-row.is-focused {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.project-row {
+  color: var(--text);
+  font-weight: 560;
+}
+
+.project-row.is-active:not(.is-selected) {
+  background: transparent;
+}
+
+.file-row.is-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 5px;
+  bottom: 5px;
+  width: 3px;
+  border-radius: 0 var(--radius-small) var(--radius-small) 0;
+  background: var(--accent);
+}
+
+.tree-disclosure {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 23px;
+  flex: 0 0 18px;
+  padding: 0;
+  border: 0;
+  color: var(--text-faint);
+  background: transparent;
+  cursor: pointer;
+}
+
+.tree-disclosure svg {
+  transition: transform 130ms ease;
+}
+
+.tree-disclosure svg.rotated {
+  transform: rotate(90deg);
+}
+
+.tree-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 2px;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tree-label > svg,
+.tree-label > img {
+  flex: 0 0 auto;
+}
+
+.file-icon {
+  display: block;
+  flex: 0 0 auto;
+}
+
+.tree-indent {
+  flex: 0 0 18px;
+}
+
+.tree-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+
+.tree-row.git-modified {
+  --tree-git-color: var(--icon-config);
+}
+.tree-row.git-added {
+  --tree-git-color: var(--icon-code);
+}
+.tree-row.git-deleted,
+.tree-row.git-conflict {
+  --tree-git-color: var(--danger);
+}
+.tree-row.git-renamed {
+  --tree-git-color: var(--icon-data);
+}
+.tree-row[class*="git-"] .tree-text {
+  color: color-mix(in srgb, var(--tree-git-color) 75%, var(--text));
+}
+
+.tree-row.is-active[class*="git-"] .tree-text,
+.tree-row.is-selected[class*="git-"] .tree-text {
+  color: color-mix(in srgb, var(--tree-git-color) 50%, var(--text));
+}
+
+.tree-row.is-ignored .tree-text {
+  color: color-mix(in srgb, var(--text-muted) 65%, var(--sidebar));
+  font-style: italic;
+}
+
+.project-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 17px;
+  width: 17px;
+  height: 17px;
+  border-radius: var(--radius-small);
+  color: var(--accent-contrast);
+  background: var(--accent);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.tree-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.tree-row:hover .tree-action,
+.tree-action:focus-visible {
+  opacity: 1;
+}
+
+.tree-action:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.tree-message {
+  gap: 7px;
+  padding-left: 26px !important;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.tree-error {
+  color: var(--danger);
+  padding-top: 0;
+  padding-bottom: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon-folder {
+  color: var(--icon-folder);
+}
+
+.tree-row:focus-within .tree-action {
+  opacity: 1;
+}
