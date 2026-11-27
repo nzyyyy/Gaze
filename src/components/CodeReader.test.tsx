@@ -28,7 +28,14 @@ const gitApiMock = vi.hoisted(() => ({
   onRepositoryChange: vi.fn(),
 }));
 
-vi.mock("../lib/api", () => ({ api: apiMock, gitApi: gitApiMock }));
+vi.mock("../lib/api", () => ({ api: apiMock }));
+vi.mock("../git/api", () => ({ gitApi: gitApiMock }));
+vi.mock("../plugins/ai-completion-api", () => ({
+  aiCompletionApi: {
+    requestAiCompletion: apiMock.requestAiCompletion,
+    cancelAiCompletion: apiMock.cancelAiCompletion,
+  },
+}));
 
 beforeEach(() => {
   gitApiMock.getFileBase.mockResolvedValue(null);
@@ -51,7 +58,8 @@ beforeEach(() => {
   apiMock.resolveMarkdownLink.mockRejectedValue(new Error("missing"));
 });
 
-import { CodeReader, type CodeReaderHandle, type EditorTab, type SaveResult } from "./CodeReader";
+import { CodeReader } from "./CodeReader";
+import type { CodeReaderHandle, EditorTab, SaveResult } from "../editor/types";
 import type { EditorDiffSnapshot } from "../git/EditorDiff";
 import type { TextFile } from "../lib/types";
 import { DEFAULT_PREFERENCES, type Preferences } from "../lib/preferences";

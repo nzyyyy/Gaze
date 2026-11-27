@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import type { EditorTab } from "../components/CodeReader";
+import type { EditorTab } from "../editor/types";
 import type { FsChangeEvent } from "./types";
 import { useFileChanges } from "./useFileChanges";
 

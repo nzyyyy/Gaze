@@ -1,6 +1,5 @@
 import { OperationButton } from "./OperationButton";
 import { memo, useEffect, useMemo, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { CircleCheck, Cloud, GitBranch } from "lucide-react";
 import {
   api,
@@ -94,8 +93,8 @@ export function BranchesPane({
         });
     };
     load();
-    const unlisten = listen<{ repositoryId: number }>("repository-changed", ({ payload }) => {
-      if (payload.repositoryId === repositoryId) load();
+    const unlisten = api.onRepositoryChange((changedId) => {
+      if (changedId === repositoryId) load();
     });
     return () => {
       cancelled = true;

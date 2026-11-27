@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { basename, errorCode, errorMessage, parentPath, tabKey } from "./utils";
+import { basename, errorCode, errorMessage, normalizePath, parentPath, tabKey } from "./utils";
 
 describe("path helpers", () => {
   it("handles root-level, nested and unicode paths", () => {
@@ -9,6 +9,12 @@ describe("path helpers", () => {
     expect(parentPath("src/components/App.tsx")).toBe("src/components");
     expect(parentPath("README.md")).toBe("");
     expect(basename("源码/你好.ts")).toBe("你好.ts");
+  });
+
+  it("normalizes project paths without changing their roots", () => {
+    expect(normalizePath("C:\\repo\\")).toBe("C:/repo");
+    expect(normalizePath("/repo/")).toBe("/repo");
+    expect(normalizePath("/")).toBe("");
   });
 
   it("builds unambiguous tab keys", () => {

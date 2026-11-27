@@ -16,7 +16,7 @@ import {
   keymap,
   type ViewUpdate,
 } from "@codemirror/view";
-import { api } from "../lib/api";
+import { aiCompletionApi as api } from "./ai-completion-api";
 import { pendingLspVersion, synchronizedLspVersion } from "../lib/diagnostics";
 import { aiCompletionError } from "./ai-completion-config";
 

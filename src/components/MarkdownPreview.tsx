@@ -44,7 +44,7 @@ import yaml from "refractor/lang/yaml";
 
 import { api } from "../lib/api";
 import { errorMessage } from "../lib/utils";
-import type { MarkdownPreviewRequest } from "./CodeReader";
+import type { MarkdownPreviewRequest } from "../editor/types";
 import { useMarkdownRenderers } from "../plugins/runtime";
 import { ExternalCodeBlock } from "./ExternalCodeBlock";
 import { useMarkdownMath } from "../plugins/markdown-math";

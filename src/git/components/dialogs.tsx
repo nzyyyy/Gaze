@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { errorMessage, type DialogSpec, type DialogValue, type Pending } from "../types";
+import { useModalDialog } from "../../lib/useModalDialog";
 
 export function FormDialog({ spec, onClose }: { spec: DialogSpec; onClose: () => void }) {
   const { t } = useI18n();
@@ -32,15 +33,7 @@ export function FormDialog({ spec, onClose }: { spec: DialogSpec; onClose: () =>
       setSubmitting(false);
     }
   };
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (typeof dialog.showModal === "function") dialog.showModal();
-    else dialog.setAttribute("open", "");
-    return () => {
-      if (dialog.open && typeof dialog.close === "function") dialog.close();
-    };
-  }, []);
+  useModalDialog(dialogRef);
   useEffect(() => {
     if (error) errorRef.current?.focus();
   }, [error]);
@@ -129,15 +122,7 @@ export function ConfirmDialog({
 }) {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (typeof dialog.showModal === "function") dialog.showModal();
-    else dialog.setAttribute("open", "");
-    return () => {
-      if (dialog.open && typeof dialog.close === "function") dialog.close();
-    };
-  }, []);
+  useModalDialog(dialogRef);
   return (
     <dialog
       ref={dialogRef}

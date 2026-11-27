@@ -1,8 +1,9 @@
 import { t } from "./i18n";
 import { useCallback, useRef, type RefObject } from "react";
 
-import type { CodeReaderHandle, EditorTab } from "../components/CodeReader";
+import type { CodeReaderHandle, EditorTab } from "../editor/types";
 import { api } from "./api";
+import { normalizePath } from "./utils";
 import type {
   Project,
   ReplaceApplyRequest,
@@ -98,9 +99,7 @@ export function useReplacement({
           projects.find((project) => project.id === projectId)?.root;
         const absolute = (projectId: string, path: string) => {
           const base = root(projectId);
-          return base === undefined
-            ? null
-            : `${base.replaceAll("\\", "/").replace(/\/$/, "")}/${path}`;
+          return base === undefined ? null : `${normalizePath(base)}/${path}`;
         };
         // Saving a candidate can reveal other candidates; keep locking until the final preview is covered.
         while (true) {
@@ -197,14 +196,12 @@ export function useReplacement({
               .filter((item) => item.status === "applied")
               .map((item) => {
                 const project = projects.find((project) => project.id === item.projectId);
-                return (
-                  project && `${project.root.replaceAll("\\", "/").replace(/\/$/, "")}/${item.path}`
-                );
+                return project && `${normalizePath(project.root)}/${item.path}`;
               }),
           );
           for (const { tab } of operation.handles) {
-            if (paths.has(`${tab.root?.replaceAll("\\", "/").replace(/\/$/, "")}/${tab.path}`))
-              applied.add(tab.key);
+            const root = tab.root === undefined ? undefined : normalizePath(tab.root);
+            if (paths.has(`${root}/${tab.path}`)) applied.add(tab.key);
           }
         }
         return result;

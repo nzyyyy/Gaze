@@ -1,6 +1,5 @@
 import { OperationButton } from "./OperationButton";
 import { memo, useEffect, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { api, type RepositorySummary, type StashInfo } from "../api";
 import { useI18n } from "../i18n";
 import { errorMessage, type DialogSpec, type RunOperation } from "../types";
@@ -57,8 +56,8 @@ export function StashesPane({
         });
     };
     load();
-    const unlisten = listen<{ repositoryId: number }>("repository-changed", ({ payload }) => {
-      if (payload.repositoryId === repositoryId) load();
+    const unlisten = api.onRepositoryChange((changedId) => {
+      if (changedId === repositoryId) load();
     });
     return () => {
       cancelled = true;

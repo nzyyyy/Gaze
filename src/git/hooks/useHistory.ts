@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
 import {
   api,
   type BranchInfo,
@@ -113,9 +112,9 @@ export function useHistory({
   }, [selectedId, tab, refreshHistory]);
 
   useEffect(() => {
-    const unlisten = listen<{ repositoryId: number }>("repository-changed", ({ payload }) => {
-      if (selectedIdRef.current !== payload.repositoryId) return;
-      if (tab === "history") void refreshHistory(payload.repositoryId);
+    const unlisten = api.onRepositoryChange((repositoryId) => {
+      if (selectedIdRef.current !== repositoryId) return;
+      if (tab === "history") void refreshHistory(repositoryId);
       else {
         historyRequest.current += 1;
         historyRepository.current = undefined;

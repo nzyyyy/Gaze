@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { gitApi } from "../../lib/api";
+import { gitApi } from "../api";
 
 /**
  * The file's committed (HEAD) text, used to paint local changes in the editor.

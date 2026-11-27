@@ -1,6 +1,6 @@
 import { t as tr, useLanguage } from "../../lib/i18n";
 import { useEffect, useState } from "react";
-import { gitApi } from "../../lib/api";
+import { gitApi } from "../api";
 import type { Project } from "../../lib/types";
 import { shortOid } from "../types";
 

@@ -4,16 +4,6 @@ export interface Project {
   root: string;
 }
 
-export interface WorkspaceSnapshot {
-  language?: import("./i18n").Language;
-  projects: Project[];
-  activeProjectId: string | null;
-  theme: ThemePreference;
-  preferences: import("./preferences").Preferences;
-  colorSchemes: import("./colorSchemes").ColorSchemes;
-  fonts: import("./fonts").FontSettings;
-}
-
 export type ThemePreference = "system" | "light" | "dark";
 export type ResolvedTheme = "light" | "dark";
 export type EditorPane = "primary" | "secondary";

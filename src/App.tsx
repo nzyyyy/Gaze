@@ -35,13 +35,13 @@ import {
 import { flushSync } from "react-dom";
 import type { DragDropEvent } from "@tauri-apps/api/webview";
 
-import {
-  CodeReader,
-  type CodeReaderHandle,
-  type EditorTab,
-  type RevealRequest,
-  type MarkdownPreviewRequest,
-} from "./components/CodeReader";
+import { CodeReader } from "./components/CodeReader";
+import type {
+  CodeReaderHandle,
+  EditorTab,
+  MarkdownPreviewRequest,
+  RevealRequest,
+} from "./editor/types";
 import { FileTree, type FileTreeHandle } from "./components/FileTree";
 import {
   operationEntries,
@@ -94,9 +94,9 @@ import type {
   ThemePreference,
   ToolCapabilities,
   TextPosition,
-  WorkspaceSnapshot,
 } from "./lib/types";
-import { basename, errorMessage, parentPath, tabKey } from "./lib/utils";
+import type { WorkspaceSnapshot } from "./lib/workspace";
+import { basename, errorMessage, normalizePath, parentPath, tabKey } from "./lib/utils";
 import { fileDropTarget } from "./lib/fileDrop";
 import { useAutoHideScrollbars } from "./lib/useAutoHideScrollbars";
 import { useProjectBranch } from "./git/hooks/useProjectBranch";
@@ -1098,7 +1098,7 @@ export default function App() {
     fileOperationBusyRef.current = true;
     setOperationBusy(true);
     const { project } = operation;
-    const root = (path: string) => path.replaceAll("\\", "/").replace(/\/$/, "");
+    const root = normalizePath;
     const snapshot = loadStateRef.current.status === "ready" ? loadStateRef.current.snapshot : null;
     const tabRoot = (tab: EditorTab) =>
       root(snapshot?.projects.find((item) => item.id === tab.projectId)?.root ?? tab.root ?? "");
@@ -2006,7 +2006,7 @@ export default function App() {
           if (!project) throw new Error(t("无法打开仓库根目录。"));
           const relative = absolute
             .replaceAll("\\", "/")
-            .slice(project.root.replaceAll("\\", "/").replace(/\/$/, "").length + 1);
+            .slice(normalizePath(project.root).length + 1);
           openLocation(project.id, relative);
         } catch (error) {
           notify(errorMessage(error));

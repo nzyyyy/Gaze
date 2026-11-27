@@ -1,6 +1,6 @@
 import { useLanguage } from "../../lib/i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { gitApi } from "../../lib/api";
+import { gitApi } from "../api";
 import type { Project } from "../../lib/types";
 import type { FileChange } from "../models";
 import { fileTreeStatus } from "../fileTreeStatus";

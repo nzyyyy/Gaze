@@ -26,6 +26,8 @@ vi.mock("../lib/api", () => ({
       warnings: [],
     }),
   },
+}));
+vi.mock("../git/api", () => ({
   gitApi: {
     getFileBase: vi.fn().mockResolvedValue(null),
     onRepositoryChange: vi.fn().mockResolvedValue(() => {}),

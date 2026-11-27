@@ -1,10 +1,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
-import { gitApi } from "../../lib/api";
+import { gitApi } from "../api";
 import type { GitContext } from "../models";
 import { useProjectBranch } from "./useProjectBranch";
 
-vi.mock("../../lib/api", () => ({
+vi.mock("../api", () => ({
   gitApi: { context: vi.fn(), onRepositoryChange: vi.fn() },
 }));
 

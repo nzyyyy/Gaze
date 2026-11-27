@@ -18,7 +18,8 @@ const gitApiMock = vi.hoisted(() => ({
   getStatus: vi.fn(),
   onRepositoryChange: vi.fn(),
 }));
-vi.mock("../lib/api", () => ({ api: apiMock, gitApi: gitApiMock }));
+vi.mock("../lib/api", () => ({ api: apiMock }));
+vi.mock("../git/api", () => ({ gitApi: gitApiMock }));
 const virtual = vi.hoisted(() => ({
   visibleEnd: Number.POSITIVE_INFINITY,
   scrollToIndex: vi.fn(),

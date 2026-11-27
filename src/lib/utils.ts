@@ -16,6 +16,10 @@ export function errorMessage(error: unknown): string {
   return t("发生了未知错误。");
 }
 
+export function normalizePath(path: string): string {
+  return path.replaceAll("\\", "/").replace(/\/$/, "");
+}
+
 export function basename(path: string): string {
   const segments = path.split("/");
   return segments[segments.length - 1] || path;

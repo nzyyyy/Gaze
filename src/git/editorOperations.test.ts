@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { insideWorktree, prepareEditors } from "./editorOperations";
-import type { SaveResult } from "../components/CodeReader";
+import type { SaveResult } from "../editor/types";
 import type { OperationRequest } from "./models";
 
 const editor = (dirty = false) => ({

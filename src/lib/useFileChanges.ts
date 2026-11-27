@@ -1,7 +1,7 @@
 import { t } from "./i18n";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
-import type { EditorTab } from "../components/CodeReader";
+import type { EditorTab } from "../editor/types";
 import type { TreeRefresh } from "../components/FileTree";
 import { api } from "./api";
 import type { FsChangeEvent } from "./types";

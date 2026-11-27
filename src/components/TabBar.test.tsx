@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TabBar } from "./TabBar";
-import type { EditorTab } from "./CodeReader";
+import type { EditorTab } from "../editor/types";
 
 const nativeApi = vi.hoisted(() => ({ copyEntryPath: vi.fn(), revealEntry: vi.fn() }));
 vi.mock("../lib/api", () => ({ api: nativeApi }));

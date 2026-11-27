@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlertCircle, Boxes, LoaderCircle, Search, Workflow } from "lucide-react";
 
-import type { EditorTab, RevealRequest } from "./CodeReader";
+import type { EditorTab, RevealRequest } from "../editor/types";
 import { api } from "../lib/api";
 import type {
   DocumentSymbol,

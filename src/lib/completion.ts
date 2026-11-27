@@ -7,11 +7,11 @@ import {
   selectedCompletion,
   snippet,
   type Completion,
+  type CompletionContext,
   type CompletionSource,
 } from "@codemirror/autocomplete";
 import { EditorState, Prec, Transaction, type Extension } from "@codemirror/state";
 import { keymap, ViewPlugin, type EditorView } from "@codemirror/view";
-import type { createPathCompletion } from "../plugins/path-completion";
 import { api, type CodeCompletion, type CompletionEdit } from "./api";
 import { errorCode } from "./utils";
 
@@ -255,6 +255,12 @@ function checkedEdits(main: CompletionEdit, extra: CompletionEdit[], length: num
   return edits;
 }
 
+export interface PathCompletionContribution {
+  source: CompletionSource;
+  matches(context: CompletionContext): boolean;
+  extension: Extension;
+}
+
 export interface CompletionContribution {
   sources(state: EditorState, pos: number): { autocomplete: CompletionSource }[] | undefined;
   extension: Extension;
@@ -275,7 +281,7 @@ export function codeCompletion(
   contribution?: CompletionContribution,
   semantic = true,
   aboveCursor = false,
-  pathCompletion?: ReturnType<typeof createPathCompletion>,
+  pathCompletion?: PathCompletionContribution,
 ) {
   const ordinarySources = semantic
     ? [lspCompletionSource(projectId, path), completeAnyWord]

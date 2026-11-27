@@ -11,7 +11,7 @@ import {
 
 import { api } from "../lib/api";
 import { errorMessage } from "../lib/utils";
-import type { EditorTab } from "./CodeReader";
+import type { EditorTab } from "../editor/types";
 import { ContextMenu, type MenuTarget } from "./ContextMenu";
 import { FileIcon } from "./FileIcon";
 

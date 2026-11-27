@@ -6,14 +6,19 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api } from "../lib/api";
 import { codeCompletion } from "../lib/completion";
 import { aiInlineCompletion, completionContext } from "./ai-completion";
+import { aiCompletionApi as aiApi } from "./ai-completion-api";
 import type { AiCompletionReply } from "./ai-completion-config";
 
 vi.mock("../lib/api", () => ({
   api: {
-    requestAiCompletion: vi.fn(),
-    cancelAiCompletion: vi.fn(),
     completeCode: vi.fn(),
     resolveCompletion: vi.fn(),
+  },
+}));
+vi.mock("./ai-completion-api", () => ({
+  aiCompletionApi: {
+    requestAiCompletion: vi.fn(),
+    cancelAiCompletion: vi.fn(),
   },
 }));
 
@@ -23,7 +28,7 @@ let host: HTMLElement;
 beforeEach(() => {
   vi.useFakeTimers();
   vi.resetAllMocks();
-  vi.mocked(api.cancelAiCompletion).mockResolvedValue(undefined);
+  vi.mocked(aiApi.cancelAiCompletion).mockResolvedValue(undefined);
   vi.mocked(api.completeCode).mockResolvedValue({
     items: [
       {
@@ -118,7 +123,7 @@ it.each(["Tab", "Enter"])(
   "shows both sources and accepts the intended result with %s",
   async (accept) => {
     open();
-    vi.mocked(api.requestAiCompletion).mockResolvedValue({ type: "suggestion", text: "o()" });
+    vi.mocked(aiApi.requestAiCompletion).mockResolvedValue({ type: "suggestion", text: "o()" });
     type("fo");
     startCompletion(view);
     await vi.advanceTimersByTimeAsync(300);
@@ -127,7 +132,7 @@ it.each(["Tab", "Enter"])(
     expect(ghost()).toBe("o()");
     key("ArrowDown");
     expect(ghost()).toBe("o()");
-    expect(api.requestAiCompletion).toHaveBeenCalledTimes(1);
+    expect(aiApi.requestAiCompletion).toHaveBeenCalledTimes(1);
     key(accept);
     expect(view.state.doc.toString()).toBe(accept === "Tab" ? "foo()" : "format");
     expect(ghost()).toBeUndefined();
@@ -140,7 +145,7 @@ it("invalidates in-flight and out-of-order replies when typing, moving or switch
   const ai = open();
   let older!: (reply: AiCompletionReply) => void;
   let newer!: (reply: AiCompletionReply) => void;
-  vi.mocked(api.requestAiCompletion)
+  vi.mocked(aiApi.requestAiCompletion)
     .mockImplementationOnce(
       () =>
         new Promise((resolve) => {
@@ -155,11 +160,11 @@ it("invalidates in-flight and out-of-order replies when typing, moving or switch
     );
   type("con");
   await vi.advanceTimersByTimeAsync(299);
-  expect(api.requestAiCompletion).not.toHaveBeenCalled();
+  expect(aiApi.requestAiCompletion).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(1);
-  const first = vi.mocked(api.requestAiCompletion).mock.calls[0]![0].id;
+  const first = vi.mocked(aiApi.requestAiCompletion).mock.calls[0]![0].id;
   type("s");
-  expect(api.cancelAiCompletion).toHaveBeenCalledWith(first);
+  expect(aiApi.cancelAiCompletion).toHaveBeenCalledWith(first);
   await vi.advanceTimersByTimeAsync(300);
   newer({ type: "suggestion", text: "t x = 1" });
   await Promise.resolve();
@@ -169,7 +174,7 @@ it("invalidates in-flight and out-of-order replies when typing, moving or switch
   view.dispatch({ selection: { anchor: 0 } });
   expect(ghost()).toBeUndefined();
 
-  vi.mocked(api.requestAiCompletion).mockImplementationOnce(
+  vi.mocked(aiApi.requestAiCompletion).mockImplementationOnce(
     () =>
       new Promise((resolve) => {
         newer = resolve;
@@ -185,11 +190,11 @@ it("invalidates in-flight and out-of-order replies when typing, moving or switch
 
 it("requests a suggestion on demand with the platform modifier", () => {
   open();
-  vi.mocked(api.requestAiCompletion).mockResolvedValue({ type: "suggestion", text: " = 1" });
+  vi.mocked(aiApi.requestAiCompletion).mockResolvedValue({ type: "suggestion", text: " = 1" });
   type("count");
   manual();
-  expect(api.requestAiCompletion).toHaveBeenCalledOnce();
-  expect(vi.mocked(api.requestAiCompletion).mock.calls[0]![0]).toMatchObject({
+  expect(aiApi.requestAiCompletion).toHaveBeenCalledOnce();
+  expect(vi.mocked(aiApi.requestAiCompletion).mock.calls[0]![0]).toMatchObject({
     manual: true,
     prefix: "count",
     lspVersion: undefined,
@@ -198,7 +203,7 @@ it("requests a suggestion on demand with the platform modifier", () => {
 
 it("preserves a matching suggestion and only inserts its remainder", async () => {
   open();
-  vi.mocked(api.requestAiCompletion).mockResolvedValue({ type: "suggestion", text: "o()" });
+  vi.mocked(aiApi.requestAiCompletion).mockResolvedValue({ type: "suggestion", text: "o()" });
   type("fo");
   await vi.advanceTimersByTimeAsync(300);
   expect(ghost()).toBe("o()");
@@ -209,30 +214,30 @@ it("preserves a matching suggestion and only inserts its remainder", async () =>
   key("Tab");
   expect(view.state.doc.toString()).toBe("foo()");
   await vi.advanceTimersByTimeAsync(1000);
-  expect(api.requestAiCompletion).toHaveBeenCalledOnce();
+  expect(aiApi.requestAiCompletion).toHaveBeenCalledOnce();
 });
 
 it("reuses an exact context after backspacing and honors the cache lifetime", async () => {
   open();
-  vi.mocked(api.requestAiCompletion).mockResolvedValue({ type: "suggestion", text: "o()" });
+  vi.mocked(aiApi.requestAiCompletion).mockResolvedValue({ type: "suggestion", text: "o()" });
   type("fo");
   await vi.advanceTimersByTimeAsync(300);
   expect(ghost()).toBe("o()");
   type("x");
   expect(ghost()).toBeUndefined();
   await vi.advanceTimersByTimeAsync(300);
-  expect(api.requestAiCompletion).toHaveBeenCalledTimes(2);
+  expect(aiApi.requestAiCompletion).toHaveBeenCalledTimes(2);
   backspace();
   await vi.advanceTimersByTimeAsync(300);
   expect(ghost()).toBe("o()");
-  expect(api.requestAiCompletion).toHaveBeenCalledTimes(2);
+  expect(aiApi.requestAiCompletion).toHaveBeenCalledTimes(2);
   type("x");
   backspace();
   manual();
   expect(ghost()).toBe("o()");
   await vi.advanceTimersByTimeAsync(30_000);
   manual();
-  expect(api.requestAiCompletion).toHaveBeenCalledTimes(3);
+  expect(aiApi.requestAiCompletion).toHaveBeenCalledTimes(3);
 });
 
 it("suppresses automatic retries during backoff but allows manual retries", async () => {
@@ -254,22 +259,22 @@ it("suppresses automatic retries during backoff but allows manual retries", asyn
     }),
   });
   view.focus();
-  vi.mocked(api.requestAiCompletion)
+  vi.mocked(aiApi.requestAiCompletion)
     .mockResolvedValueOnce({ type: "error", kind: "rateLimited", retryAfterMs: 60_000 })
     .mockResolvedValue({ type: "suggestion", text: " = 1" });
   type("count");
   await vi.advanceTimersByTimeAsync(300);
   type("x");
   await vi.advanceTimersByTimeAsync(1000);
-  expect(api.requestAiCompletion).toHaveBeenCalledOnce();
+  expect(aiApi.requestAiCompletion).toHaveBeenCalledOnce();
   expect(onError).toHaveBeenCalledOnce();
   manual();
-  expect(api.requestAiCompletion).toHaveBeenCalledTimes(2);
+  expect(aiApi.requestAiCompletion).toHaveBeenCalledTimes(2);
 });
 
 it("evicts the least recently used suggestion after four contexts", async () => {
   open(undefined, "\n".repeat(12));
-  vi.mocked(api.requestAiCompletion).mockImplementation(async ({ prefix }) => ({
+  vi.mocked(aiApi.requestAiCompletion).mockImplementation(async ({ prefix }) => ({
     type: "suggestion",
     text: prefix.trim() + "()",
   }));
@@ -282,25 +287,25 @@ it("evicts the least recently used suggestion after four contexts", async () => 
   type("b");
   view.dispatch({ selection: { anchor: view.state.doc.length } });
   await vi.advanceTimersByTimeAsync(300);
-  expect(api.requestAiCompletion).toHaveBeenCalledTimes(4);
+  expect(aiApi.requestAiCompletion).toHaveBeenCalledTimes(4);
   backspace();
   backspace();
   backspace();
   backspace();
   await vi.advanceTimersByTimeAsync(300);
-  expect(api.requestAiCompletion).toHaveBeenCalledTimes(5);
+  expect(aiApi.requestAiCompletion).toHaveBeenCalledTimes(5);
 });
 
 it("suppresses exact plain-text duplicates but retains distinct AI completions", async () => {
   open();
-  vi.mocked(api.requestAiCompletion).mockResolvedValue({ type: "suggestion", text: "at" });
+  vi.mocked(aiApi.requestAiCompletion).mockResolvedValue({ type: "suggestion", text: "at" });
   type("form");
   startCompletion(view);
   await vi.advanceTimersByTimeAsync(300);
   expect(completionStatus(view.state)).toBe("active");
   expect(ghost()).toBeUndefined();
   key("Escape");
-  vi.mocked(api.requestAiCompletion).mockResolvedValue({ type: "suggestion", text: "at()" });
+  vi.mocked(aiApi.requestAiCompletion).mockResolvedValue({ type: "suggestion", text: "at()" });
   type("x");
   await vi.advanceTimersByTimeAsync(300);
   expect(ghost()).toBe("at()");
@@ -309,18 +314,18 @@ it("suppresses exact plain-text duplicates but retains distinct AI completions",
 it("waits for IME commit and suppresses the reserved editor context", async () => {
   let reserved = false;
   open(() => reserved);
-  vi.mocked(api.requestAiCompletion).mockResolvedValue({ type: "suggestion", text: " = 1" });
+  vi.mocked(aiApi.requestAiCompletion).mockResolvedValue({ type: "suggestion", text: " = 1" });
   view.contentDOM.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
   type("名称");
   await vi.advanceTimersByTimeAsync(400);
-  expect(api.requestAiCompletion).not.toHaveBeenCalled();
+  expect(aiApi.requestAiCompletion).not.toHaveBeenCalled();
   view.contentDOM.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
   await vi.advanceTimersByTimeAsync(400);
-  expect(api.requestAiCompletion).toHaveBeenCalledOnce();
+  expect(aiApi.requestAiCompletion).toHaveBeenCalledOnce();
   reserved = true;
   type("x");
   await vi.advanceTimersByTimeAsync(400);
-  expect(api.requestAiCompletion).toHaveBeenCalledOnce();
+  expect(aiApi.requestAiCompletion).toHaveBeenCalledOnce();
   expect(ghost()).toBeUndefined();
 });
 

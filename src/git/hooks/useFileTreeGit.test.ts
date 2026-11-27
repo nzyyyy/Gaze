@@ -1,10 +1,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
-import { gitApi } from "../../lib/api";
+import { gitApi } from "../api";
 import { useFileTreeGit } from "./useFileTreeGit";
 import type { FileChange, GitContext, WorkingTreeSnapshot } from "../models";
 
-vi.mock("../../lib/api", () => ({
+vi.mock("../api", () => ({
   gitApi: { context: vi.fn(), getStatus: vi.fn(), onRepositoryChange: vi.fn() },
 }));
 const change = (path: string, kind: FileChange["kind"]): FileChange => ({

@@ -104,7 +104,8 @@ const gitApiMock = vi.hoisted(() => ({
   onRepositoryChange: vi.fn(),
 }));
 
-vi.mock("./lib/api", () => ({ api: apiMock, gitApi: gitApiMock }));
+vi.mock("./lib/api", () => ({ api: apiMock }));
+vi.mock("./git/api", () => ({ api: gitApiMock, gitApi: gitApiMock }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 vi.mock("./components/terminal/TerminalPanel", () => ({
   TerminalPanel: ({ open }: { open: boolean }) => <section aria-label="终端面板" hidden={!open} />,

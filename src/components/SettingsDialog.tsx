@@ -33,7 +33,7 @@ import {
 } from "../lib/preferences";
 import { DEFAULT_LAYOUT, LAYOUT_SIZE_LIMITS, readLayout, type Layout } from "../lib/layout";
 import { BUILTIN_PLUGIN_CATEGORIES, type BuiltinPluginCategory } from "../plugins/builtins";
-import { api } from "../lib/api";
+import { aiCompletionApi } from "../plugins/ai-completion-api";
 import {
   aiCompletionError,
   AI_PROTOCOLS,
@@ -573,7 +573,7 @@ export function SettingsDialog({ settings, isMac = false, onSave, onClose }: Set
             setTestingAi(true);
             setAiTest(null);
             try {
-              await api.testAiCompletion(aiConfig);
+              await aiCompletionApi.testAiCompletion(aiConfig);
               setAiTest({ ok: true, message: t("模型连接成功。") });
             } catch (error) {
               setAiTest({ ok: false, message: aiCompletionError(error) });

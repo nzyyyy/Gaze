@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../lib/ipc";
 
 export type PluginContribution =
   { kind: "command"; id: string; title: string } | { kind: "markdown"; language: string };

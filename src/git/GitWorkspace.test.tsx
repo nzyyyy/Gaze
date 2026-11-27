@@ -1,7 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import GitWorkspace from "./GitWorkspace";
-import { listen } from "@tauri-apps/api/event";
 import {
   api,
   type GitContext,
@@ -28,7 +27,6 @@ vi.mock("./api", () => ({
     startOperation: vi.fn(),
   },
 }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
 const repository: RepositorySummary = {
   id: 1,
   path: "/repo",
@@ -74,7 +72,6 @@ beforeEach(() => {
   sidebarContainer = document.createElement("div");
   document.body.append(sidebarContainer);
   callbacks.sidebarContainer = sidebarContainer;
-  vi.mocked(listen).mockResolvedValue(() => {});
   vi.mocked(api.context).mockResolvedValue(context());
   vi.mocked(api.refreshRepository).mockImplementation(async (id) => ({
     summary: { ...repository, id },
@@ -253,10 +250,12 @@ it("reuses context initialization when opening during hidden preloading", async 
   const props = { ...callbacks, sidebarContainer: null };
   const { rerender } = render(<GitWorkspace project={project} active={false} preload {...props} />);
   expect(api.context).toHaveBeenCalledTimes(1);
-  expect(api.onRepositoryChange).not.toHaveBeenCalled();
+  // 隐藏预加载只保留历史监听，激活后才增加工作区刷新监听。
+  expect(api.onRepositoryChange).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole("region", { name: "Git 工作区" })).not.toBeInTheDocument();
   rerender(<GitWorkspace project={project} active preload {...props} />);
   expect(api.context).toHaveBeenCalledTimes(1);
+  expect(api.onRepositoryChange).toHaveBeenCalledTimes(2);
   expect(screen.getByRole("status")).toHaveTextContent("正在加载 Git 工作区…");
   expect(screen.queryByText("Git 暂不可用")).not.toBeInTheDocument();
   await act(async () => {

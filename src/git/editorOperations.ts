@@ -1,7 +1,8 @@
 import { t as tr } from "../lib/i18n";
-import type { CodeReaderHandle } from "../components/CodeReader";
+import type { CodeReaderHandle } from "../editor/types";
 import type { OperationRequest } from "./models";
 import type { OperationOutcome } from "./types";
+import { normalizePath } from "../lib/utils";
 
 export type PrepareGitOperation = (
   root: string,
@@ -43,7 +44,7 @@ export function locksEditors(request: OperationRequest) {
 }
 
 export function insideWorktree(absolute: string, root: string) {
-  const normalize = (path: string) => path.replaceAll("\\", "/").replace(/\/$/, "");
+  const normalize = normalizePath;
   let path = normalize(absolute),
     base = normalize(root);
   if (/^[a-z]:/i.test(base)) {

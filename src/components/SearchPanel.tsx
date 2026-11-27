@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlertCircle, LoaderCircle, RotateCcw, Search, SearchX } from "lucide-react";
 
-import type { RevealRequest } from "./CodeReader";
+import type { RevealRequest } from "../editor/types";
 import type {
   Project,
   ReplaceApplyRequest,

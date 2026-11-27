@@ -6,7 +6,7 @@ import { DEFAULT_COLOR_SCHEMES } from "../lib/colorSchemes";
 import { DEFAULT_PREFERENCES, type AppSettings } from "../lib/preferences";
 import { DEFAULT_LAYOUT } from "../lib/layout";
 import { SettingsDialog } from "./SettingsDialog";
-import { api } from "../lib/api";
+import { aiCompletionApi } from "../plugins/ai-completion-api";
 
 const settings: AppSettings = {
   language: "zh-CN",
@@ -165,7 +165,7 @@ it("asks for the AI configuration instead of dropping an enabled switch", async 
 it("disables reset while an AI connection test is pending", async () => {
   const user = userEvent.setup();
   let finish!: () => void;
-  const test = vi.spyOn(api, "testAiCompletion").mockImplementation(
+  const test = vi.spyOn(aiCompletionApi, "testAiCompletion").mockImplementation(
     () =>
       new Promise<void>((resolve) => {
         finish = resolve;

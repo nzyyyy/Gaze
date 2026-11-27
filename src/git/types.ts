@@ -38,9 +38,9 @@ export type DialogSpec = {
 };
 export type CommandItem = { id: string; label: string; search: string; action: () => void };
 
+export { errorMessage } from "../lib/utils";
+
 export const shortOid = (oid?: string | null) => oid?.slice(0, 8) ?? "—";
-export const errorMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error);
 export const FAVORITES_GROUP = "\0favorites";
 export const UNGROUPED_GROUP = "\0ungrouped";
 export const GRAPH_EDGE_BUCKET_ROWS = 256;

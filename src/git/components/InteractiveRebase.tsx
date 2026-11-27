@@ -9,6 +9,7 @@ import {
 } from "../api";
 import { useI18n } from "../i18n";
 import { errorMessage, shortOid, type RunOperation } from "../types";
+import { useModalDialog } from "../../lib/useModalDialog";
 
 const ACTIONS: RebaseAction[] = ["pick", "reword", "squash", "fixup", "drop"];
 
@@ -32,15 +33,7 @@ export function InteractiveRebase({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (typeof dialog.showModal === "function") dialog.showModal();
-    else dialog.setAttribute("open", "");
-    return () => {
-      if (dialog.open && typeof dialog.close === "function") dialog.close();
-    };
-  }, []);
+  useModalDialog(dialogRef);
 
   useEffect(() => {
     api
