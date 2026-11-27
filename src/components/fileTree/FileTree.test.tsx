@@ -432,6 +432,28 @@ describe("FileTree operations", () => {
     await waitFor(() => expect(onPaste).toHaveBeenCalledWith(project, "target"));
   });
 
+  it("keeps the row count stable while an empty directory loads for the first time", async () => {
+    const { user } = setup();
+    await screen.findByText("readme.md");
+    const initialRowCount = screen.getAllByRole("treeitem").length;
+    let finishLoad!: (listing: DirectoryListing) => void;
+    apiMock.listDirectory.mockReturnValueOnce(
+      new Promise<DirectoryListing>((resolve) => {
+        finishLoad = resolve;
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "src" }));
+    const sourceRow = screen.getByText("src").closest<HTMLElement>(".tree-row")!;
+    expect(sourceRow).toHaveAttribute("aria-expanded", "true");
+    expect(within(sourceRow).getByLabelText("读取目录…")).toBeInTheDocument();
+    expect(screen.getAllByRole("treeitem")).toHaveLength(initialRowCount);
+
+    await act(async () => finishLoad({ projectId: project.id, path: "src", entries: [] }));
+    expect(within(sourceRow).queryByLabelText("读取目录…")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("treeitem")).toHaveLength(initialRowCount);
+  });
+
   it("leaves the existing rows and focus in place while refreshing a paste destination", async () => {
     const ref = createRef<FileTreeHandle>();
     listings.src = [entry("src/before.ts")];

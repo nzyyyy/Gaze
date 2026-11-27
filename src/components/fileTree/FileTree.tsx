@@ -43,7 +43,7 @@ type DirectoryState =
   | { status: "error"; entries: DirEntry[]; message: string };
 
 interface FlatNode {
-  kind: "project" | "directory" | "file" | "loading" | "error";
+  kind: "project" | "directory" | "file" | "error";
   key: string;
   depth: number;
   parentKey: string | null;
@@ -253,16 +253,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
     const appendDirectory = (project: Project, path: string, depth: number, parentKey: string) => {
       const key = directoryKey(project.id, path);
       const state = directories[key];
-      if (!state || (state.status === "loading" && state.entries.length === 0)) {
-        result.push({
-          kind: "loading",
-          key: `${key}\u0000loading`,
-          depth,
-          parentKey,
-          project,
-        });
-        return;
-      }
+      if (!state || (state.status === "loading" && state.entries.length === 0)) return;
       if (state.status === "error" && state.entries.length === 0) {
         result.push({
           kind: "error",
@@ -343,17 +334,6 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
       selectedIndexRef.current = index;
       return;
     }
-    // A reloaded ancestor temporarily hides the selected row.
-    if (
-      nodes.some(
-        (node) =>
-          node.kind === "loading" &&
-          (node.parentKey === `project\u0000${node.project.id}`
-            ? selectedKey.startsWith(directoryKey(node.project.id, ""))
-            : selectedKey.startsWith(`${node.parentKey}/`)),
-      )
-    )
-      return;
     // Keep the roving focus on a nearby row when the focused row disappears
     // (trashed file, external deletion, or a collapsed parent directory).
     const neighbour = selectable[Math.min(selectedIndexRef.current, selectable.length - 1)];
@@ -838,7 +818,11 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
                         open ? t("折叠 {0}", node.project.name) : t("展开 {0}", node.project.name)
                       }
                     >
-                      <ChevronRight size={14} className={open ? "rotated" : ""} />
+                      {directories[directoryKey(node.project.id, "")]?.status === "loading" ? (
+                        <LoaderCircle size={14} className="spin" aria-label={t("读取目录…")} />
+                      ) : (
+                        <ChevronRight size={14} className={open ? "rotated" : ""} />
+                      )}
                     </button>
                     <button
                       className="tree-label"
@@ -851,14 +835,6 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
                       <span className="tree-text">{node.project.name}</span>
                     </button>
                     {moreButton(node)}
-                  </div>
-                );
-              }
-              if (node.kind === "loading") {
-                return (
-                  <div className="tree-row tree-message" key={node.key} style={style}>
-                    <LoaderCircle size={13} className="spin" />
-                    <span>{t("读取目录…")}</span>
                   </div>
                 );
               }
@@ -905,6 +881,8 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
                     >
                       {entry.isSymlink ? (
                         <Link2 size={13} />
+                      ) : directories[node.key]?.status === "loading" ? (
+                        <LoaderCircle size={14} className="spin" aria-label={t("读取目录…")} />
                       ) : (
                         <ChevronRight size={14} className={open ? "rotated" : ""} />
                       )}
