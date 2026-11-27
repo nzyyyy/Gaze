@@ -4,7 +4,7 @@ import { api } from "../../lib/platform/api";
 import { t, useLanguage } from "../../lib/i18n";
 import type { PythonEnvironment, PythonEnvironmentStatus } from "../../lib/types";
 import { errorMessage } from "../../lib/utils";
-import { Select } from "../../components/Select";
+import { Select } from "../../components/common/Select";
 
 const AUTO = "auto";
 const BROWSE = "browse";

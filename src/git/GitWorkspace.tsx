@@ -2,7 +2,7 @@ import { t as tr, useLanguage } from "../lib/i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { GitBranch } from "lucide-react";
-import { EditorSplitResizer } from "../components/EditorSplitResizer";
+import { EditorSplitResizer } from "../components/layout/EditorSplitResizer";
 import type { Project } from "../lib/types";
 import { api, type FileChange, type GitContext, type RepositorySummary } from "./api";
 import { ConflictEditor } from "./ConflictEditor";

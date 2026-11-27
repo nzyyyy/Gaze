@@ -1,0 +1,642 @@
+import { t, useLanguage } from "../../lib/i18n";
+import { ChevronLeft, ChevronRight, GitCompare, PanelRight, X } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
+
+import { api } from "../../lib/platform/api";
+import { errorMessage } from "../../lib/utils";
+import type { EditorTab } from "../../editor/types";
+import { ContextMenu, type MenuTarget } from "../common/ContextMenu";
+import { FileIcon } from "../common/FileIcon";
+
+interface TabBarProps {
+  tabs: EditorTab[];
+  activeKey: string | null;
+  dirtyKeys: ReadonlySet<string>;
+  onActivate: (tab: EditorTab) => void;
+  onClose: (tab: EditorTab) => void;
+  onCloseTabs: (tabs: EditorTab[]) => void;
+  onNotice: (message: string) => void;
+  onToggleSplit?: () => void;
+  splitOpen?: boolean;
+  onMoveToOtherPane?: (tab: EditorTab) => void;
+  onReorder?: (sourceKey: string, targetKey: string, after: boolean) => void;
+  comparison?: { name: string; active: boolean; onActivate: () => void; onClose: () => void };
+}
+
+type DropTarget = { key: string; after: boolean };
+
+export function TabBar({
+  tabs,
+  activeKey,
+  dirtyKeys,
+  onActivate,
+  onClose,
+  onCloseTabs,
+  onNotice,
+  onToggleSplit,
+  splitOpen = false,
+  onMoveToOtherPane,
+  onReorder,
+  comparison,
+}: TabBarProps) {
+  useLanguage();
+  const activeTabRef = useRef<HTMLDivElement>(null);
+  const comparisonButton = useRef<HTMLButtonElement>(null);
+  const tabRefs = useRef(new Map<string, HTMLButtonElement>());
+  const focusedTabKeyRef = useRef<string | null>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
+  const scrollHoldTimerRef = useRef<number | null>(null);
+  const scrollFrameRef = useRef<number | null>(null);
+  const repeatedScrollRef = useRef(false);
+  const dragRef = useRef<{
+    key: string;
+    pointerId: number;
+    x: number;
+    width: number;
+    left: number;
+    contentWidth: number;
+    scrollLeft: number;
+    dragging: boolean;
+    target: DropTarget | null;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
+  const positionsRef = useRef<Map<HTMLElement, number> | null>(null);
+  const [scrollEdges, setScrollEdges] = useState({ left: false, right: false });
+  const [draggingKey, setDraggingKey] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+  const [menu, setMenu] = useState<(MenuTarget & { tab: EditorTab }) | null>(null);
+  const stopDrag = useCallback(() => {
+    const drag = dragRef.current;
+    if (drag?.dragging && stripRef.current) {
+      positionsRef.current = new Map(
+        Array.from(stripRef.current!.querySelectorAll<HTMLElement>(".tab"), (element) => [
+          element,
+          element.getBoundingClientRect().left,
+        ]),
+      );
+    }
+    dragRef.current = null;
+    setDraggingKey(null);
+    setDropTarget(null);
+    const strip = stripRef.current;
+    if (drag?.dragging && strip?.hasPointerCapture(drag.pointerId))
+      strip.releasePointerCapture(drag.pointerId);
+    return drag;
+  }, []);
+  useLayoutEffect(() => {
+    const drag = dragRef.current;
+    if (drag && !tabs.some((tab) => tab.key === drag.key)) stopDrag();
+  }, [tabs, stopDrag]);
+  const updateScrollEdges = useCallback(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    const left = strip.scrollLeft > 1;
+    const right = strip.scrollWidth - strip.clientWidth - strip.scrollLeft > 1;
+    setScrollEdges((previous) =>
+      previous.left === left && previous.right === right ? previous : { left, right },
+    );
+  }, []);
+  const stopScrollingTabs = useCallback(() => {
+    if (scrollHoldTimerRef.current !== null) window.clearTimeout(scrollHoldTimerRef.current);
+    if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current);
+    scrollHoldTimerRef.current = null;
+    scrollFrameRef.current = null;
+  }, []);
+  const scrollTabs = (direction: number, detail: number) => {
+    const repeated = repeatedScrollRef.current;
+    repeatedScrollRef.current = false;
+    // A hold's release click must not add another tab-sized jump.
+    if (repeated && detail > 0) return;
+    const strip = stripRef.current!;
+    const elements = Array.from(strip.querySelectorAll<HTMLElement>(".tab"));
+    const target =
+      direction < 0
+        ? elements.reverse().find((element) => element.offsetLeft < strip.scrollLeft - 1)
+        : elements.find((element) => element.offsetLeft > strip.scrollLeft + 1);
+    strip.scrollTo({
+      left: target?.offsetLeft ?? (direction < 0 ? 0 : strip.scrollWidth),
+      behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+        ? "instant"
+        : "smooth",
+    });
+  };
+  const startScrollingTabs = (direction: number, button: number) => {
+    if (button !== 0) return;
+    stopScrollingTabs();
+    repeatedScrollRef.current = false;
+    scrollHoldTimerRef.current = window.setTimeout(() => {
+      scrollHoldTimerRef.current = null;
+      let previous = performance.now();
+      const scroll = (time: number) => {
+        const strip = stripRef.current;
+        if (!strip) {
+          stopScrollingTabs();
+          return;
+        }
+        const maxScroll = Math.max(0, strip.scrollWidth - strip.clientWidth);
+        repeatedScrollRef.current = true;
+        strip.scrollLeft = Math.max(
+          0,
+          Math.min(maxScroll, strip.scrollLeft + (direction * (time - previous)) / 2),
+        );
+        previous = time;
+        updateScrollEdges();
+        if (direction < 0 ? strip.scrollLeft > 0 : strip.scrollLeft < maxScroll)
+          scrollFrameRef.current = window.requestAnimationFrame(scroll);
+        else stopScrollingTabs();
+      };
+      scrollFrameRef.current = window.requestAnimationFrame(scroll);
+    }, 300);
+  };
+  useLayoutEffect(() => {
+    const positions = positionsRef.current;
+    positionsRef.current = null;
+    if (positions) {
+      for (const [element, left] of positions) {
+        if (!element.isConnected) continue;
+        element.getAnimations?.().forEach((animation) => animation.cancel());
+        const delta = left - element.getBoundingClientRect().left;
+        if (
+          Math.abs(delta) > 0.5 &&
+          !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+        ) {
+          element.animate?.(
+            [{ transform: `translateX(${delta}px)` }, { transform: "translateX(0)" }],
+            { duration: 160, easing: "cubic-bezier(0.2, 0, 0, 1)" },
+          );
+        }
+      }
+    }
+    updateScrollEdges();
+  }, [tabs, draggingKey, updateScrollEdges]);
+  const hasTabs = tabs.length > 0;
+  useEffect(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    const onWheel = (event: WheelEvent) => {
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.deltaX || !event.deltaY)
+        return;
+      const maxScroll = strip.scrollWidth - strip.clientWidth;
+      if (maxScroll <= 0) return;
+      const unit =
+        event.deltaMode === WheelEvent.DOM_DELTA_LINE
+          ? parseFloat(getComputedStyle(strip).lineHeight) || 16
+          : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+            ? strip.clientWidth
+            : 1;
+      event.preventDefault();
+      strip.scrollLeft = Math.max(0, Math.min(maxScroll, strip.scrollLeft + event.deltaY * unit));
+      updateScrollEdges();
+    };
+    strip.addEventListener("wheel", onWheel, { passive: false });
+    return () => strip.removeEventListener("wheel", onWheel);
+  }, [hasTabs, updateScrollEdges]);
+  useLayoutEffect(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    const observer = new ResizeObserver(() => {
+      if (!dragRef.current?.dragging)
+        activeTabRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      updateScrollEdges();
+    });
+    observer.observe(strip);
+    return () => observer.disconnect();
+  }, [hasTabs, updateScrollEdges]);
+  useEffect(() => {
+    window.addEventListener("blur", stopDrag);
+    window.addEventListener("pointerup", stopScrollingTabs);
+    window.addEventListener("pointercancel", stopScrollingTabs);
+    window.addEventListener("blur", stopScrollingTabs);
+    return () => {
+      window.removeEventListener("blur", stopDrag);
+      window.removeEventListener("pointerup", stopScrollingTabs);
+      window.removeEventListener("pointercancel", stopScrollingTabs);
+      window.removeEventListener("blur", stopScrollingTabs);
+      stopScrollingTabs();
+      dragRef.current = null;
+    };
+  }, [hasTabs, stopDrag, stopScrollingTabs]);
+  useLayoutEffect(() => {
+    activeTabRef.current?.scrollIntoView({
+      behavior: "instant",
+      block: "nearest",
+      inline: "nearest",
+    });
+    updateScrollEdges();
+  }, [activeKey, tabs.length, comparison?.active, comparison?.name, updateScrollEdges]);
+  useLayoutEffect(() => {
+    if (comparison?.active) comparisonButton.current?.focus({ preventScroll: true });
+  }, [comparison?.active]);
+  useLayoutEffect(() => {
+    const focusedKey = focusedTabKeyRef.current;
+    if (!focusedKey || tabs.some((tab) => tab.key === focusedKey)) return;
+    const nextKey =
+      activeKey && tabs.some((tab) => tab.key === activeKey) ? activeKey : tabs[0]?.key;
+    focusedTabKeyRef.current = nextKey ?? null;
+    if (nextKey) tabRefs.current.get(nextKey)?.focus();
+  }, [activeKey, tabs]);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const target = menu && tabs.find((tab) => tab.key === menu.tab.key);
+  const targetIndex = target ? tabs.indexOf(target) : -1;
+  const closeGroup = (closing: EditorTab[]) => {
+    closeMenu();
+    onCloseTabs(closing);
+  };
+  const nativeAction = (action: () => Promise<void>, message?: string) => {
+    closeMenu();
+    void action()
+      .then(() => {
+        if (message) onNotice(message);
+      })
+      .catch((error) => onNotice(errorMessage(error)));
+  };
+  if (tabs.length === 0) return null;
+  const nameCounts = new Map<string, number>();
+  for (const tab of tabs) {
+    nameCounts.set(tab.name, (nameCounts.get(tab.name) ?? 0) + 1);
+  }
+  const sourceIndex = tabs.findIndex((tab) => tab.key === draggingKey);
+  const targetIndexForDrop = tabs.findIndex((tab) => tab.key === dropTarget?.key);
+  const insertionIndex = targetIndexForDrop + (dropTarget?.after ? 1 : 0);
+  const destination = dropTarget
+    ? insertionIndex - (sourceIndex < insertionIndex ? 1 : 0)
+    : sourceIndex;
+  const dragWidth = dragRef.current?.width ?? 0;
+  const moveTabFocus = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const count = tabs.length + Number(!!comparison);
+    const next =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? count - 1
+          : (index + (event.key === "ArrowRight" ? 1 : -1) + count) % count;
+    event.preventDefault();
+    event.stopPropagation();
+    if (next === tabs.length) {
+      comparisonButton.current?.focus();
+      comparison?.onActivate();
+    } else {
+      const tab = tabs[next]!;
+      tabRefs.current.get(tab.key)?.focus();
+      onActivate(tab);
+    }
+  };
+  return (
+    <>
+      <div className="tab-bar">
+        <div
+          ref={stripRef}
+          className={`tab-strip${draggingKey ? " is-dragging" : ""}`}
+          role="tablist"
+          aria-label={t("打开的文件")}
+          onScroll={updateScrollEdges}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+              focusedTabKeyRef.current = null;
+          }}
+          onDragStart={(event) => event.preventDefault()}
+          onPointerMove={(event) => {
+            const drag = dragRef.current;
+            if (!drag || drag.pointerId !== event.pointerId) return;
+            if (!drag.dragging && Math.abs(event.clientX - drag.x) < 5) return;
+            event.preventDefault();
+            const strip = event.currentTarget;
+            if (!drag.dragging) {
+              drag.dragging = true;
+              suppressClickRef.current = true;
+              setDraggingKey(drag.key);
+              setMenu(null);
+              strip.setPointerCapture(event.pointerId);
+            }
+            const rect = strip.getBoundingClientRect();
+            let target: DropTarget | null = null;
+            if (
+              event.clientY >= rect.top &&
+              event.clientY <= rect.bottom &&
+              event.clientX >= rect.left &&
+              event.clientX <= rect.right
+            ) {
+              if (event.clientX < rect.left + 24) strip.scrollLeft -= 20;
+              else if (event.clientX > rect.right - 24) strip.scrollLeft += 20;
+              const elements = Array.from(
+                strip.querySelectorAll<HTMLElement>(".tab:not(.comparison-tab)"),
+              );
+              // Hit-test layout positions so the animation cannot shift its own drop target.
+              const index = elements.findIndex((element) => {
+                return (
+                  event.clientX <
+                  rect.left + element.offsetLeft - strip.scrollLeft + element.offsetWidth / 2
+                );
+              });
+              const tab = tabs[index < 0 ? tabs.length - 1 : index];
+              if (tab) target = { key: tab.key, after: index < 0 };
+            }
+            strip.style.setProperty(
+              "--tab-drag-offset",
+              `${Math.max(-drag.left, Math.min(drag.contentWidth - drag.left - drag.width, event.clientX - drag.x + strip.scrollLeft - drag.scrollLeft))}px`,
+            );
+            drag.target = target;
+            setDropTarget((previous) =>
+              previous?.key === target?.key && previous?.after === target?.after
+                ? previous
+                : target,
+            );
+          }}
+          onPointerUp={(event) => {
+            if (dragRef.current?.pointerId !== event.pointerId) return;
+            const drag = stopDrag();
+            const rect = event.currentTarget.getBoundingClientRect();
+            if (
+              drag?.dragging &&
+              drag.target &&
+              event.clientX >= rect.left &&
+              event.clientX <= rect.right &&
+              event.clientY >= rect.top &&
+              event.clientY <= rect.bottom
+            )
+              onReorder?.(drag.key, drag.target.key, drag.target.after);
+          }}
+          onPointerCancel={stopDrag}
+          onLostPointerCapture={stopDrag}
+          onPointerLeave={() => {
+            if (dragRef.current && !dragRef.current.dragging) stopDrag();
+          }}
+        >
+          {tabs.map((tab, index) => {
+            const showProject = (nameCounts.get(tab.name) ?? 0) > 1;
+            const isDirty = dirtyKeys.has(tab.key);
+            const selected = tab.key === activeKey && !comparison?.active;
+            return (
+              <div
+                className={`tab ${selected ? "is-active" : ""}${tab.key === draggingKey ? " is-dragging" : ""}`}
+                style={{
+                  transform:
+                    tab.key === draggingKey
+                      ? "translateX(var(--tab-drag-offset, 0px))"
+                      : sourceIndex >= 0 && index > sourceIndex && index <= destination
+                        ? `translateX(${-dragWidth}px)`
+                        : sourceIndex >= 0 && index < sourceIndex && index >= destination
+                          ? `translateX(${dragWidth}px)`
+                          : undefined,
+                }}
+                data-drop={
+                  dropTarget?.key === tab.key ? (dropTarget.after ? "after" : "before") : undefined
+                }
+                ref={selected ? activeTabRef : null}
+                key={tab.key}
+                onFocus={() => {
+                  focusedTabKeyRef.current = tab.key;
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  const trigger = event.currentTarget.querySelector<HTMLElement>(".tab-main")!;
+                  const rect = trigger.getBoundingClientRect();
+                  setMenu({
+                    tab,
+                    trigger,
+                    x: event.clientX || rect.left,
+                    y: event.clientY || rect.bottom,
+                  });
+                }}
+              >
+                <button
+                  ref={(element) => {
+                    if (element) tabRefs.current.set(tab.key, element);
+                    else tabRefs.current.delete(tab.key);
+                  }}
+                  className="tab-main"
+                  role="tab"
+                  tabIndex={selected ? 0 : -1}
+                  aria-selected={selected}
+                  aria-label={`${showProject ? `${tab.projectName} ` : ""}${tab.name}${
+                    isDirty ? t("（未保存）") : ""
+                  }`}
+                  onPointerDown={(event) => {
+                    suppressClickRef.current = false;
+                    if (event.button !== 0 || !onReorder) return;
+                    dragRef.current = {
+                      key: tab.key,
+                      pointerId: event.pointerId,
+                      x: event.clientX,
+                      width: event.currentTarget.parentElement!.offsetWidth,
+                      left: event.currentTarget.parentElement!.offsetLeft,
+                      contentWidth: stripRef.current!.scrollWidth,
+                      scrollLeft: stripRef.current!.scrollLeft,
+                      dragging: false,
+                      target: null,
+                    };
+                  }}
+                  onClick={(event) => {
+                    if (suppressClickRef.current && event.detail !== 0) {
+                      suppressClickRef.current = false;
+                      return;
+                    }
+                    onActivate(tab);
+                  }}
+                  aria-keyshortcuts={
+                    onReorder ? "Alt+Shift+ArrowLeft Alt+Shift+ArrowRight" : undefined
+                  }
+                  onKeyDown={(event) => {
+                    if (
+                      onReorder &&
+                      event.altKey &&
+                      event.shiftKey &&
+                      ["ArrowLeft", "ArrowRight"].includes(event.key)
+                    ) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const after = event.key === "ArrowRight";
+                      const target = tabs[index + (after ? 1 : -1)];
+                      if (target) onReorder(tab.key, target.key, after);
+                      return;
+                    }
+                    moveTabFocus(event, index);
+                  }}
+                  data-tooltip={`${tab.projectName}/${tab.path}${isDirty ? t("（未保存）") : ""}`}
+                >
+                  <FileIcon name={tab.name} size={14} />
+                  {showProject && <span className="tab-project">{tab.projectName}</span>}
+                  <span className="tab-name">{tab.name}</span>
+                  {isDirty && (
+                    <span className="tab-dirty" aria-hidden>
+                      ●
+                    </span>
+                  )}
+                </button>
+                <button
+                  className="tab-close"
+                  onClick={() => onClose(tab)}
+                  data-tooltip={t("关闭 {0}", tab.name)}
+                  aria-label={t("关闭 {0}", tab.name)}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            );
+          })}
+          {comparison && (
+            <div
+              className={`tab comparison-tab${comparison.active ? " is-active" : ""}`}
+              ref={comparison.active ? activeTabRef : null}
+            >
+              <button
+                className="tab-main"
+                type="button"
+                role="tab"
+                ref={comparisonButton}
+                tabIndex={comparison.active ? 0 : -1}
+                aria-selected={comparison.active}
+                data-tooltip={comparison.name}
+                onClick={comparison.onActivate}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape" && comparison.active) {
+                    event.preventDefault();
+                    comparison.onClose();
+                  } else moveTabFocus(event, tabs.length);
+                }}
+              >
+                <GitCompare size={14} aria-hidden="true" />
+                <span className="tab-name">{comparison.name}</span>
+              </button>
+              <button
+                className="tab-close"
+                type="button"
+                onClick={comparison.onClose}
+                aria-label={t("关闭 {0}", comparison.name)}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="tab-tools">
+          {(scrollEdges.left || scrollEdges.right) && (
+            <>
+              <button
+                className="tab-scroll"
+                aria-label={t("向左滚动标签页")}
+                data-tooltip={t("向左滚动标签页")}
+                disabled={!scrollEdges.left}
+                onPointerDown={(event) => startScrollingTabs(-1, event.button)}
+                onPointerLeave={stopScrollingTabs}
+                onClick={(event) => scrollTabs(-1, event.detail)}
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <button
+                className="tab-scroll"
+                aria-label={t("向右滚动标签页")}
+                data-tooltip={t("向右滚动标签页")}
+                disabled={!scrollEdges.right}
+                onPointerDown={(event) => startScrollingTabs(1, event.button)}
+                onPointerLeave={stopScrollingTabs}
+                onClick={(event) => scrollTabs(1, event.detail)}
+              >
+                <ChevronRight size={14} />
+              </button>
+            </>
+          )}
+          {onToggleSplit && (
+            <button
+              className={`tab-split ${splitOpen ? "is-on" : ""}`}
+              onClick={onToggleSplit}
+              data-tooltip={splitOpen ? t("关闭右侧编辑区") : t("在右侧打开编辑区")}
+              aria-label={splitOpen ? t("关闭右侧编辑区") : t("在右侧打开编辑区")}
+              aria-pressed={splitOpen}
+            >
+              <PanelRight size={14} />
+            </button>
+          )}
+        </div>
+      </div>
+      {menu && target && (
+        <ContextMenu target={menu} label={t("标签页操作")} onClose={closeMenu}>
+          <button
+            role="menuitem"
+            onClick={() => {
+              closeMenu();
+              onClose(target);
+            }}
+          >
+            {t("关闭")}
+          </button>
+          <button
+            role="menuitem"
+            disabled={tabs.length < 2}
+            onClick={() => closeGroup(tabs.filter((tab) => tab.key !== target.key))}
+          >
+            {t("关闭其他")}
+          </button>
+          {onMoveToOtherPane && (
+            <button
+              role="menuitem"
+              onClick={() => {
+                closeMenu();
+                onMoveToOtherPane(target);
+              }}
+            >
+              {t("移动到另一编辑区")}
+            </button>
+          )}
+          <button
+            role="menuitem"
+            disabled={targetIndex === tabs.length - 1}
+            onClick={() => closeGroup(tabs.slice(targetIndex + 1))}
+          >
+            {t("关闭右侧")}
+          </button>
+          <button
+            role="menuitem"
+            disabled={targetIndex === 0}
+            onClick={() => closeGroup(tabs.slice(0, targetIndex))}
+          >
+            {t("关闭左侧")}
+          </button>
+          <button role="menuitem" onClick={() => closeGroup(tabs)}>
+            {t("关闭所有")}
+          </button>
+          <button
+            role="menuitem"
+            disabled={!/Mac/.test(navigator.userAgent)}
+            onClick={() =>
+              nativeAction(
+                () => api.copyEntryPath(target.projectId, target.path, false),
+                t("已复制绝对路径"),
+              )
+            }
+          >
+            {t("复制绝对路径")}
+          </button>
+          <button
+            role="menuitem"
+            disabled={!/Mac/.test(navigator.userAgent)}
+            onClick={() =>
+              nativeAction(
+                () => api.copyEntryPath(target.projectId, target.path, true),
+                t("已复制相对路径"),
+              )
+            }
+          >
+            {t("复制相对路径")}
+          </button>
+          <button
+            role="menuitem"
+            disabled={!/Mac/.test(navigator.userAgent)}
+            onClick={() => nativeAction(() => api.revealEntry(target.projectId, target.path))}
+          >
+            {t("在访达中打开")}
+          </button>
+        </ContextMenu>
+      )}
+    </>
+  );
+}

@@ -1,4 +1,4 @@
-import { Select } from "../../components/Select";
+import { Select } from "../../components/common/Select";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   api,

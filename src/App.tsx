@@ -31,33 +31,33 @@ import {
 import { flushSync } from "react-dom";
 import type { DragDropEvent } from "@tauri-apps/api/webview";
 
-import { CodeReader } from "./components/CodeReader";
-import { EditorPaneView } from "./components/EditorPane";
-import { WorkspaceStatusBar } from "./components/WorkspaceStatusBar";
+import { CodeReader } from "./components/editor/CodeReader";
+import { EditorPaneView } from "./components/editor/EditorPane";
+import { WorkspaceStatusBar } from "./components/layout/WorkspaceStatusBar";
 import type {
   CodeReaderHandle,
   EditorTab,
   MarkdownPreviewRequest,
   RevealRequest,
 } from "./editor/types";
-import { FileTree, type FileTreeHandle } from "./components/FileTree";
+import { FileTree, type FileTreeHandle } from "./components/fileTree/FileTree";
 import {
   operationEntries,
   type FileOperation,
   type FileOperationResult,
   type BatchFileOperationResult,
-} from "./components/FileOperationDialog";
-import { LocationPicker } from "./components/LocationPicker";
-import { QuickOpen, type PaletteAction } from "./components/QuickOpen";
-import { ReferencePanel } from "./components/ReferencePanel";
-import { SearchPanel } from "./components/SearchPanel";
-import { SettingsDialog } from "./components/SettingsDialog";
-import { SidebarLayout, type SidebarLayoutHandle } from "./components/SidebarLayout";
-import { EditorSplitResizer } from "./components/EditorSplitResizer";
-import { SymbolPanel } from "./components/SymbolPanel";
+} from "./components/fileTree/FileOperationDialog";
+import { LocationPicker } from "./components/navigation/LocationPicker";
+import { QuickOpen, type PaletteAction } from "./components/navigation/QuickOpen";
+import { ReferencePanel } from "./components/navigation/ReferencePanel";
+import { SearchPanel } from "./components/search/SearchPanel";
+import { SettingsDialog } from "./components/settings/SettingsDialog";
+import { SidebarLayout, type SidebarLayoutHandle } from "./components/layout/SidebarLayout";
+import { EditorSplitResizer } from "./components/layout/EditorSplitResizer";
+import { SymbolPanel } from "./components/navigation/SymbolPanel";
 import { TerminalPanel } from "./components/terminal/TerminalPanel";
-import { Tooltip } from "./components/Tooltip";
-import { UnsavedDialog } from "./components/UnsavedDialog";
+import { Tooltip } from "./components/common/Tooltip";
+import { UnsavedDialog } from "./components/common/UnsavedDialog";
 import { api } from "./lib/platform/api";
 import { DEFAULT_PREFERENCES, type AppSettings, type Preferences } from "./lib/settings/preferences";
 import { useNativeMenu, type NativeMenuAction, type NativeMenuState } from "./lib/platform/nativeMenu";

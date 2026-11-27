@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Text } from "@codemirror/state";
 
-import type { FileOperation, FileOperationResult } from "./components/FileOperationDialog";
+import type { FileOperation, FileOperationResult } from "./components/fileTree/FileOperationDialog";
 import type { DirEntry, EditorStatus, Project } from "./lib/types";
 import type { NativeMenuAction, NativeMenuState } from "./lib/platform/nativeMenu";
 import type { PrepareGitOperation } from "./git/editorOperations";
@@ -156,7 +156,7 @@ vi.mock("./git/GitWorkspace", async () => {
     },
   };
 });
-vi.mock("./components/FileTree", async () => {
+vi.mock("./components/fileTree/FileTree", async () => {
   const React = await import("react");
   const FileTree = (props: {
     ref?: React.Ref<{
@@ -219,7 +219,7 @@ vi.mock("./components/FileTree", async () => {
   };
   return { FileTree };
 });
-vi.mock("./components/CodeReader", async () => {
+vi.mock("./components/editor/CodeReader", async () => {
   const React = await import("react");
   const CodeReader = React.forwardRef(function FakeCodeReader(
     props: {

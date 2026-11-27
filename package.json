@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:perf": "vitest bench --run src/components/MarkdownPreview.bench.tsx",
+    "test:perf": "vitest bench --run src/components/markdown/MarkdownPreview.bench.tsx",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "tauri": "tauri"
